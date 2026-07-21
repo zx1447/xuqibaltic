@@ -32,8 +32,8 @@ SERVERS_URL = f"{BASE_URL}/servers"
 RENEW_PATH = f"/servers/{SERVER_ID}/renew"
 
 
-def log(msg):
-    print(msg, flush=True)
+def log(*args):
+    print(" ".join(str(arg) for arg in args), flush=True)
 
 
 def now_str():
@@ -68,7 +68,7 @@ def main():
         log(f"🔗 挂载代理: {PROXY}")
 
     with SB(**sb_kwargs) as sb:
-        # Step 1: 静态 Cookie 逻辑（如有）
+        # Step 1: 写入静态 Cookie (如有)
         if COOKIE and not (USER and PASS):
             log("🍪 写入静态 BITERCLOUD_COOKIE...")
             sb.open(BASE_URL)
@@ -91,13 +91,12 @@ def main():
             time.sleep(3)
 
             cur_url = sb.get_current_url()
-            log(f"📍 当前页面 URL: {cur_url}")
+            log("📍 当前页面 URL:", cur_url)
 
             # 检查是否在登录页
             if "login" in cur_url.lower():
                 log(f"📝 填入账号 {USER[:3]}**** ...")
                 try:
-                    # 匹配常见的 email/username 输入框
                     if sb.is_element_visible('input[name="email"]'):
                         sb.type('input[name="email"]', USER, timeout=10)
                     elif sb.is_element_visible('#email'):
@@ -129,7 +128,7 @@ def main():
         sb.wait_for_ready_state_complete()
         time.sleep(3)
 
-        # Step 4: 在真浏览器环境中精准执行 PATCH 续期请求
+        # Step 4: 执行 PATCH 续期请求
         log(f"🔄 发起 PATCH 续期请求 ({RENEW_PATH})...")
         renew_res = sb.execute_script(f"""
             let cookies = document.cookie.split('; ');
