@@ -31,4 +31,5 @@ jobs:
         env:
           SESSION_COOKIE: ${{ secrets.SESSION_COOKIE }}
           SERVER_ID: ${{ secrets.SERVER_ID }}
+          DUMP_FULL: "1"
         run: python renew.py
