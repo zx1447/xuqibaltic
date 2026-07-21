@@ -17,10 +17,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Cloudflare WARP
-        uses: fscarmen/warp-action@v1
-        with:
-          mode: warp
+      - name: Setup Cloudflare WARP (WireGuard)
+        run: |
+          sudo apt-get update && sudo apt-get install -y wireguard-tools resolvconf
+          curl -sSL "https://github.com/ViRb3/wgcf/releases/download/v2.2.22/wgcf_2.2.22_linux_amd64" -o wgcf
+          chmod +x wgcf
+          ./wgcf register --accept-tos
+          ./wgcf generate
+          # avoid breaking local runner connectivity by adjusting route
+          sed -i 's/AllowedIPs = .*/AllowedIPs = 0.0.0.0\/1, 128.0.0.0\/1/' wgcf-profile.conf
+          sudo cp wgcf-profile.conf /etc/wireguard/wg0.conf
+          sudo wg-quick up wg0
+          echo "=== PUBLIC IP via WARP ==="
+          curl -s https://ipinfo.io/json || true
 
       - name: Setup Python
         uses: actions/setup-python@v5
