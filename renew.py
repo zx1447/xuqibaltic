@@ -1,216 +1,234 @@
 #!/usr/bin/env python3
 """
-BalticHost / hostingmitherz 面板自动续期脚本。
+BalticHost / hostingmitherz 面板自动续期脚本（SeleniumBase 真浏览器版）。
 
-两种鉴权方式（二选一）：
+为什么用真浏览器：
+  面板有反爬防护盾（M.E.O.W），裸 requests 从数据中心 IP（如 GitHub 云端 runner）
+  会被直接拦成一张反爬 HTML 页，连登录请求都发不出去。用 SeleniumBase 的
+  uc（undetected-chromedriver）模式启动一个真 Chrome，能像真人浏览器一样
+  通过防护盾 / Turnstile，从而完成登录与续期。
 
-  A. 账号密码自动登录（推荐，cookie 永不过期）
-     设置 BLINKY_USER 与 BLINKY_PASS，脚本每次运行先 RSA 加密密码登录
-     /auth/validator 拿新鲜 session cookie，再续期。无需手动维护 cookie。
+鉴权（二选一）：
+  A. 账号密码（推荐）：设置 BLINKY_USER / BLINKY_PASS，脚本自动填表登录。
+  B. 静态 cookie（旧）：设置 SESSION_COOKIE="session=...."，注入后直接进续期页。
 
-  B. 静态 session cookie（旧方式，需手动更新）
-     只设置 SESSION_COOKIE（整段或仅值）。cookie 过期后需重新复制。
-
-流程：
-  1. 取得已登录的 session（方式 A 登录 / 方式 B 用给定 cookie）。
-  2. GET 续期页面，从 <meta name="csrf-token"> 取 CSRF token。
-  3. 带 CSRF 以 multipart 形式 POST 续期接口。
-  4. 解析返回 JSON：
-       - success=true                -> 续期成功，退出 0
-       - 未到续期窗口(到期前7天才可续) -> 视为正常空跑，退出 0
-       - cookie 失效 / 登录失败 / 其它 -> 退出 1（让 Actions 报错通知你）
+续期规则：
+  仅到期前 7 天内开放续期按钮；窗口外脚本会优雅跳过（退出 0）。
 
 环境变量：
-  BLINKY_USER     可选。面板登录用户名（与 BLINKY_PASS 一起用 = 方式 A）。
-  BLINKY_PASS     可选。面板登录密码（明文存在 secret 里，脚本端 RSA 加密后才发出）。
-  SESSION_COOKIE  可选。整段 cookie "session=.eJx....." 或仅值 ".eJx....."（方式 B）。
-  SERVER_ID       可选。默认 04dd7781。
-  BASE_URL        可选。默认 https://blinky.baltichost.de
+  BLINKY_USER     面板登录用户名（方式 A）
+  BLINKY_PASS     面板登录密码（明文存 secret，仅在浏览器内填入）
+  SESSION_COOKIE  可选，整段 "session=...."（方式 B）
+  SERVER_ID       可选，默认 04dd7781
+  BASE_URL        可选，默认 https://blinky.baltichost.de
+  TG_BOT_TOKEN    可选，Telegram 机器人 token（通知用）
+  TG_CHAT_ID      可选，Telegram 接收 chat id
+  HEADLESS        可选，"true" 用无头（CI 默认）；"false" 用有头（本地调试）
 """
 import os
 import re
 import sys
-import base64
+import time
+from datetime import datetime
 
 try:
-    import requests
+    from seleniumbase import SB
 except ImportError:
-    sys.exit("缺少 requests 库，请先 `pip install requests`")
+    sys.exit("缺少 seleniumbase，请先 `pip install seleniumbase`")
 
-try:
-    from Crypto.PublicKey import RSA
-    from Crypto.Cipher import PKCS1_v1_5
-except ImportError:
-    sys.exit("缺少 pycryptodome 库，请先 `pip install pycryptodome`")
-
-BASE_URL = os.environ.get("BASE_URL", "https://blinky.baltichost.de").rstrip("/")
+EMAIL = os.environ.get("BLINKY_USER", "").strip()
+PASSWORD = os.environ.get("BLINKY_PASS", "").strip()
+SESSION_COOKIE = os.environ.get("SESSION_COOKIE", "").strip()
 SERVER_ID = (os.environ.get("SERVER_ID") or "04dd7781").strip()
-RAW_COOKIE = os.environ.get("SESSION_COOKIE", "").strip()
-BLINKY_USER = os.environ.get("BLINKY_USER", "").strip()
-BLINKY_PASS = os.environ.get("BLINKY_PASS", "").strip()
+BASE = os.environ.get("BASE_URL", "https://blinky.baltichost.de").rstrip("/")
+TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN", "").strip()
+TG_CHAT_ID = os.environ.get("TG_CHAT_ID", "").strip()
+HEADLESS = os.environ.get("HEADLESS", "true").lower() != "false"
 
-UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-      "(KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0")
+LOGIN_URL = f"{BASE}/auth/login/"
+RENEWAL_URL = f"{BASE}/manage/server/{SERVER_ID}/renewal"
 
-# 这些消息表示"还没到续期窗口"，属正常，不算失败
+# 这些文案表示“还没到续期窗口”，属正常，不算失败
 NOT_IN_WINDOW_HINTS = (
-    "nicht im verl",          # nicht im Verlängerungszeitraum verfügbar
-    "not in the renewal",
+    "verfügbar in",        # "Verlängerung verfügbar in 26 Tage"
+    "nicht im verl",       # "nicht im Verlängerungszeitraum"
     "not available",
-    "verfügbar in",
+    "not in the renewal",
 )
 
 
-def fail(msg: str) -> None:
-    print(f"::error::{msg}")
-    sys.exit(1)
-
-
-def antibot_guard(r) -> None:
-    """被反爬防护盾拦截（数据中心 IP 常被拦，如 GitHub Actions 免费 runner）。"""
-    if "M.E.O.W" in r.text or "I see you hiding" in r.text or r.status_code == 403:
-        fail("被反爬防护页拦截 (M.E.O.W / 403)。该面板会拦截数据中心 IP，"
-             "无法从 GitHub 云端 runner 访问。请在自己的电脑/家庭网络 IP 上运行"
-             "（本机任务计划程序 或 自托管 runner）。")
-
-
-def rsa_encrypt_password(pub_pem: str, password: str) -> str:
-    """用页面内嵌的 RSA 公钥（PKCS1 v1.5，与 JSEncrypt 一致）加密密码，返回 base64。"""
-    key = RSA.import_key(pub_pem)
-    cipher = PKCS1_v1_5.new(key)
-    enc = cipher.encrypt(password.encode("utf-8"))
-    return base64.b64encode(enc).decode("ascii")
-
-
-def extract_pubkey(html: str) -> str:
-    m = re.search(r"-----BEGIN PUBLIC KEY-----.*?-----END PUBLIC KEY-----", html, re.S)
-    if not m:
-        fail("登录页未找到 RSA 公钥，面板可能已改版，请检查 /auth/login/。")
-    return m.group(0)
-
-
-def login(s: requests.Session) -> None:
-    """方式 A：用账号密码登录，把已认证的 session cookie 写入 s.cookies。"""
-    print(f"[login] 使用账号 {BLINKY_USER} 登录 {BASE_URL}/auth/validator ...")
-    lr = s.get(f"{BASE_URL}/auth/login/", headers={
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Referer": f"{BASE_URL}/auth/login/",
-    }, timeout=30, allow_redirects=True)
-    if lr.status_code != 200:
-        fail(f"获取登录页失败 (HTTP {lr.status_code})")
-    antibot_guard(lr)
-
-    pub = extract_pubkey(lr.text)
-    enc_pwd = rsa_encrypt_password(pub, BLINKY_PASS)
-
-    vr = s.post(f"{BASE_URL}/auth/validator",
-                data={"username": BLINKY_USER, "password": enc_pwd},
-                headers={
-                    "Accept": "*/*",
-                    "Referer": f"{BASE_URL}/auth/login/",
-                    "Origin": BASE_URL,
-                },
-                allow_redirects=False, timeout=30)
-
-    if not s.cookies.get("session"):
-        fail("登录后未返回 session cookie，可能账号或密码错误。")
-
-    body = vr.text or ""
-    if "success" in body.lower() or vr.status_code in (200, 302):
-        print("✅ 登录成功，已获取新的 session cookie。")
-    else:
-        # 失败响应通常带德文/英文错误，如 "Dieser Benutzername existiert nicht."
-        fail(f"登录失败: {body[:200]}")
-
-
-def parse_static_cookie(raw: str) -> str:
-    """返回 session cookie 的值部分（去掉 'session=' 前缀）。"""
-    if not raw:
-        fail("未设置 SESSION_COOKIE，也未设置 BLINKY_USER/BLINKY_PASS。请至少配置一种鉴权方式。")
-    raw = raw.strip().strip('"').strip("'")
-    if raw.lower().startswith("session="):
-        raw = raw.split("=", 1)[1]
-    raw = raw.split(";")[0].strip()   # 万一用户把多个 cookie 粘一起，只取 session 那段
-    return raw
-
-
-def main() -> None:
-    s = requests.Session()
-    s.headers.update({
-        "User-Agent": UA,
-        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-        "sec-ch-ua": '"Not;A=Brand";v="8", "Chromium";v="150", "Microsoft Edge";v="150"',
-        "sec-ch-ua-mobile": "?0",
-        "sec-ch-ua-platform": '"Windows"',
-        "Upgrade-Insecure-Requests": "1",
-    })
-
-    # 鉴权：优先方式 A（账号密码），否则方式 B（静态 cookie）
-    if BLINKY_USER and BLINKY_PASS:
-        login(s)
-    else:
-        cookie_val = parse_static_cookie(RAW_COOKIE)
-        s.cookies.set("session", cookie_val, domain=BASE_URL.split("//", 1)[-1])
-
-    page_url = f"{BASE_URL}/manage/server/{SERVER_ID}/renewal"
-    renew_url = f"{BASE_URL}/manage/server/api/{SERVER_ID}/renewal/renew"
-
-    # 1) 取续期页面
+def send_tg(token, chat_id, message):
+    if not token or not chat_id:
+        return
     try:
-        r = s.get(page_url, headers={
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Referer": page_url,
-        }, timeout=30, allow_redirects=True)
-    except requests.RequestException as e:
-        fail(f"访问续期页面失败: {e}")
+        import requests
+        resp = requests.post(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            json={"chat_id": chat_id, "text": message},
+            timeout=10,
+        )
+        print("📨 Telegram 通知已发送" if resp.status_code == 200
+              else f"❌ Telegram 发送失败: {resp.text}")
+    except Exception as e:
+        print(f"❌ Telegram 发送异常: {e}")
 
-    # 被重定向到登录页 => 登录态失效
-    if "/login" in r.url or "/auth" in r.url:
-        fail(f"登录态失效，被重定向到 {r.url}。请检查 BLINKY_USER/BLINKY_PASS 是否正确，"
-             "或更新 SESSION_COOKIE。")
-    antibot_guard(r)
 
-    m = re.search(r'name="csrf-token"\s+content="([a-f0-9]+)"', r.text)
-    if not m:
-        fail("未在页面中找到 csrf-token，SESSION_COOKIE 可能已失效，请重新登录复制新的 session cookie。")
-    csrf = m.group(1)
-    print(f"已获取 CSRF token: {csrf[:12]}...")
+def mask(s):
+    if "@" in s:
+        local, domain = s.split("@", 1)
+        if len(local) <= 2:
+            return f"{local[0]}***@{domain}"
+        return f"{local[:2]}****{local[-1]}@{domain}"
+    if len(s) <= 2:
+        return s[0] + "*"
+    return s[:2] + "****" + s[-1]
 
-    # 打印到期信息（页面里有的话）
-    exp = re.search(r'id="expiration-date"[^>]*>\s*([0-9.\s:]+)', r.text)
-    if exp:
-        print(f"当前到期时间: {exp.group(1).strip()}")
 
-    # 2) POST 续期
-    try:
-        pr = s.post(renew_url, files={"csrf_token": (None, csrf)}, headers={
-            "Accept": "*/*",
-            "Origin": BASE_URL,
-            "Referer": page_url,
-        }, timeout=30)
-    except requests.RequestException as e:
-        fail(f"提交续期请求失败: {e}")
+def main():
+    print("#" * 28)
+    print("   BalticHost 自动登录续期")
+    print("#" * 28)
+    if not EMAIL and not PASSWORD and not SESSION_COOKIE:
+        print("❌ 请设置 BLINKY_USER/BLINKY_PASS 或 SESSION_COOKIE")
+        sys.exit(1)
 
-    # 3) 解析结果
-    try:
-        data = pr.json()
-    except ValueError:
-        fail(f"续期接口返回非 JSON (HTTP {pr.status_code}): {pr.text[:300]}")
+    print(f"🌐 启动浏览器 (headless={HEADLESS})")
+    with SB(uc=True, headless=HEADLESS, xvfb=True) as sb:
+        # 1) 进入登录页（这一步会先过反爬盾）
+        print(f"🌐 打开登录页 {LOGIN_URL}")
+        sb.open(LOGIN_URL)
+        sb.wait_for_ready_state_complete()
+        time.sleep(2)
 
-    success = bool(data.get("success"))
-    message = str(data.get("message", "")).strip()
+        # 处理可能的 Turnstile / 反爬挑战
+        try:
+            sb.uc_gui_click_captcha()
+            print("✅ 已尝试处理反爬/验证码挑战")
+        except Exception as e:
+            print(f"⚠️ 反爬挑战处理跳过: {e}")
 
-    if success:
-        print(f"✅ 续期成功: {message or 'OK'}")
-        sys.exit(0)
+        title = sb.get_title()
+        if "M.E.O.W" in title or "hiding" in title:
+            msg = "❌ 仍被反爬盾拦截（M.E.O.W）。该面板对数据中心 IP 极严，" \
+                  "请改用家庭网络 IP（自托管 runner / 本机定时任务）。"
+            print(msg)
+            send_tg(TG_BOT_TOKEN, TG_CHAT_ID, msg)
+            sys.exit(1)
 
-    low = message.lower()
-    if any(h in low for h in NOT_IN_WINDOW_HINTS):
-        print(f"ℹ️ 尚未到续期窗口，跳过（正常）: {message}")
-        sys.exit(0)
+        # 2) 登录
+        if EMAIL and PASSWORD:
+            print(f"🔑 填写账号 {mask(EMAIL)} ...")
+            sb.type("#username", EMAIL, timeout=10)
+            sb.type("#password", PASSWORD, timeout=10)
+            print("🖱️ 点击登录按钮 #loginBtn")
+            sb.uc_click("#loginBtn")
+            # 等待跳离登录页
+            logged_in = False
+            for _ in range(30):
+                cur = sb.get_current_url()
+                if "login" not in cur:
+                    logged_in = True
+                    break
+                time.sleep(1)
+            if not logged_in:
+                msg = "❌ 登录后未跳转，可能账号/密码错误或登录失败"
+                print(msg)
+                send_tg(TG_BOT_TOKEN, TG_CHAT_ID, msg)
+                sys.exit(1)
+            print(f"✅ 登录成功，当前 URL: {sb.get_current_url()}")
+        elif SESSION_COOKIE:
+            print("🍪 注入静态 session cookie")
+            cookie_val = SESSION_COOKIE.split("session=", 1)[-1].split(";")[0].strip()
+            sb.open(BASE)  # 先到域名下放 cookie
+            sb.add_cookie({
+                "name": "session",
+                "value": cookie_val,
+                "domain": BASE.split("//", 1)[-1],
+                "path": "/",
+            })
+            sb.refresh()
+        else:
+            print("❌ 未配置任何鉴权方式")
+            sys.exit(1)
 
-    # 其它 false：可能是 cookie/csrf 问题或接口变更，报错通知
-    fail(f"续期失败 (HTTP {pr.status_code}): {message or data}")
+        # 3) 进入续期页
+        print(f"📄 导航到续期页 {RENEWAL_URL}")
+        sb.open(RENEWAL_URL)
+        sb.wait_for_ready_state_complete()
+        time.sleep(3)
+
+        page = sb.get_page_source()
+
+        # 提取到期日（页面里有 id=expiration-date）
+        exp = re.search(r'id="expiration-date"[^>]*>\s*([0-9.\s:]+)', page)
+        exp_text = exp.group(1).strip() if exp else "未知"
+        print(f"🕒 当前到期时间: {exp_text}")
+
+        # 判断是否未到窗口
+        low = page.lower()
+        if any(h in low for h in NOT_IN_WINDOW_HINTS):
+            msg = (f"ℹ️ 尚未到续期窗口（到期前 7 天才可续），跳过。\n"
+                   f"👤 账户: {mask(EMAIL or 'cookie')}\n"
+                   f"📅 到期时间: {exp_text}")
+            print(msg)
+            send_tg(TG_BOT_TOKEN, TG_CHAT_ID, msg)
+            sys.exit(0)
+
+        # 4) 在窗口内：提交续期表单 #renewalForm
+        if not sb.is_element_visible("#renewalForm", timeout=8):
+            msg = "❌ 未找到续期表单 #renewalForm，可能面板改版或不在续期窗口"
+            print(msg)
+            send_tg(TG_BOT_TOKEN, TG_CHAT_ID, msg)
+            sys.exit(1)
+
+        print("🔄 点击续期提交按钮 ...")
+        try:
+            sb.uc_click('#renewalForm button[type="submit"]', timeout=5)
+        except Exception:
+            # 退路：直接 submit 表单
+            sb.execute_script("document.getElementById('renewalForm').requestSubmit();")
+
+        # 等待结果：成功会 location.reload()；失败会 alert()
+        time.sleep(4)
+        # 处理可能的 alert（如“未到窗口”）
+        try:
+            alert = sb.driver.switch_to.alert
+            alert_text = alert.text
+            alert.accept()
+            if any(h in alert_text.lower() for h in NOT_IN_WINDOW_HINTS):
+                print(f"ℹ️ 弹窗提示未到窗口，跳过: {alert_text}")
+                sys.exit(0)
+            print(f"⚠️ 续期弹窗: {alert_text}")
+        except Exception:
+            pass
+
+        # 重新读取页面判断是否成功（到期日应变化 / 出现成功提示）
+        new_page = sb.get_page_source()
+        new_exp = re.search(r'id="expiration-date"[^>]*>\s*([0-9.\s:]+)', new_page)
+        new_exp_text = new_exp.group(1).strip() if new_exp else exp_text
+
+        success = ("erfolgreich" in new_page.lower()
+                   or "success" in new_page.lower()
+                   or new_exp_text != exp_text)
+
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        if success:
+            status = "✅ 续期成功"
+            msg = (f"🇪🇪 BalticHost 续期通知\n\n{status}\n"
+                   f"👤 账户: {mask(EMAIL or 'cookie')}\n"
+                   f"📅 新到期时间: {new_exp_text}\n"
+                   f"⏱️ 续期时间: {now_str}")
+        else:
+            status = "❌ 续期失败（到期时间未变化）"
+            msg = (f"🇪🇪 BalticHost 续期通知\n\n{status}\n"
+                   f"👤 账户: {mask(EMAIL or 'cookie')}\n"
+                   f"📅 到期时间: {new_exp_text}\n"
+                   f"⏱️ 时间: {now_str}")
+        print(msg)
+        send_tg(TG_BOT_TOKEN, TG_CHAT_ID, msg)
+        sys.exit(0 if success else 1)
+
+    print("🏁 脚本执行完毕")
 
 
 if __name__ == "__main__":

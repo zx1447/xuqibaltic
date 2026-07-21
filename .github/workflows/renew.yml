@@ -1,11 +1,11 @@
 name: Auto Renew Server
 
-# ⚠️ 重要：该面板有反爬防护(M.E.O.W)，会拦截 GitHub 托管 runner 的数据中心 IP，
-# 返回 403 拦截页而非真实页面。因此本 workflow 必须使用【自托管 runner】
-# （在你自己的电脑上安装 self-hosted runner，用家庭 IP 访问才能通过）。
-# 如果不想装自托管 runner，请改用本机的 run_local.ps1 + 任务计划程序（见 README）。
-#
-# 使用自托管 runner 时，把下面的 runs-on 改成 self-hosted 对应的标签。
+# 自动续期说明：
+#   脚本采用 SeleniumBase 真浏览器（uc 模式）访问面板，能像真人浏览器一样
+#   通过反爬防护盾(M.E.O.W)。这样即使是 GitHub 托管 runner 也有机会通过
+#   （反爬盾对"真浏览器指纹"放行，对裸 requests 拦截）。
+#   若仍被拦截（极端情况下数据中心 IP 被硬封），可改用自托管 runner
+#   （把 runs-on 改成 self-hosted）或用本机 run_local.ps1。
 
 on:
   schedule:
@@ -21,8 +21,6 @@ concurrency:
 
 jobs:
   renew:
-    # GitHub 托管 runner (ubuntu-latest) 会被面板反爬拦截，请换成自托管 runner：
-    # runs-on: [self-hosted]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -33,13 +31,30 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install deps
-        run: pip install requests pycryptodome
+      - name: Install system deps (Chrome)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget gnupg xvfb
+          # 安装 Google Chrome
+          wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add - 2>/dev/null || true
+          echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
+          sudo apt-get update
+          sudo apt-get install -y google-chrome-stable || sudo apt-get install -y chromium-browser
+          google-chrome --version || chromium-browser --version
+
+      - name: Install Python deps
+        run: pip install --upgrade pip seleniumbase
+
+      - name: Install chromedriver
+        run: python -m seleniumbase install chromedriver
 
       - name: Run renew
         env:
-          SESSION_COOKIE: ${{ secrets.SESSION_COOKIE }}
           BLINKY_USER: ${{ secrets.BLINKY_USER }}
           BLINKY_PASS: ${{ secrets.BLINKY_PASS }}
+          SESSION_COOKIE: ${{ secrets.SESSION_COOKIE }}
           SERVER_ID: ${{ secrets.SERVER_ID }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          HEADLESS: "true"
         run: python renew.py
