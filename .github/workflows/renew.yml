@@ -54,6 +54,7 @@ jobs:
           BLINKY_PASS: ${{ secrets.BLINKY_PASS }}
           SESSION_COOKIE: ${{ secrets.SESSION_COOKIE }}
           SERVER_ID: ${{ secrets.SERVER_ID }}
+          PROXY_SERVER: ${{ secrets.PROXY_SERVER }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
           HEADLESS: "true"
