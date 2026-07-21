@@ -82,6 +82,10 @@ def main() -> None:
 
     m = re.search(r'name="csrf-token"\s+content="([a-f0-9]+)"', r.text)
     if not m:
+        title = re.search(r"<title[^>]*>(.*?)</title>", r.text, re.S | re.I)
+        print(f"[debug] final_url={r.url} status={r.status_code} len={len(r.text)}")
+        print(f"[debug] title={title.group(1).strip() if title else 'N/A'}")
+        print(f"[debug] head=\n{r.text[:600]}")
         fail("未在页面中找到 csrf-token，SESSION_COOKIE 可能已失效，请更新。")
     csrf = m.group(1)
     print(f"已获取 CSRF token: {csrf[:12]}...")
