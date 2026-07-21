@@ -17,19 +17,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Cloudflare WARP (WireGuard)
+      - name: Install and Start Cloudflare WARP (SOCKS5 Proxy)
         run: |
-          sudo apt-get update && sudo apt-get install -y wireguard-tools resolvconf
-          curl -sSL "https://github.com/ViRb3/wgcf/releases/download/v2.2.22/wgcf_2.2.22_linux_amd64" -o wgcf
-          chmod +x wgcf
-          ./wgcf register --accept-tos
-          ./wgcf generate
-          # avoid breaking local runner connectivity by adjusting route
-          sed -i 's/AllowedIPs = .*/AllowedIPs = 0.0.0.0\/1, 128.0.0.0\/1/' wgcf-profile.conf
-          sudo cp wgcf-profile.conf /etc/wireguard/wg0.conf
-          sudo wg-quick up wg0
-          echo "=== PUBLIC IP via WARP ==="
-          curl -s https://ipinfo.io/json || true
+          curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | sudo gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
+          echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ noble main" | sudo tee /etc/apt/sources.list.d/cloudflare-client.list
+          sudo apt-get update
+          sudo apt-get install -y cloudflare-warp
+          warp-cli --accept-tos registration new || true
+          warp-cli --accept-tos mode proxy || true
+          warp-cli --accept-tos proxy port 40001 || true
+          warp-cli --accept-tos connect || true
+          sleep 3
+          echo "=== WARP SOCKS5 PROXY CHECK ==="
+          curl -x socks5h://127.0.0.1:40001 https://ipinfo.io/json || true
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -58,7 +58,7 @@ jobs:
           BLINKY_PASS: ${{ secrets.BLINKY_PASS }}
           SESSION_COOKIE: ${{ secrets.SESSION_COOKIE }}
           SERVER_ID: ${{ secrets.SERVER_ID }}
-          PROXY_SERVER: ${{ secrets.PROXY_SERVER }}
+          PROXY_SERVER: "socks5://127.0.0.1:40001"
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
           HEADLESS: "true"
