@@ -93,7 +93,12 @@ def main():
         sys.exit(1)
 
     print(f"🌐 启动浏览器 (headless={HEADLESS})")
-    with SB(uc=True, headless=HEADLESS, xvfb=True) as sb:
+    proxy = os.environ.get("PROXY_SERVER", "").strip()
+    sb_kwargs = {"uc": True, "headless": HEADLESS, "xvfb": True}
+    if proxy:
+        sb_kwargs["proxy"] = proxy
+        print(f"🔗 使用代理: {proxy}")
+    with SB(**sb_kwargs) as sb:
         # 1) 进入登录页（这一步会先过反爬盾）
         print(f"🌐 打开登录页 {LOGIN_URL}")
         sb.open(LOGIN_URL)
@@ -122,16 +127,35 @@ def main():
             sb.type("#password", PASSWORD, timeout=10)
             print("🖱️ 点击登录按钮 #loginBtn")
             sb.uc_click("#loginBtn")
-            # 等待跳离登录页
+            # 等待跳离登录页（成功会跳到 / 或 next）
             logged_in = False
-            for _ in range(30):
+            err_text = ""
+            for _ in range(20):
                 cur = sb.get_current_url()
                 if "login" not in cur:
                     logged_in = True
                     break
+                # 读取页面内错误提示
+                try:
+                    err = sb.get_text("#errorMessage", timeout=0.5)
+                    if err and err.strip():
+                        err_text = err.strip()
+                except Exception:
+                    pass
                 time.sleep(1)
             if not logged_in:
-                msg = "❌ 登录后未跳转，可能账号/密码错误或登录失败"
+                # 抓取更多诊断信息
+                title = sb.get_title()
+                page = sb.get_page_source()
+                if "M.E.O.W" in title or "hiding" in title:
+                    diag = "被反爬盾拦截（M.E.O.W）"
+                elif "ip_banned" in page or "Access denied from your location" in page:
+                    diag = "IP 在登录端点被封 (ip_banned)"
+                elif "invalid_credentials" in page or "Invalid username or password" in page:
+                    diag = "账号或密码错误 (invalid_credentials)"
+                else:
+                    diag = f"登录失败，页面错误提示: {err_text or '无'}"
+                msg = f"❌ 登录后未跳转：{diag}"
                 print(msg)
                 send_tg(TG_BOT_TOKEN, TG_CHAT_ID, msg)
                 sys.exit(1)
