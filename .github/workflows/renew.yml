@@ -1,0 +1,34 @@
+name: Auto Renew Server
+
+on:
+  schedule:
+    # 每天 UTC 03:00 和 15:00 各跑一次（北京时间 11:00 / 23:00）
+    # 面板只在到期前 7 天开放续期，其余时间脚本会正常空跑
+    - cron: "0 3 * * *"
+    - cron: "0 15 * * *"
+  workflow_dispatch: {}   # 允许在 Actions 页面手动触发
+
+concurrency:
+  group: auto-renew
+  cancel-in-progress: false
+
+jobs:
+  renew:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps
+        run: pip install requests
+
+      - name: Run renew
+        env:
+          SESSION_COOKIE: ${{ secrets.SESSION_COOKIE }}
+          SERVER_ID: ${{ secrets.SERVER_ID }}
+        run: python renew.py
