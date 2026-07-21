@@ -4,7 +4,7 @@
 Zytrano (https://cp.zytrano.top) 服务器自动登录与续期脚本。
 - 使用 SeleniumBase 在 Xvfb 虚拟显示屏中以真有头模式运行，完美过 Cloudflare Turnstile 验证码
 - 自动填入账号密码登录 Zytrano 后端面板
-- 登录成功后，通过 PATCH /servers/renew/{server_id} 接口进行服务器续期
+- 登录成功后，通过 PATCH https://cp.zytrano.top/servers/renew/{server_id} 接口进行服务器续期
 """
 import os
 import sys
@@ -29,7 +29,7 @@ PROXY = os.environ.get("PROXY_SERVER", "socks5://127.0.0.1:40001").strip()
 BASE_URL = "https://cp.zytrano.top"
 LOGIN_URL = f"{BASE_URL}/login"
 SERVERS_URL = f"{BASE_URL}/servers"
-RENEW_PATH = f"/servers/renew/{SERVER_ID}"
+RENEW_FULL_URL = f"{BASE_URL}/servers/renew/{SERVER_ID}"
 
 
 def log(*args):
@@ -123,7 +123,7 @@ def main():
                     sb.uc_click('.btn-primary')
                 time.sleep(6)
 
-            log("📍 登录尝试完成，当前页面 URL:", sb.get_current_url())
+            log("📍 登录完成，当前页面 URL:", sb.get_current_url())
 
         # Step 3: 导航到服务器列表页
         log(f"🌐 打开服务器列表页面: {SERVERS_URL}")
@@ -131,14 +131,14 @@ def main():
         sb.wait_for_ready_state_complete()
         time.sleep(3)
 
-        # Step 4: 执行 PATCH 续期请求
-        log(f"🔄 发起 PATCH 续期请求 ({RENEW_PATH})...")
+        # Step 4: 在真浏览器环境中使用完整绝对路径发起 PATCH 续期请求
+        log(f"🔄 发起 PATCH 续期请求 ({RENEW_FULL_URL})...")
         renew_res = sb.execute_script(f"""
             let cookies = document.cookie.split('; ');
             let xsrfCookie = cookies.find(row => row.startsWith('XSRF-TOKEN='));
             let xsrfValue = xsrfCookie ? decodeURIComponent(xsrfCookie.split('=')[1]) : '';
 
-            return fetch('{RENEW_PATH}', {{
+            return fetch('{RENEW_FULL_URL}', {{
                 method: 'PATCH',
                 credentials: 'include',
                 headers: {{
