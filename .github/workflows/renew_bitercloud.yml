@@ -2,8 +2,8 @@ name: Bitercloud Server Auto Renew
 
 on:
   schedule:
-    # 每 6 小时自动运行一次
-    - cron: "0 */6 * * *"
+    # 每 3 天自动运行一次 (每天 00:00 UTC 校验日期步长，相当于每 3 天一次)
+    - cron: "0 0 */3 * *"
   workflow_dispatch: {}
 
 concurrency:
@@ -18,42 +18,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install and Start Cloudflare WARP (SOCKS5 Proxy)
-        run: |
-          curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | sudo gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
-          echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ noble main" | sudo tee /etc/apt/sources.list.d/cloudflare-client.list
-          sudo apt-get update
-          sudo apt-get install -y cloudflare-warp
-          sudo warp-svc &
-          sleep 3
-          warp-cli --accept-tos registration new || true
-          warp-cli --accept-tos mode proxy || true
-          warp-cli --accept-tos proxy port 40001 || true
-          warp-cli --accept-tos connect || true
-          sleep 3
-          echo "=== WARP PROXY CHECK ==="
-          curl -x socks5h://127.0.0.1:40001 https://ipinfo.io/json || true
-
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: Install system deps (Chrome)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y wget gnupg xvfb
-          wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add - 2>/dev/null || true
-          echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
-          sudo apt-get update
-          sudo apt-get install -y google-chrome-stable || sudo apt-get install -y chromium-browser
-          google-chrome --version || chromium-browser --version
-
       - name: Install Python deps
-        run: pip install --upgrade pip seleniumbase requests "requests[socks]"
-
-      - name: Install chromedriver
-        run: python -m seleniumbase install chromedriver
+        run: pip install --upgrade pip requests "requests[socks]"
 
       - name: Run Bitercloud Renew
         env:
@@ -63,6 +34,4 @@ jobs:
           BITERCLOUD_SERVER_ID: ${{ secrets.BITERCLOUD_SERVER_ID }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-          PROXY_SERVER: "socks5://127.0.0.1:40001"
-          HEADLESS: "true"
         run: python renew_bitercloud.py
