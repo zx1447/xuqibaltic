@@ -101,7 +101,7 @@ def try_login_and_renew_via_proxy(proxy):
 
         payload = {"_token": token_val, "email": USER, "password": PASS}
 
-        # 2. 提交账号密码登录
+        # 2. 提交账号密码登录 (期望得到 302 重定向至 /home)
         r_post = s.post(LOGIN_URL, data=payload, allow_redirects=False, timeout=8)
         if r_post.status_code not in (200, 302) or r_post.headers.get("Location") == f"{BASE_URL}/blocked":
             return None
@@ -114,9 +114,9 @@ def try_login_and_renew_via_proxy(proxy):
         s.headers["Accept"] = "application/json, text/html, */*"
         s.headers["Referer"] = SERVERS_URL
 
-        # 3. 发起 PATCH 续期请求
-        r_renew = s.patch(RENEW_URL, timeout=8)
-        return (proxy, r_renew.status_code, r_renew.text)
+        # 3. 发起 PATCH 续期请求 (Laravel 成功后会返回 302 Redirect 并带 Alert 提示)
+        r_renew = s.patch(RENEW_URL, allow_redirects=False, timeout=8)
+        return (proxy, r_post.status_code, r_renew.status_code, r_renew.headers.get("Location"), r_renew.text)
     except Exception:
         return None
 
@@ -148,10 +148,10 @@ def main():
             s.headers["X-XSRF-TOKEN"] = urllib.parse.unquote(xsrf_token)
 
         try:
-            resp = s.patch(RENEW_URL, json={}, timeout=20)
-            log(f"HTTP Status: {resp.status_code}, Body: {resp.text[:300]}")
-            if resp.status_code == 200 or "renewed" in resp.text.lower() or "ok" in resp.text.lower():
-                msg = f"🎉 Bitercloud 服务器 ({SERVER_ID}) 续期成功！\n响应: {resp.text[:200]}"
+            resp = s.patch(RENEW_URL, allow_redirects=False, timeout=20)
+            log(f"HTTP Status: {resp.status_code}, Location: {resp.headers.get('Location')}")
+            if resp.status_code in (200, 302):
+                msg = f"🎉 Bitercloud 服务器 ({SERVER_ID}) Cookie 模式续期成功！"
                 log(msg)
                 send_tg(msg)
                 sys.exit(0)
@@ -176,13 +176,17 @@ def main():
             results = executor.map(try_login_and_renew_via_proxy, proxy_list)
             for res in results:
                 if res:
-                    proxy, status_code, body = res
-                    log(f"🎉 成功匹配可用节点 [{proxy}] 并完成全自动续期！")
-                    log(f"   HTTP 状态码: {status_code}")
-                    log(f"   响应内容: {body[:300]}")
+                    proxy, post_status, renew_status, loc_hdr, body = res
+                    log(f"🎉 成功匹配可用代理节点 [{proxy}]！")
+                    log(f"   步骤 1: 账号密码 POST 登录 -> 状态码 {post_status}")
+                    log(f"   步骤 2: 发起 PATCH 续期请求 ({RENEW_URL}) -> 状态码 {renew_status}")
+                    log(f"   步骤 3: 续期返回跳转 -> Location: {loc_hdr}")
 
-                    if status_code == 200 or "renewed" in body.lower() or "ok" in body.lower() or "success" in body.lower():
-                        msg = f"🎉 Bitercloud 服务器 ({SERVER_ID}) 全自动登录续期成功！\n使用节点: {proxy}\n响应: {body[:200]}"
+                    if renew_status in (200, 302):
+                        msg = (f"🎉 Bitercloud 服务器 ({SERVER_ID}) 全自动登录与续期成功！\n"
+                               f"📌 节点: {proxy}\n"
+                               f"🔑 登录状态: {post_status}\n"
+                               f"🔄 续期状态: {renew_status} -> {loc_hdr or 'Success'}")
                         log(msg)
                         send_tg(msg)
                         success = True
