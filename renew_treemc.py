@@ -87,15 +87,51 @@ def main():
             time.sleep(4)
             print("✅ Discord Token 注入完成，当前 Discord URL:", sb.get_current_url())
 
-        # Step 3: 打开 TreeMC Dashboard
-        print("🌐 导航到 TreeMC Host...")
-        sb.open("https://www.treemc.host/dashboard")
+        # Step 3: 导航到 TreeMC Login 页面
+        print("🌐 导航到 TreeMC Host /login...")
+        sb.open("https://www.treemc.host/login")
         sb.wait_for_ready_state_complete()
         time.sleep(3)
 
-        print("📍 当前页面 URL:", sb.get_current_url())
+        cur_url = sb.get_current_url()
+        print("📍 初始 URL:", cur_url)
 
-        # 如果跳转到了 Discord 授权页面，自动点击 Authorize
+        # 防止外链重定向干扰，确保留在 treemc.host
+        if "treemc.host" not in cur_url:
+            print("⚠️ 跳转到了广告外链，强行返回 https://www.treemc.host/login ...")
+            sb.open("https://www.treemc.host/login")
+            time.sleep(3)
+
+        print("📍 修正后 URL:", sb.get_current_url())
+
+        # 打印页面上的可点击元素以供调试
+        try:
+            links = sb.find_elements("a")
+            for l in links[:10]:
+                href = l.get_attribute("href")
+                text = l.text
+                if href or text:
+                    print(f"🔗 Link: '{text}' -> {href}")
+            btns = sb.find_elements("button")
+            for b in btns[:10]:
+                print(f"🔘 Button: '{b.text}'")
+        except Exception as e:
+            print(f"打印元素提示: {e}")
+
+        # 尝试寻找包含 discord 授权链接或按钮并点击
+        try:
+            if sb.is_element_visible("a[href*='discord']"):
+                print("🖱️ 找到 Discord 链接，点击...")
+                sb.uc_click("a[href*='discord']")
+                time.sleep(4)
+            elif sb.is_element_visible("button"):
+                print("🖱️ 点击登录/授权按钮...")
+                sb.uc_click("button")
+                time.sleep(4)
+        except Exception as e:
+            print(f"点击登录提示: {e}")
+
+        # 处理 Discord OAuth 授权页
         if "discord.com/oauth2/authorize" in sb.get_current_url():
             print("🖱️ 处于 Discord 授权界面，点击 Authorize 按钮...")
             time.sleep(3)
@@ -108,37 +144,9 @@ def main():
             except Exception as e:
                 print(f"授权点击提示: {e}")
 
-        # 如果在 TreeMC 且有 Login / Discord 关联按钮
-        page_source = sb.get_page_source()
-        if ("login" in sb.get_current_url().lower() or "login" in page_source.lower()) and "discord.com" not in sb.get_current_url():
-            print("🖱️ 尝试寻找并点击 Discord 登录/授权按钮...")
-            try:
-                if sb.is_element_visible("a[href*='discord']"):
-                    sb.uc_click("a[href*='discord']")
-                elif sb.is_element_visible("button:contains('Login')"):
-                    sb.uc_click("button:contains('Login')")
-                elif sb.is_element_visible("a:contains('Login')"):
-                    sb.uc_click("a:contains('Login')")
-                time.sleep(5)
-            except Exception as e:
-                print(f"点击登录按钮提示: {e}")
+        print("📍 登录处理完成，当前 URL:", sb.get_current_url())
 
-        # 再检测一次授权
-        if "discord.com/oauth2/authorize" in sb.get_current_url():
-            print("🖱️ 处于 Discord 授权界面，点击 Authorize 按钮...")
-            time.sleep(3)
-            try:
-                if sb.is_element_visible("button[type='submit']"):
-                    sb.uc_click("button[type='submit']")
-                elif sb.is_element_visible("button:contains('Authorize')"):
-                    sb.uc_click("button:contains('Authorize')")
-                time.sleep(5)
-            except Exception as e:
-                print(f"授权点击提示: {e}")
-
-        print("📍 处理后页面 URL:", sb.get_current_url())
-
-        # 先查账号信息
+        # Step 4: 检查账号并触发续期 API
         acc_res = sb.execute_script("""
             return fetch('/api/pterodactyl/account', {
                 method: 'GET',
@@ -150,7 +158,6 @@ def main():
         """)
         print("🔍 账号接口返回:", acc_res)
 
-        # 触发续期 API
         print("🔄 发起续期 API 请求...")
         renew_res = sb.execute_script("""
             return fetch('/api/server/renew', {
