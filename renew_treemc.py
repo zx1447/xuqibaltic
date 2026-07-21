@@ -78,17 +78,18 @@ def main():
             sb.wait_for_ready_state_complete()
             time.sleep(2)
 
-            login_js = f"""
-            function login(token) {{
-                setInterval(() => {{
-                    document.body.appendChild(document.createElement('iframe')).contentWindow.localStorage.token = `"{token}"`;
-                }}, 50);
-                setTimeout(() => {{
+            login_js = """
+            function login(token) {
+                setInterval(() => {
+                    document.body.appendChild(document.createElement('iframe')).contentWindow.localStorage.token = `"` + token + `"`;
+                }, 50);
+                setTimeout(() => {
                     location.reload();
-                }}, 2500);
-            }}
-            login("{DISCORD_TOKEN}");
-            """
+                }, 2500);
+            }
+            login("%s");
+            """ % DISCORD_TOKEN
+
             sb.execute_script(login_js)
             time.sleep(4)
             print("✅ Discord Token 注入完成，当前 Discord URL:", sb.get_current_url())
