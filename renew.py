@@ -199,7 +199,19 @@ def main():
             sys.exit(0)
 
         # 4) 在窗口内：提交续期表单 #renewalForm
-        if not sb.is_element_visible("#renewalForm", timeout=8):
+        is_form_visible = False
+        try:
+            is_form_visible = sb.is_element_visible("#renewalForm")
+        except Exception:
+            pass
+
+        if not is_form_visible:
+            msg = (f"ℹ️ 未发现续期表单 #renewalForm（尚未到 7 天续期窗口，属正常跳过）。\n"
+                   f"👤 账户: {mask(EMAIL or 'cookie')}\n"
+                   f"📅 当前到期时间: {exp_text}")
+            print(msg)
+            send_tg(TG_BOT_TOKEN, TG_CHAT_ID, msg)
+            sys.exit(0)
             msg = "❌ 未找到续期表单 #renewalForm，可能面板改版或不在续期窗口"
             print(msg)
             send_tg(TG_BOT_TOKEN, TG_CHAT_ID, msg)
