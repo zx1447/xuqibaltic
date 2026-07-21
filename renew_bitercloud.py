@@ -95,19 +95,19 @@ def main():
 
             log("📍 登录完成，当前 URL:", sb.get_current_url())
 
-        # 2. 打开服务器列表页面并打印分析所有包含 renew 或 server 按钮的表单
+        # 2. 打开服务器列表页面
         log(f"🌐 打开服务器列表页: {SERVERS_URL}")
         sb.open(SERVERS_URL)
         sb.wait_for_ready_state_complete()
         time.sleep(3)
 
-        # 提取页面中包含的全部按钮、链接与表单
+        # 提取页面上的关联按钮/链接
         inspect_res = sb.execute_script("""
             let items = [];
             document.querySelectorAll('form, button, a').forEach(el => {
-                let action = el.getAttribute('action') or el.getAttribute('href') or '';
-                let text = el.innerText or el.textContent or '';
-                let method = el.getAttribute('method') or '';
+                let action = el.getAttribute('action') || el.getAttribute('href') || '';
+                let text = el.innerText || el.textContent || '';
+                let method = el.getAttribute('method') || '';
                 if (action || text) {
                     items.push({ tag: el.tagName, text: text.trim().substring(0, 50), action: action, method: method });
                 }
@@ -115,15 +115,13 @@ def main():
             return items;
         """)
 
-        log("🔎 页面发现的交互元素 (前20个):")
+        log("🔎 页面发现的交互元素 (前 20 个):")
         for idx, it in enumerate(inspect_res[:20]):
             log(f"   [{idx+1}] <{it.get('tag')}> text='{it.get('text')}' action='{it.get('action')}' method='{it.get('method')}'")
 
-        # 尝试几种可能的续期 URL 变体
         renew_candidates = [
             f"/servers/{SERVER_ID}/renew",
             f"/servers/renew/{SERVER_ID}",
-            f"/servers//renew/{SERVER_ID}",
             f"/api/servers/{SERVER_ID}/renew"
         ]
 
