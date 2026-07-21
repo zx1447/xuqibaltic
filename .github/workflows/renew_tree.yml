@@ -40,7 +40,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install Python deps
-        run: pip install --upgrade pip requests
+        run: pip install --upgrade pip requests "requests[socks]"
 
       - name: Run TreeMC Renew
         env:
