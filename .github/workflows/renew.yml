@@ -1,19 +1,10 @@
 name: Auto Renew Server
 
-# 自动续期说明：
-#   脚本采用 SeleniumBase 真浏览器（uc 模式）访问面板，能像真人浏览器一样
-#   通过反爬防护盾(M.E.O.W)。这样即使是 GitHub 托管 runner 也有机会通过
-#   （反爬盾对"真浏览器指纹"放行，对裸 requests 拦截）。
-#   若仍被拦截（极端情况下数据中心 IP 被硬封），可改用自托管 runner
-#   （把 runs-on 改成 self-hosted）或用本机 run_local.ps1。
-
 on:
   schedule:
-    # 每天 UTC 03:00 和 15:00 各跑一次（北京时间 11:00 / 23:00）
-    # 面板只在到期前 7 天开放续期，其余时间脚本会正常空跑
     - cron: "0 3 * * *"
     - cron: "0 15 * * *"
-  workflow_dispatch: {}   # 允许在 Actions 页面手动触发
+  workflow_dispatch: {}
 
 concurrency:
   group: auto-renew
@@ -26,6 +17,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Cloudflare WARP
+        uses: fscarmen/warp-action@v1
+        with:
+          mode: warp
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
@@ -35,7 +31,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y wget gnupg xvfb
-          # 安装 Google Chrome
           wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add - 2>/dev/null || true
           echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
           sudo apt-get update
