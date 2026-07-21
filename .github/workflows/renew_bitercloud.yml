@@ -39,14 +39,30 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install system deps (Chrome)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget gnupg xvfb
+          wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add - 2>/dev/null || true
+          echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
+          sudo apt-get update
+          sudo apt-get install -y google-chrome-stable || sudo apt-get install -y chromium-browser
+          google-chrome --version || chromium-browser --version
+
       - name: Install Python deps
-        run: pip install --upgrade pip requests "requests[socks]"
+        run: pip install --upgrade pip seleniumbase requests "requests[socks]"
+
+      - name: Install chromedriver
+        run: python -m seleniumbase install chromedriver
 
       - name: Run Bitercloud Renew
         env:
+          BITERCLOUD_USER: ${{ secrets.BITERCLOUD_USER }}
+          BITERCLOUD_PASS: ${{ secrets.BITERCLOUD_PASS }}
           BITERCLOUD_COOKIE: ${{ secrets.BITERCLOUD_COOKIE }}
           BITERCLOUD_SERVER_ID: ${{ secrets.BITERCLOUD_SERVER_ID }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
           PROXY_SERVER: "socks5://127.0.0.1:40001"
+          HEADLESS: "true"
         run: python renew_bitercloud.py
