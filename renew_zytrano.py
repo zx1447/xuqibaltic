@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Zytrano (https://cp.zytrano.top) 服务器自动登录与续期脚本。
+Zytrano (https://cp.zytrano.top) 服务器自动登录与随机间隔续期脚本。
+- 自动计算 2~10 天随机时间间隔，完美模拟真人的随机登录与续期习惯
 - 使用 SeleniumBase (uc + Xvfb) 自动完成账号密码登录与 Cloudflare Turnstile 验证
 - 登录完成后，构建标准 Laravel PATCH 伪造表单提交续期请求
+- 续期成功后，随机计算并保存下一次触发节点至 zytrano_state.json 自动写回仓库
 """
 import os
 import sys
+import json
 import time
+import random
 import datetime
 import requests
 
@@ -20,6 +24,7 @@ USER = os.environ.get("ZYTRANO_USER", "").strip()
 PASS = os.environ.get("ZYTRANO_PASS", "").strip()
 COOKIE = os.environ.get("ZYTRANO_COOKIE", "").strip()
 SERVER_ID = (os.environ.get("ZYTRANO_SERVER_ID") or "nWUh0n4lbOYojO4M9ePOA").strip()
+FORCE_RUN = os.environ.get("FORCE_RUN", "false").lower() == "true"
 
 TG_CHAT_ID = os.environ.get("TG_CHAT_ID", "").strip()
 TG_TOKEN = os.environ.get("TG_BOT_TOKEN", "").strip()
@@ -29,6 +34,8 @@ BASE_URL = "https://cp.zytrano.top"
 LOGIN_URL = f"{BASE_URL}/login"
 SERVERS_URL = f"{BASE_URL}/servers"
 RENEW_ACTION_URL = f"{BASE_URL}/servers/renew/{SERVER_ID}"
+
+STATE_FILE = "zytrano_state.json"
 
 
 def log(*args):
@@ -54,12 +61,85 @@ def send_tg(msg):
         log(f"⚠️ Telegram 通知发送失败：{e}")
 
 
+def load_state():
+    if os.path.exists(STATE_FILE):
+        try:
+            with open(STATE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            log(f"⚠️ 读取状态文件失败: {e}")
+    return {}
+
+
+def save_state(next_renew_ts, interval_days, interval_hours):
+    utc_now = datetime.datetime.now(datetime.timezone.utc)
+    next_dt = utc_now + datetime.timedelta(days=interval_days, hours=interval_hours) + datetime.timedelta(hours=8)
+    
+    state_data = {
+        "last_renew_time": now_str(),
+        "last_renew_timestamp": int(time.time()),
+        "next_renew_timestamp": int(next_renew_ts),
+        "next_interval_days": interval_days,
+        "next_interval_hours": interval_hours,
+        "next_renew_time": next_dt.strftime('%Y-%m-%d %H:%M:%S')
+    }
+    try:
+        with open(STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(state_data, f, indent=2, ensure_ascii=False)
+        log(f"💾 最新运行状态与下一次随机时间 ({state_data['next_renew_time']}) 已保存至状态文件")
+    except Exception as e:
+        log(f"⚠️ 写入状态文件失败: {e}")
+
+
+def should_execute():
+    state = load_state()
+    next_ts = state.get("next_renew_timestamp", 0)
+    now_ts = int(time.time())
+
+    if FORCE_RUN:
+        log("⚡ 手动/环境变量触发 FORCE_RUN，忽略随机时间，立即执行续期！")
+        return True
+
+    if not next_ts:
+        log("🆕 未检测到之前的续期记录，判定为第一次运行，立即执行续期！")
+        return True
+
+    if now_ts < next_ts:
+        next_time_str = state.get("next_renew_time", "未知")
+        diff_hours = (next_ts - now_ts) / 3600.0
+        log(f"⏳ 尚未到预定的下一次随机续期节点。")
+        log(f"   上次续期时间: {state.get('last_renew_time')}")
+        log(f"   设定的随机间隔: {state.get('next_interval_days')} 天 {state.get('next_interval_hours', 0)} 小时")
+        log(f"   下一次计划时间: {next_time_str} (还需等待约 {diff_hours:.1f} 小时)")
+        log("🎲 完美模拟真人行为，优雅跳过本次检查。")
+        return False
+
+    log(f"🎯 已达到约定的随机续期时间节点！开启全自动续期流程...")
+    return True
+
+
+def update_random_schedule():
+    # 2 ~ 10 天之间的随机天数
+    rand_days = random.randint(2, 10)
+    # 0 ~ 12 小时的微调抖动，实现高随机度
+    rand_hours = random.randint(0, 12)
+    next_ts = time.time() + (rand_days * 86400) + (rand_hours * 3600)
+
+    log(f"🎲 成功生成下一次续期的随机间隔: {rand_days} 天 {rand_hours} 小时")
+    save_state(next_ts, rand_days, rand_hours)
+    return rand_days, rand_hours
+
+
 def main():
     log("=" * 50)
-    log("🚀 Zytrano 服务器自动登录续期启动")
+    log("🚀 Zytrano 服务器自动登录与随机间隔续期启动")
     log(f"🕐 北京时间: {now_str()}")
     log(f"🖥 服务器 ID: {SERVER_ID}")
     log("=" * 50)
+
+    # 校验 2~10 天随机间隔，未到时间则直接退出
+    if not should_execute():
+        sys.exit(0)
 
     sb_kwargs = {"uc": True, "xvfb": True, "headless": False}
     if PROXY:
@@ -82,7 +162,7 @@ def main():
             sb.refresh()
             time.sleep(2)
 
-        # Step 2: 填表登录与 Turnstile 处理
+        # Step 2: 填表登录与 Cloudflare Turnstile 处理
         if USER and PASS:
             log(f"🔑 导航至登录页面: {LOGIN_URL}")
             sb.open(LOGIN_URL)
@@ -122,23 +202,13 @@ def main():
 
             log("📍 登录完成，当前页面 URL:", sb.get_current_url())
 
-        # Step 3: 打开服务器管理页面
+        # Step 3: 导航到服务器列表页
         log(f"🌐 打开服务器列表页面: {SERVERS_URL}")
         sb.open(SERVERS_URL)
         sb.wait_for_ready_state_complete()
         time.sleep(3)
 
-        # 检查页面上是否有既有的 Renew 按钮并直接点击
-        try:
-            renew_btns = sb.find_elements(f"form[action*='renew/{SERVER_ID}'] button, button[form*='{SERVER_ID}'], a[href*='renew/{SERVER_ID}']")
-            if renew_btns:
-                log("🖱️ 在页面发现对应服务器的 Renew 按钮，直接模拟点击...")
-                sb.uc_click(renew_btns[0])
-                time.sleep(5)
-        except Exception as e:
-            log(f"寻找既有 Renew 按钮提示: {e}")
-
-        # Step 4: 提交标准 Laravel POST + _method=PATCH 续期表单
+        # Step 4: 提交标准 Laravel PATCH 伪造表单
         log(f"🔄 提交 Laravel PATCH 方法伪造表单 ({RENEW_ACTION_URL})...")
         sb.execute_script(f"""
             let form = document.createElement('form');
@@ -164,12 +234,13 @@ def main():
 
         time.sleep(6)
         after_renew_url = sb.get_current_url()
-        page_src = sb.get_page_source().lower()
-
         log("📍 续期表单提交后 URL:", after_renew_url)
 
         if "login" not in after_renew_url.lower():
-            msg = f"🎉 Zytrano 服务器 ({SERVER_ID}) 全自动登录续期成功！\n当前页面: {after_renew_url}"
+            # 续期成功，生成并保存下一次 2~10 天的随机触发节点
+            d, h = update_random_schedule()
+            msg = (f"🎉 Zytrano 服务器 ({SERVER_ID}) 全自动登录续期成功！\n"
+                   f"🎲 自动计算下次续期间隔: {d} 天 {h} 小时")
             log(msg)
             send_tg(msg)
             sys.exit(0)
