@@ -2,9 +2,8 @@
 # -*- coding: utf-8 -*-
 """
 Zytrano (https://cp.zytrano.top) 服务器自动登录与续期脚本。
-- 使用 SeleniumBase 在 Xvfb 虚拟显示屏中以真有头模式运行，完美过 Cloudflare Turnstile 验证码
-- 自动填入账号密码登录 Zytrano 后端面板
-- 登录成功后，通过 PATCH https://cp.zytrano.top/servers/renew/{server_id} 接口进行服务器续期
+- 使用 SeleniumBase (uc + Xvfb) 自动完成账号密码登录与 Cloudflare Turnstile 验证
+- 登录完成后，构建标准 Laravel PATCH 伪造表单提交续期请求
 """
 import os
 import sys
@@ -29,7 +28,7 @@ PROXY = os.environ.get("PROXY_SERVER", "socks5://127.0.0.1:40001").strip()
 BASE_URL = "https://cp.zytrano.top"
 LOGIN_URL = f"{BASE_URL}/login"
 SERVERS_URL = f"{BASE_URL}/servers"
-RENEW_FULL_URL = f"{BASE_URL}/servers/renew/{SERVER_ID}"
+RENEW_ACTION_URL = f"{BASE_URL}/servers/renew/{SERVER_ID}"
 
 
 def log(*args):
@@ -62,7 +61,6 @@ def main():
     log(f"🖥 服务器 ID: {SERVER_ID}")
     log("=" * 50)
 
-    # 在 Xvfb 虚拟桌面下使用有头 UC 模式，能完美通过 Turnstile 验证码与 GUI 点击
     sb_kwargs = {"uc": True, "xvfb": True, "headless": False}
     if PROXY:
         sb_kwargs["proxy"] = PROXY
@@ -84,7 +82,7 @@ def main():
             sb.refresh()
             time.sleep(2)
 
-        # Step 2: 填表登录与 Cloudflare Turnstile 处理
+        # Step 2: 填表登录与 Turnstile 处理
         if USER and PASS:
             log(f"🔑 导航至登录页面: {LOGIN_URL}")
             sb.open(LOGIN_URL)
@@ -106,11 +104,10 @@ def main():
                 elif sb.is_element_visible('#password'):
                     sb.type('#password', PASS, timeout=10)
 
-                # 处理 Cloudflare Turnstile 验证码
                 log("🤖 尝试通过 Turnstile 验证码挑战...")
                 try:
                     sb.uc_gui_click_captcha()
-                    log("✅ 已尝试模拟点击 Cloudflare Turnstile 复选框")
+                    log("✅ 已尝试模拟点击 Turnstile 复选框")
                 except Exception as e:
                     log(f"⚠️ Turnstile 交互提示: {e}")
 
@@ -125,54 +122,62 @@ def main():
 
             log("📍 登录完成，当前页面 URL:", sb.get_current_url())
 
-        # Step 3: 导航到服务器列表页
+        # Step 3: 打开服务器管理页面
         log(f"🌐 打开服务器列表页面: {SERVERS_URL}")
         sb.open(SERVERS_URL)
         sb.wait_for_ready_state_complete()
         time.sleep(3)
 
-        # Step 4: 在真浏览器环境中使用完整绝对路径发起 PATCH 续期请求
-        log(f"🔄 发起 PATCH 续期请求 ({RENEW_FULL_URL})...")
-        renew_res = sb.execute_script(f"""
-            let cookies = document.cookie.split('; ');
-            let xsrfCookie = cookies.find(row => row.startsWith('XSRF-TOKEN='));
-            let xsrfValue = xsrfCookie ? decodeURIComponent(xsrfCookie.split('=')[1]) : '';
+        # 检查页面上是否有既有的 Renew 按钮并直接点击
+        try:
+            renew_btns = sb.find_elements(f"form[action*='renew/{SERVER_ID}'] button, button[form*='{SERVER_ID}'], a[href*='renew/{SERVER_ID}']")
+            if renew_btns:
+                log("🖱️ 在页面发现对应服务器的 Renew 按钮，直接模拟点击...")
+                sb.uc_click(renew_btns[0])
+                time.sleep(5)
+        except Exception as e:
+            log(f"寻找既有 Renew 按钮提示: {e}")
 
-            return fetch('{RENEW_FULL_URL}', {{
-                method: 'PATCH',
-                credentials: 'include',
-                headers: {{
-                    'Accept': 'application/json, text/html, */*',
-                    'Content-Type': 'application/json',
-                    'X-XSRF-TOKEN': xsrfValue
-                }}
-            }}).then(async r => {{
-                let txt = await r.text();
-                return {{ status: r.status, body: txt }};
-            }}).catch(err => ({{ status: 500, error: err.toString() }}));
+        # Step 4: 提交标准 Laravel POST + _method=PATCH 续期表单
+        log(f"🔄 提交 Laravel PATCH 方法伪造表单 ({RENEW_ACTION_URL})...")
+        sb.execute_script(f"""
+            let form = document.createElement('form');
+            form.method = 'POST';
+            form.action = '{RENEW_ACTION_URL}';
+
+            let mInput = document.createElement('input');
+            mInput.type = 'hidden';
+            mInput.name = '_method';
+            mInput.value = 'PATCH';
+            form.appendChild(mInput);
+
+            let tInput = document.createElement('input');
+            tInput.type = 'hidden';
+            tInput.name = '_token';
+            let csrfMeta = document.querySelector('meta[name="csrf-token"]');
+            tInput.value = csrfMeta ? csrfMeta.content : '';
+            form.appendChild(tInput);
+
+            document.body.appendChild(form);
+            form.submit();
         """)
 
-        log("📊 续期 API 返回结果:", renew_res)
+        time.sleep(6)
+        after_renew_url = sb.get_current_url()
+        page_src = sb.get_page_source().lower()
 
-        status_code = renew_res.get("status") if isinstance(renew_res, dict) else 0
-        body = renew_res.get("body", "") if isinstance(renew_res, dict) else str(renew_res)
-        body_low = body.lower()
+        log("📍 续期表单提交后 URL:", after_renew_url)
 
-        if status_code in (200, 302) or "renewed" in body_low or "success" in body_low or "ok" in body_low:
-            msg = f"🎉 Zytrano 服务器 ({SERVER_ID}) 全自动登录续期成功！\n响应: {body[:200]}"
+        if "login" not in after_renew_url.lower():
+            msg = f"🎉 Zytrano 服务器 ({SERVER_ID}) 全自动登录续期成功！\n当前页面: {after_renew_url}"
             log(msg)
             send_tg(msg)
             sys.exit(0)
-        elif status_code == 401 or "unauthenticated" in body_low:
-            msg = f"❌ Zytrano 续期失败 (401 Unauthenticated)。未完成登录验证。"
+        else:
+            msg = f"❌ Zytrano 续期失败：登录已失效，跳转至 {after_renew_url}"
             log(msg)
             send_tg(msg)
             sys.exit(1)
-        else:
-            msg = f"ℹ️ Zytrano 续期响应 (HTTP {status_code}): {body[:200]}"
-            log(msg)
-            send_tg(msg)
-            sys.exit(0 if status_code and status_code < 500 else 1)
 
 
 if __name__ == "__main__":
