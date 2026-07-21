@@ -1,13 +1,6 @@
 #!/usr/bin/env python3
 """
 TreeMC Host (https://www.treemc.host) 自动登录与续期脚本（SeleniumBase 真浏览器版）。
-
-自动流程：
-1. 启动 Chrome (SeleniumBase uc 模式) 挂载 SOCKS5 代理
-2. 访问 Discord 并通过 TREEMC_TOKEN (Discord User Token) 实现静默登录
-3. 打开 TreeMC Host (https://www.treemc.host) 点击登录/授权
-4. 成功获取 TreeMC Session 并自动发起 /api/server/renew 续期或在前端进行续期
-5. 若配置了 Telegram 则发送成功/失败通知
 """
 import os
 import sys
@@ -51,7 +44,7 @@ def main():
         print(f"🔗 使用代理: {PROXY}")
 
     with SB(**sb_kwargs) as sb:
-        # Step 1: 如果有静态 Session Cookie，优先直接写入
+        # Step 1: 写入静态 Session Cookie（如有）
         if COOKIE:
             print("🍪 注入 TREEMC_COOKIE 静态 Session...")
             sb.open("https://www.treemc.host")
@@ -71,7 +64,7 @@ def main():
             sb.refresh()
             time.sleep(2)
 
-        # Step 2: 如果存在 Discord Token，利用 Discord Token 静默登录
+        # Step 2: 通过 Discord Token 进行免密登录
         if DISCORD_TOKEN:
             print("🔑 正在通过 Discord Token 进行免密授权登录...")
             sb.open("https://discord.com/login")
@@ -94,26 +87,15 @@ def main():
             time.sleep(4)
             print("✅ Discord Token 注入完成，当前 Discord URL:", sb.get_current_url())
 
-        # Step 3: 打开 TreeMC 主页并处理登录
+        # Step 3: 打开 TreeMC Dashboard
         print("🌐 导航到 TreeMC Host...")
-        sb.open("https://www.treemc.host")
+        sb.open("https://www.treemc.host/dashboard")
         sb.wait_for_ready_state_complete()
         time.sleep(3)
 
-        page_source = sb.get_page_source()
-        if "login" in page_source.lower() or "discord" in page_source.lower():
-            print("🖱️ 尝试寻找并点击 Discord 登录/授权按钮...")
-            try:
-                if sb.is_element_visible("a[href*='discord']"):
-                    sb.uc_click("a[href*='discord']")
-                elif sb.is_element_visible("button:contains('Login')"):
-                    sb.uc_click("button:contains('Login')")
-                elif sb.is_element_visible("a:contains('Login')"):
-                    sb.uc_click("a:contains('Login')")
-                time.sleep(4)
-            except Exception as e:
-                print(f"点击登录按钮提示: {e}")
+        print("📍 当前页面 URL:", sb.get_current_url())
 
+        # 如果跳转到了 Discord 授权页面，自动点击 Authorize
         if "discord.com/oauth2/authorize" in sb.get_current_url():
             print("🖱️ 处于 Discord 授权界面，点击 Authorize 按钮...")
             time.sleep(3)
@@ -126,35 +108,80 @@ def main():
             except Exception as e:
                 print(f"授权点击提示: {e}")
 
-        # Step 4: 触发续期 API
-        print("🔄 尝试发起续期 API 请求...")
+        # 如果在 TreeMC 且有 Login / Discord 关联按钮
+        page_source = sb.get_page_source()
+        if ("login" in sb.get_current_url().lower() or "login" in page_source.lower()) and "discord.com" not in sb.get_current_url():
+            print("🖱️ 尝试寻找并点击 Discord 登录/授权按钮...")
+            try:
+                if sb.is_element_visible("a[href*='discord']"):
+                    sb.uc_click("a[href*='discord']")
+                elif sb.is_element_visible("button:contains('Login')"):
+                    sb.uc_click("button:contains('Login')")
+                elif sb.is_element_visible("a:contains('Login')"):
+                    sb.uc_click("a:contains('Login')")
+                time.sleep(5)
+            except Exception as e:
+                print(f"点击登录按钮提示: {e}")
+
+        # 再检测一次授权
+        if "discord.com/oauth2/authorize" in sb.get_current_url():
+            print("🖱️ 处于 Discord 授权界面，点击 Authorize 按钮...")
+            time.sleep(3)
+            try:
+                if sb.is_element_visible("button[type='submit']"):
+                    sb.uc_click("button[type='submit']")
+                elif sb.is_element_visible("button:contains('Authorize')"):
+                    sb.uc_click("button:contains('Authorize')")
+                time.sleep(5)
+            except Exception as e:
+                print(f"授权点击提示: {e}")
+
+        print("📍 处理后页面 URL:", sb.get_current_url())
+
+        # 先查账号信息
+        acc_res = sb.execute_script("""
+            return fetch('/api/pterodactyl/account', {
+                method: 'GET',
+                credentials: 'include'
+            }).then(async r => {
+                let txt = await r.text();
+                return { status: r.status, body: txt };
+            }).catch(err => ({ status: 500, error: err.toString() }));
+        """)
+        print("🔍 账号接口返回:", acc_res)
+
+        # 触发续期 API
+        print("🔄 发起续期 API 请求...")
         renew_res = sb.execute_script("""
-            return fetch('https://www.treemc.host/api/server/renew', {
+            return fetch('/api/server/renew', {
                 method: 'POST',
+                credentials: 'include',
                 headers: {
                     'Content-Type': 'application/json'
                 }
-            }).then(r => r.json().then(data => ({status: r.status, data: data})))
-              .catch(err => ({status: 500, error: err.toString()}));
+            }).then(async r => {
+                let txt = await r.text();
+                return { status: r.status, body: txt };
+            }).catch(err => ({ status: 500, error: err.toString() }));
         """)
 
         print("📊 续期 API 返回结果:", renew_res)
 
         status_code = renew_res.get("status") if isinstance(renew_res, dict) else 0
-        data = renew_res.get("data") if isinstance(renew_res, dict) else renew_res
+        body = renew_res.get("body", "") if isinstance(renew_res, dict) else str(renew_res)
 
-        if status_code == 200 or (isinstance(data, dict) and data.get("ok")):
-            msg = f"🎉 TreeMC Host 自动续期成功！\n返回结果: {data}"
+        if status_code == 200 or "success" in body.lower() or "renewed" in body.lower():
+            msg = f"🎉 TreeMC Host 自动续期成功！\n返回结果: {body}"
             print(msg)
             send_tg(msg)
             sys.exit(0)
-        elif status_code == 401:
-            msg = f"❌ TreeMC Host 续期失败 (401 Unauthorized)。未获得有效的登录状态。"
+        elif status_code == 401 or "unauthorized" in body.lower():
+            msg = f"❌ TreeMC Host 续期失败 (401 Unauthorized)。未获得有效登录状态。\n账号响应: {acc_res}"
             print(msg)
             send_tg(msg)
             sys.exit(1)
         else:
-            msg = f"ℹ️ TreeMC Host 续期响应 (HTTP {status_code}): {data}"
+            msg = f"ℹ️ TreeMC Host 续期响应 (HTTP {status_code}): {body}"
             print(msg)
             send_tg(msg)
             sys.exit(0 if status_code and status_code < 500 else 1)
