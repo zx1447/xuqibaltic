@@ -34,10 +34,12 @@ jobs:
           python-version: "3.12"
 
       - name: Install deps
-        run: pip install requests
+        run: pip install requests pycryptodome
 
       - name: Run renew
         env:
           SESSION_COOKIE: ${{ secrets.SESSION_COOKIE }}
+          BLINKY_USER: ${{ secrets.BLINKY_USER }}
+          BLINKY_PASS: ${{ secrets.BLINKY_PASS }}
           SERVER_ID: ${{ secrets.SERVER_ID }}
         run: python renew.py

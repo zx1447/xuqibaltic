@@ -12,13 +12,56 @@
 
 ---
 
+## 鉴权方式（二选一）
+
+脚本支持两种登录方式，**推荐方式 1**，可做到 cookie 永不过期。
+
+### 方式 1（推荐）：账号密码自动登录 —— cookie 自动刷新
+
+脚本每次运行先用 **RSA 加密密码**登录 `/auth/validator` 拿新鲜 session cookie，再续期。
+你**完全不用再管 cookie**，只要在 Secret 里填好账号密码即可。
+
+> 面板登录页用 JSEncrypt 对密码做 RSA 加密（公钥内嵌在页面），脚本在本地用
+> `pycryptodome` 同样加密后才发出，明文密码不会出现在网络请求里。
+
+需要两个 Secret：
+
+| Secret 名称    | 是否必填 | 值 |
+|----------------|----------|----|
+| `BLINKY_USER`  | 方式1必填 | 面板登录用户名 |
+| `BLINKY_PASS`  | 方式1必填 | 面板登录密码（明文存 Secret，仅本地加密后发出） |
+
+只要设了这两个，脚本就会走登录流程，**忽略 `SESSION_COOKIE`**。
+
+### 方式 2（旧）：静态 session cookie —— 需手动更新
+
+| Secret 名称      | 是否必填 | 值 |
+|------------------|----------|----|
+| `SESSION_COOKIE` | 方式2必填 | 浏览器里的 `session` cookie 值（`.eJx....`，带不带 `session=` 前缀都行） |
+
+> cookie 会过期，撑不到续期窗口就得重新复制（见下方「cookie 过期」）。
+
+两种方式的 Secret 都存在 **Settings → Secrets and variables → Actions → New repository secret**。
+本次已通过 API 写入过 `SESSION_COOKIE`，但**它随时可能过期**，建议改用方式 1。
+
+### ❓ 为什么不用 Discord token？
+
+面板确实有 Discord 登录按钮（`/auth/discord/login`），但那是 **OAuth 重定向流程**
+（跳到 discord.com 让用户点「同意」再跳回面板），不是「贴一个 token」就能用的接口。
+光给一个 Discord 用户 token，脚本无法完成登录握手，因此**不可用于自动化**。
+要彻底免维护，请用上面的「方式 1 账号密码」。
+
+---
+
 ## 方案 A（推荐）：本机 + Windows 任务计划程序
 
 最简单可靠，用你家里的 IP，不会被反爬拦。
 
-1. 安装 Python 3（勾选 Add to PATH）。
+1. 安装 Python 3（勾选 Add to PATH），并 `pip install requests pycryptodome`。
 2. 下载本仓库到本地。
-3. 编辑 `run_local.ps1`，把 `$SessionCookie` 改成你的 session cookie 值（获取方式见下）。
+3. 配置鉴权：
+   - **方式 1（推荐）**：在 `run_local.ps1` 里填 `$BlinkyUser` / `$BlinkyPass`，留空 `$SessionCookie`。
+   - 方式 2：把 `$SessionCookie` 改成你的 session cookie 值（获取方式见下），`$BlinkyUser`/`$BlinkyPass` 留空。
 4. 先手动跑一次验证：右键 `run_local.ps1` → 用 PowerShell 运行。
 5. 用任务计划程序每天自动跑：
    - 打开「任务计划程序」→ 创建基本任务 → 触发器选「每天」。
@@ -32,34 +75,25 @@
 
 1. 仓库 **Settings → Actions → Runners → New self-hosted runner**，按指引在你电脑上安装并启动 runner。
 2. 把 `.github/workflows/renew.yml` 里的 `runs-on: ubuntu-latest` 改成 `runs-on: [self-hosted]`。
-3. 配置下面的 Secret。
+3. 配置上面的 Secret（方式 1 或方式 2）。
 
-### Secret 配置（方案 B 用）
-
-**Settings → Secrets and variables → Actions → New repository secret**：
-
-| Secret 名称       | 是否必填 | 值 |
-|-------------------|----------|----|
-| `SESSION_COOKIE`  | 必填     | 浏览器里的 `session` cookie 值（`.eJx....`，带不带 `session=` 前缀都行） |
-| `SERVER_ID`       | 可选     | 服务器 ID，默认 `04dd7781` |
-
-> 本次已通过 API 帮你写入了 `SESSION_COOKIE`，但**它随时可能过期**（见下）。
+> 即便用自托管 runner，若电脑挂着代理 / 走了数据中心出口 IP，仍可能被反爬拦。
 
 ---
 
-## 怎么获取 `SESSION_COOKIE`
+## 怎么获取 `SESSION_COOKIE`（仅方式 2 需要）
 
 1. 浏览器登录面板，打开 `https://blinky.baltichost.de/manage/server/04dd7781/renewal`。
 2. F12 → Application/应用 → Cookies → 选 `blinky.baltichost.de`。
 3. 复制名为 `session` 那条的 **Value**。
 
-## ⚠️ 关于 cookie 过期（重要）
+## ⚠️ 关于 cookie 过期（方式 2 才需关心）
 
 - cookie 是登录凭证，会过期。**续期窗口 8 月中旬才开，现在的 cookie 很可能撑不到那时候。**
-- **建议：临近 8 月 10 号左右，重新登录复制一份新 cookie 再填进去**，可靠性最高。
+- 用「方式 1 账号密码」可彻底规避此问题，无需手动维护。
 - 脚本会在 cookie 失效时明确报错（找不到 csrf-token / 被反爬拦截），方便你发现并更新。
 
 ## 退出码
 
 - `0`：续期成功，或"尚未到续期窗口"（正常空跑）。
-- `1`：被反爬拦截 / cookie 失效 / 接口异常 —— 需要处理（多半是换 cookie 或换非数据中心 IP）。
+- `1`：被反爬拦截 / 登录失败 / cookie 失效 / 接口异常 —— 需要处理。
