@@ -35,7 +35,7 @@ def send_tg(msg):
 
 def run_direct_requests():
     """使用 TREEMC_COOKIE 直接通过 requests 接口续期"""
-    print("🍪 检测到 TREEMC_COOKIE，使用直连 HTTP 接口模式...")
+    print("🍪 使用直连 HTTP 接口模式...")
     s = requests.Session()
     s.headers.update({
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
@@ -66,13 +66,15 @@ def run_direct_requests():
         r_renew = s.post(RENEW_URL, json={}, timeout=15)
         print(f"HTTP Status: {r_renew.status_code}, Body: {r_renew.text[:300]}")
 
-        if r_renew.status_code == 200 or "success" in r_renew.text.lower() or "ok" in r_renew.text.lower():
+        # 精确校验成功条件（需 200 且 含有 ok:true / success:true）
+        body_low = r_renew.text.lower()
+        if r_renew.status_code == 200 and ("\"ok\":true" in body_low or "\"success\":true" in body_low or "renewed" in body_low or "success" in body_low):
             msg = f"🎉 TreeMC Host 自动续期成功！\n响应: {r_renew.text[:200]}"
             print(msg)
             send_tg(msg)
             return True
-        elif r_renew.status_code == 401:
-            msg = f"❌ TreeMC Host 续期失败 (401 Unauthorized)，请检查或更新 TREEMC_COOKIE。"
+        elif r_renew.status_code == 401 or "unauthorized" in body_low:
+            msg = f"❌ TreeMC Host 续期失败 (401 Unauthorized)。未获得有效登录 Session Cookie。"
             print(msg)
             send_tg(msg)
             return False
@@ -89,13 +91,13 @@ def run_direct_requests():
 
 
 def run_seleniumbase():
-    """回退使用 SeleniumBase 模拟登录续期"""
+    """使用 SeleniumBase 真浏览器免密授权续期"""
     try:
         from seleniumbase import SB
     except ImportError:
         sys.exit("缺少 seleniumbase 依赖")
 
-    print("🤖 未找到 Effective Cookie，尝试使用 SeleniumBase 真浏览器进行免密授权...")
+    print("🤖 尝试使用 SeleniumBase 真浏览器进行 Discord Token 免密授权...")
     sb_kwargs = {"uc": True, "headless": HEADLESS, "xvfb": True}
     if PROXY:
         sb_kwargs["proxy"] = PROXY
@@ -142,7 +144,8 @@ def run_seleniumbase():
         status_code = renew_res.get("status") if isinstance(renew_res, dict) else 0
         body = renew_res.get("body", "") if isinstance(renew_res, dict) else str(renew_res)
 
-        return status_code == 200 or "success" in body.lower()
+        body_low = body.lower()
+        return status_code == 200 and ("\"ok\":true" in body_low or "success" in body_low)
 
 
 def main():
@@ -154,8 +157,8 @@ def main():
         success = run_direct_requests()
         sys.exit(0 if success else 1)
     elif DISCORD_TOKEN:
-        print("💡 当前配置了 TREEMC_TOKEN (Discord Token)。")
-        print("⚠️ 提示：TreeMC Host 依赖 Web Session Cookie。推荐将 F12 抓取的 Cookie 存入 Secret `TREEMC_COOKIE` 中。")
+        print("💡 当前已配置 Discord Token (TREEMC_TOKEN)。")
+        print("⚠️ 提示：TreeMC Host 核心验证依赖 Web Session Cookie。推荐将 F12 抓取的 Cookie 粘贴存入 Secret `TREEMC_COOKIE` 中。")
         success = run_direct_requests()
         if not success:
             success = run_seleniumbase()
