@@ -25,7 +25,7 @@ except ImportError:
     sys.exit("缺少 requests 库，请先 `pip install requests`")
 
 BASE_URL = os.environ.get("BASE_URL", "https://blinky.baltichost.de").rstrip("/")
-SERVER_ID = os.environ.get("SERVER_ID", "04dd7781").strip()
+SERVER_ID = (os.environ.get("SERVER_ID") or "04dd7781").strip()
 RAW_COOKIE = os.environ.get("SESSION_COOKIE", "").strip()
 
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -61,7 +61,14 @@ def main() -> None:
     cookie_val = parse_cookie(RAW_COOKIE)
 
     s = requests.Session()
-    s.headers.update({"User-Agent": UA})
+    s.headers.update({
+        "User-Agent": UA,
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        "sec-ch-ua": '"Not;A=Brand";v="8", "Chromium";v="150", "Microsoft Edge";v="150"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Windows"',
+        "Upgrade-Insecure-Requests": "1",
+    })
     s.cookies.set("session", cookie_val, domain=BASE_URL.split("//", 1)[-1])
 
     page_url = f"{BASE_URL}/manage/server/{SERVER_ID}/renewal"
