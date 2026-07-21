@@ -1,0 +1,52 @@
+name: TreeMC Host Auto Renew
+
+on:
+  schedule:
+    # 每 4 小时运行一次 (00:00, 04:00, 08:00, 12:00, 16:00, 20:00 UTC)
+    - cron: "0 */4 * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: treemc-auto-renew
+  cancel-in-progress: true
+
+jobs:
+  renew:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install and Start Cloudflare WARP (SOCKS5 Proxy)
+        run: |
+          curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | sudo gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
+          echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ noble main" | sudo tee /etc/apt/sources.list.d/cloudflare-client.list
+          sudo apt-get update
+          sudo apt-get install -y cloudflare-warp
+          sudo warp-svc &
+          sleep 3
+          warp-cli --accept-tos registration new || true
+          warp-cli --accept-tos mode proxy || true
+          warp-cli --accept-tos proxy port 40001 || true
+          warp-cli --accept-tos connect || true
+          sleep 3
+          echo "=== WARP PROXY CHECK ==="
+          curl -x socks5h://127.0.0.1:40001 https://ipinfo.io/json || true
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python deps
+        run: pip install --upgrade pip requests
+
+      - name: Run TreeMC Renew
+        env:
+          TREEMC_TOKEN: ${{ secrets.TREEMC_TOKEN }}
+          TREEMC_COOKIE: ${{ secrets.TREEMC_COOKIE }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          PROXY_SERVER: "socks5://127.0.0.1:40001"
+        run: python renew_treemc.py
