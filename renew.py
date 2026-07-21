@@ -87,20 +87,18 @@ def main() -> None:
     if "/login" in r.url or "/auth" in r.url:
         fail(f"登录态失效，被重定向到 {r.url}。请更新 SESSION_COOKIE。")
 
+    # 反爬/防护盾拦截（数据中心 IP 常被拦，如 GitHub Actions）
+    if "M.E.O.W" in r.text or "I see you hiding" in r.text or r.status_code == 403:
+        fail("被反爬防护页拦截 (M.E.O.W / 403)。该面板会拦截数据中心 IP，"
+             "无法从 GitHub 托管 runner 访问。请在自己的电脑/家庭网络 IP 上运行本脚本。")
+
     m = re.search(r'name="csrf-token"\s+content="([a-f0-9]+)"', r.text)
     if not m:
         title = re.search(r"<title[^>]*>(.*?)</title>", r.text, re.S | re.I)
         print(f"[debug] final_url={r.url} status={r.status_code} len={len(r.text)}")
         print(f"[debug] title={title.group(1).strip() if title else 'N/A'}")
-        print(f"[debug] resp_headers={dict(r.headers)}")
-        print(f"[debug] set_cookies={r.cookies.get_dict()}")
-        if os.environ.get("DUMP_FULL"):
-            print("[debug] FULL_BODY_START")
-            print(r.text)
-            print("[debug] FULL_BODY_END")
-        else:
-            print(f"[debug] head=\n{r.text[:600]}")
-        fail("未在页面中找到 csrf-token，SESSION_COOKIE 可能已失效，请更新。")
+        print(f"[debug] head=\n{r.text[:400]}")
+        fail("未在页面中找到 csrf-token，SESSION_COOKIE 可能已失效，请重新登录复制新的 session cookie。")
     csrf = m.group(1)
     print(f"已获取 CSRF token: {csrf[:12]}...")
 

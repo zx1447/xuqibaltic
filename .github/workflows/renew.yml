@@ -1,5 +1,12 @@
 name: Auto Renew Server
 
+# ⚠️ 重要：该面板有反爬防护(M.E.O.W)，会拦截 GitHub 托管 runner 的数据中心 IP，
+# 返回 403 拦截页而非真实页面。因此本 workflow 必须使用【自托管 runner】
+# （在你自己的电脑上安装 self-hosted runner，用家庭 IP 访问才能通过）。
+# 如果不想装自托管 runner，请改用本机的 run_local.ps1 + 任务计划程序（见 README）。
+#
+# 使用自托管 runner 时，把下面的 runs-on 改成 self-hosted 对应的标签。
+
 on:
   schedule:
     # 每天 UTC 03:00 和 15:00 各跑一次（北京时间 11:00 / 23:00）
@@ -14,6 +21,8 @@ concurrency:
 
 jobs:
   renew:
+    # GitHub 托管 runner (ubuntu-latest) 会被面板反爬拦截，请换成自托管 runner：
+    # runs-on: [self-hosted]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -31,5 +40,4 @@ jobs:
         env:
           SESSION_COOKIE: ${{ secrets.SESSION_COOKIE }}
           SERVER_ID: ${{ secrets.SERVER_ID }}
-          DUMP_FULL: "1"
         run: python renew.py
