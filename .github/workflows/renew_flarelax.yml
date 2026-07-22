@@ -1,19 +1,25 @@
-name: Flarelax AFK Auto Claim
+name: Flarelax AFK Continuous Points
 
 on:
   schedule:
-    # 每 6 小时检查一次；如果站点处于冷却期则正常跳过。
+    # 每 6 小时启动一个新的 AFK 积分窗口。
     - cron: "0 */6 * * *"
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      duration_minutes:
+        description: "本次持续运行分钟数（测试可填 2；默认 350 分钟）"
+        required: false
+        default: "350"
 
 concurrency:
   group: flarelax-afk-claim
   cancel-in-progress: true
 
 jobs:
-  claim:
+  afk:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    # 350 分钟运行窗口 + 启动余量，下一次 6 小时调度时重新启动。
+    timeout-minutes: 355
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -26,11 +32,12 @@ jobs:
       - name: Install dependencies
         run: pip install --upgrade pip requests "requests[socks]"
 
-      - name: Run Flarelax AFK claim
+      - name: Run Flarelax AFK continuous points
         env:
           FLARELAX_DISCORD_TOKEN: ${{ secrets.FLARELAX_DISCORD_TOKEN }}
-          # 可选：如果提供稳定住宅代理，则优先使用；否则自动轮询公开节点。
+          # 可选：提供时优先使用；没有则自动轮询公开节点池。
           FLARELAX_PROXY: ${{ secrets.FLARELAX_PROXY }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          RUN_MINUTES: ${{ github.event.inputs.duration_minutes || '350' }}
         run: python renew_flarelax.py
