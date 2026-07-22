@@ -253,6 +253,8 @@ def login_via_proxy(proxy: str) -> requests.Session:
         raise FlarelaxError("该节点仍被 Flarelax 判定为 VPN/代理")
     if "/login" in callback.url.lower():
         raise FlarelaxError(f"Callback 后仍在登录页：{callback.url}")
+    if "rate limited" in callback.text.lower() or "too many tokens" in callback.text.lower():
+        raise FlarelaxError("Flarelax OAuth 已触发频率限制，停止继续提交登录请求")
     if not site_session.cookies.get("connect.sid"):
         raise FlarelaxError("Callback 未生成 connect.sid")
 
@@ -358,10 +360,17 @@ def main() -> int:
     last_coins = None
     last_earned = None
     last_error: Optional[Exception] = None
+    oauth_attempts = 0
+    max_oauth_attempts = 8
 
     while time.monotonic() < deadline:
         # 没有登录会话时，使用下一个节点重新 OAuth 登录。
+        # 正常情况下整个 6 小时窗口只会进入这里一次；只有会话失效/代理死亡才重登。
         if session is None:
+            if oauth_attempts >= max_oauth_attempts:
+                last_error = FlarelaxError("本次窗口 OAuth 尝试次数已达上限，停止继续登录")
+                log("⛔ 为避免触发 Flarelax 频率限制，本次停止继续提交 OAuth 登录。")
+                break
             if proxy_index >= len(proxies):
                 log("🔄 当前节点已用尽，重新获取一批公开节点...")
                 try:
@@ -373,12 +382,16 @@ def main() -> int:
                     break
             current_proxy = proxies[proxy_index]
             proxy_index += 1
+            oauth_attempts += 1
             try:
                 session = login_via_proxy(current_proxy)
             except Exception as exc:
                 last_error = exc
                 log(f"⚠️ 登录节点失败：{type(exc).__name__}: {exc}")
                 session = None
+                if "rate limit" in str(exc).lower() or "too many tokens" in str(exc).lower():
+                    log("⛔ 已检测到 OAuth 频率限制，不再继续尝试其他节点。")
+                    break
                 continue
 
         try:
