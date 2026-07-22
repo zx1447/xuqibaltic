@@ -11,6 +11,9 @@ on:
         required: false
         default: "350"
 
+permissions:
+  contents: write
+
 concurrency:
   group: flarelax-afk-claim
   cancel-in-progress: true
@@ -21,8 +24,11 @@ jobs:
     # 350 分钟运行窗口 + 启动余量，下一次 6 小时调度时重新启动。
     timeout-minutes: 355
     steps:
-      - name: Checkout
+      - name: Checkout Flarelax branch
         uses: actions/checkout@v4
+        with:
+          ref: flarelax
+          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -32,7 +38,7 @@ jobs:
       - name: Install dependencies
         run: pip install --upgrade pip requests "requests[socks]"
 
-      - name: Run Flarelax AFK continuous points
+      - name: Run Flarelax AFK continuous points and renewal
         env:
           FLARELAX_DISCORD_TOKEN: ${{ secrets.FLARELAX_DISCORD_TOKEN }}
           # 可选：提供时优先使用；没有则自动轮询公开节点池。
@@ -41,3 +47,16 @@ jobs:
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
           RUN_MINUTES: ${{ github.event.inputs.duration_minutes || '350' }}
         run: python renew_flarelax.py
+
+      - name: Save Flarelax renewal state
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add flarelax_state.json || true
+          if git diff --cached --quiet; then
+            echo "No Flarelax renewal state change."
+            exit 0
+          fi
+          git commit -m "Update Flarelax renewal state [skip ci]"
+          git push origin HEAD:flarelax

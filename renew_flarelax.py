@@ -31,7 +31,13 @@ WARNING_URL = f"{BASE_URL}/auth/warning"
 AUTH_URL = f"{BASE_URL}/auth/discord"
 CALLBACK_URL = f"{BASE_URL}/auth/discord/callback"
 CLAIM_URL = f"{BASE_URL}/api/afk/claim"
+SERVER_RENEW_URL = f"{BASE_URL}/api/server/8a4d1879/renew"
 DISCORD_API = "https://discord.com/api/v10"
+
+# AFK 积分达到 50 以上才尝试续期；两次服务器续期间隔至少 48 小时。
+MIN_RENEW_COINS = 50
+RENEW_INTERVAL_SECONDS = 2 * 24 * 60 * 60
+STATE_FILE = "flarelax_state.json"
 
 DISCORD_TOKEN = os.environ.get("FLARELAX_DISCORD_TOKEN", "").strip()
 CUSTOM_PROXY = os.environ.get("FLARELAX_PROXY", "").strip()
@@ -319,6 +325,90 @@ def claim_reached_daily_limit(data: dict) -> bool:
     return "daily limit" in message or "limit reached" in message
 
 
+def load_state() -> dict:
+    try:
+        with open(STATE_FILE, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+            return data if isinstance(data, dict) else {}
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+
+
+def save_state(data: dict) -> None:
+    temporary = f"{STATE_FILE}.tmp"
+    with open(temporary, "w", encoding="utf-8") as handle:
+        json.dump(data, handle, ensure_ascii=False, indent=2)
+    os.replace(temporary, STATE_FILE)
+
+
+def maybe_renew_server(session: requests.Session, coins: object) -> bool:
+    """积分超过 50 且距离上次成功续期至少 48 小时时，POST 服务器续期。"""
+    try:
+        coin_count = int(coins)
+    except (TypeError, ValueError):
+        return False
+
+    if coin_count <= MIN_RENEW_COINS:
+        return False
+
+    state = load_state()
+    last_timestamp = int(state.get("last_server_renew_timestamp", 0) or 0)
+    now_timestamp = int(time.time())
+    if last_timestamp and now_timestamp - last_timestamp < RENEW_INTERVAL_SECONDS:
+        remaining_hours = (RENEW_INTERVAL_SECONDS - (now_timestamp - last_timestamp)) / 3600
+        return False
+
+    log(
+        f"🔔 当前 coins={coin_count} > {MIN_RENEW_COINS}，"
+        "且已超过 2 天续期间隔，发起服务器续期..."
+    )
+    response = session.post(
+        SERVER_RENEW_URL,
+        headers={
+            "Accept": "application/json, text/plain, */*",
+            "Referer": f"{BASE_URL}/dashboard",
+            "X-Requested-With": "XMLHttpRequest",
+        },
+        timeout=25,
+    )
+    log(f"   📡 POST /api/server/8a4d1879/renew -> HTTP {response.status_code}")
+
+    try:
+        data = response.json()
+    except ValueError as exc:
+        raise FlarelaxError(f"服务器续期返回非 JSON：{response.text[:300]}") from exc
+    log("   📦 续期返回：" + json.dumps(data, ensure_ascii=False, separators=(",", ":")))
+
+    if response.status_code in (401, 403):
+        raise FlarelaxError(f"续期会话失效：HTTP {response.status_code}")
+    if response.status_code != 200:
+        raise FlarelaxError(f"服务器续期失败：HTTP {response.status_code}")
+
+    message = str(data.get("message", ""))
+    if data.get("success") is False:
+        # 站点自身的冷却提示不需要每分钟重复 POST；记录检查时间即可。
+        if any(word in message.lower() for word in ("already", "cooldown", "wait", "again", "2 day")):
+            log(f"ℹ️ 服务器仍在续期冷却期：{message}")
+            state.update({
+                "last_server_renew_timestamp": now_timestamp,
+                "last_server_renew_time": now_str(),
+                "last_server_renew_result": message,
+            })
+            save_state(state)
+            return False
+        raise FlarelaxError(f"服务器续期业务失败：{message or '未知原因'}")
+
+    state.update({
+        "last_server_renew_timestamp": now_timestamp,
+        "last_server_renew_time": now_str(),
+        "last_server_renew_coins": coin_count,
+        "last_server_renew_result": message or "success",
+    })
+    save_state(state)
+    log(f"🎉 服务器续期成功，已记录下次续期时间（至少 2 天后）")
+    return True
+
+
 def build_proxy_list() -> list[str]:
     if CUSTOM_PROXY:
         log("🔧 检测到 FLARELAX_PROXY，优先尝试自定义节点")
@@ -359,6 +449,7 @@ def main() -> int:
     claim_count = 0
     last_coins = None
     last_earned = None
+    renew_count = 0
     last_error: Optional[Exception] = None
     oauth_attempts = 0
     max_oauth_attempts = 8
@@ -413,6 +504,15 @@ def main() -> int:
                     f"✅ 第 {claim_count} 次积分领取成功："
                     f"coins={last_coins}, earnedToday={last_earned}/{data.get('dailyLimit', '?')}"
                 )
+                try:
+                    if maybe_renew_server(session, last_coins):
+                        renew_count += 1
+                except FlarelaxError as renew_exc:
+                    # 只有续期接口明确返回会话失效时才换登录；普通业务失败不重登。
+                    if "续期会话失效" in str(renew_exc):
+                        raise
+                    last_error = renew_exc
+                    log(f"⚠️ 服务器续期本次未完成（保持当前登录会话）：{renew_exc}")
         except Exception as exc:
             last_error = exc
             log(f"⚠️ 当前节点请求失败，准备换节点：{type(exc).__name__}: {exc}")
@@ -429,7 +529,8 @@ def main() -> int:
     log("=" * 62)
     log(
         f"🏁 本次 AFK 窗口结束：运行约 {elapsed / 60:.1f} 分钟，"
-        f"成功领取 {claim_count} 次，当前 coins={last_coins}，earnedToday={last_earned}"
+        f"成功领取 {claim_count} 次，服务器续期 {renew_count} 次，"
+        f"当前 coins={last_coins}，earnedToday={last_earned}"
     )
     if last_error:
         log(f"ℹ️ 期间最后一次节点错误（已自动轮换）：{type(last_error).__name__}: {last_error}")
@@ -438,6 +539,7 @@ def main() -> int:
         f"🎉 Flarelax AFK 持续运行窗口结束\n"
         f"🕐 {now_str()}\n"
         f"📊 成功领取：{claim_count} 次\n"
+        f"🔄 服务器续期：{renew_count} 次\n"
         f"💰 coins：{last_coins}\n"
         f"📅 earnedToday：{last_earned}"
     )
