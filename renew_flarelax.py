@@ -424,7 +424,7 @@ def main() -> int:
     log("=" * 62)
     log("🚀 Flarelax AFK 持续积分模式启动")
     log(f"🕐 北京时间：{now_str()}")
-    log("⏱️ 每约 62 秒领取一次，6 小时窗口结束后由 Actions 重新登录")
+    log("⏱️ 每约 62 秒检测一次；若积分不变则自动退避到 90~180 秒")
     log("=" * 62)
     if not DISCORD_TOKEN:
         log("❌ 缺少 FLARELAX_DISCORD_TOKEN GitHub Secret")
@@ -446,7 +446,10 @@ def main() -> int:
     session: Optional[requests.Session] = None
     proxy_index = 0
     current_proxy = ""
+    request_count = 0
     claim_count = 0
+    unchanged_count = 0
+    claim_interval = 62
     last_coins = None
     last_earned = None
     renew_count = 0
@@ -522,32 +525,58 @@ def main() -> int:
 
         try:
             data = claim_once(session)
+            request_count += 1
             if claim_reached_daily_limit(data):
                 log("🎯 今日 AFK 积分已达到站点上限，提前结束本次窗口。")
                 break
 
             if data.get("success") is False:
                 if claim_is_too_fast(data):
-                    log("⏳ 站点提示请求过快，等待下一分钟再试。")
+                    unchanged_count += 1
+                    claim_interval = min(180, claim_interval + 15)
+                    log(
+                        f"⏳ 站点提示请求过快，本次不计积分；"
+                        f"下次等待 {claim_interval} 秒。"
+                    )
                 else:
                     raise FlarelaxError(f"claim 业务失败：{data.get('message', '未知原因')}")
             else:
-                claim_count += 1
-                last_coins = data.get("coins", last_coins)
-                last_earned = data.get("earnedToday", last_earned)
-                log(
-                    f"✅ 第 {claim_count} 次积分领取成功："
-                    f"coins={last_coins}, earnedToday={last_earned}/{data.get('dailyLimit', '?')}"
+                new_coins = data.get("coins", last_coins)
+                new_earned = data.get("earnedToday", last_earned)
+                first_success = last_coins is None and last_earned is None
+                balance_changed = (
+                    first_success
+                    or (new_coins is not None and last_coins is not None and new_coins > last_coins)
+                    or (new_earned is not None and last_earned is not None and new_earned > last_earned)
                 )
-                try:
-                    if maybe_renew_server(session, last_coins):
-                        renew_count += 1
-                except FlarelaxError as renew_exc:
-                    # 只有续期接口明确返回会话失效时才换登录；普通业务失败不重登。
-                    if "续期会话失效" in str(renew_exc):
-                        raise
-                    last_error = renew_exc
-                    log(f"⚠️ 服务器续期本次未完成（保持当前登录会话）：{renew_exc}")
+                last_coins = new_coins
+                last_earned = new_earned
+
+                if balance_changed:
+                    claim_count += 1
+                    unchanged_count = 0
+                    claim_interval = 62
+                    log(
+                        f"✅ 第 {claim_count} 次积分实际到账："
+                        f"coins={last_coins}, earnedToday={last_earned}/{data.get('dailyLimit', '?')}"
+                    )
+                    try:
+                        if maybe_renew_server(session, last_coins):
+                            renew_count += 1
+                    except FlarelaxError as renew_exc:
+                        # 只有续期接口明确返回会话失效时才换登录；普通业务失败不重登。
+                        if "续期会话失效" in str(renew_exc):
+                            raise
+                        last_error = renew_exc
+                        log(f"⚠️ 服务器续期本次未完成（保持当前登录会话）：{renew_exc}")
+                else:
+                    unchanged_count += 1
+                    claim_interval = min(180, 90 + min(unchanged_count, 3) * 15)
+                    log(
+                        f"ℹ️ API 返回 success=true，但 coins/earnedToday 没有变化；"
+                        f"本次不计入积分，连续未变化 {unchanged_count} 次，"
+                        f"下次等待 {claim_interval} 秒。"
+                    )
         except Exception as exc:
             last_error = exc
             log(f"⚠️ 当前节点请求失败，准备换节点：{type(exc).__name__}: {exc}")
@@ -558,13 +587,13 @@ def main() -> int:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             break
-        time.sleep(min(62, remaining))
+        time.sleep(min(claim_interval, remaining))
 
     elapsed = run_minutes * 60 - max(0, deadline - time.monotonic())
     log("=" * 62)
     log(
         f"🏁 本次 AFK 窗口结束：运行约 {elapsed / 60:.1f} 分钟，"
-        f"成功领取 {claim_count} 次，服务器续期 {renew_count} 次，"
+        f"请求 {request_count} 次，实际到账 {claim_count} 次，服务器续期 {renew_count} 次，"
         f"当前 coins={last_coins}，earnedToday={last_earned}"
     )
     if last_error:
@@ -573,7 +602,7 @@ def main() -> int:
     send_telegram(
         f"🎉 Flarelax AFK 持续运行窗口结束\n"
         f"🕐 {now_str()}\n"
-        f"📊 成功领取：{claim_count} 次\n"
+        f"📊 API 请求：{request_count} 次，实际到账：{claim_count} 次\n"
         f"🔄 服务器续期：{renew_count} 次\n"
         f"💰 coins：{last_coins}\n"
         f"📅 earnedToday：{last_earned}"
