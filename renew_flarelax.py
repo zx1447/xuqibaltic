@@ -20,6 +20,7 @@ import os
 import random
 import re
 import sys
+import time
 import urllib.parse
 from typing import Optional
 
@@ -251,8 +252,8 @@ def login_via_proxy(proxy: str) -> requests.Session:
     return site_session
 
 
-def claim_afk(session: requests.Session) -> dict:
-    log("4️⃣ 发起 AFK claim GET 请求...")
+def claim_once(session: requests.Session) -> dict:
+    """复刻 dashboard/afk 页面：大约每 60 秒请求一次 claim。"""
     response = session.get(
         CLAIM_URL,
         headers={
@@ -262,63 +263,150 @@ def claim_afk(session: requests.Session) -> dict:
         },
         timeout=25,
     )
-    log(f"   📡 GET {CLAIM_URL} -> HTTP {response.status_code}")
+    log(f"   📡 GET /api/afk/claim -> HTTP {response.status_code}")
     try:
         data = response.json()
     except ValueError as exc:
         raise FlarelaxError(f"claim 返回非 JSON：{response.text[:300]}") from exc
-    log("   📦 返回：" + json.dumps(data, ensure_ascii=False, separators=(",", ":")))
-    if response.status_code == 401:
-        raise FlarelaxError("会话未生效，claim 返回 Authentication required")
+
+    if response.status_code in (401, 403):
+        raise FlarelaxError(f"登录会话失效：HTTP {response.status_code}")
     if response.status_code != 200:
         raise FlarelaxError(f"claim 请求失败：HTTP {response.status_code}")
-    if data.get("success") is False:
-        message = str(data.get("message", "未知原因"))
-        normalized = message.lower()
-        if any(word in normalized for word in ("already", "cooldown", "wait", "claimed", "later")):
-            log(f"ℹ️ 本次无需领取：{message}")
-            return data
-        raise FlarelaxError(f"claim 业务失败：{message}")
+
+    log("   📦 返回：" + json.dumps(data, ensure_ascii=False, separators=(",", ":")))
     return data
 
 
+def claim_is_too_fast(data: dict) -> bool:
+    message = str(data.get("message", "")).lower()
+    return any(word in message for word in ("too fast", "wait", "cooldown", "already"))
+
+
+def claim_reached_daily_limit(data: dict) -> bool:
+    try:
+        earned = int(data.get("earnedToday", -1))
+        limit = int(data.get("dailyLimit", -1))
+        if limit > 0 and earned >= limit:
+            return True
+    except (TypeError, ValueError):
+        pass
+    message = str(data.get("message", "")).lower()
+    return "daily limit" in message or "limit reached" in message
+
+
+def build_proxy_list() -> list[str]:
+    if CUSTOM_PROXY:
+        log("🔧 检测到 FLARELAX_PROXY，优先尝试自定义节点")
+        return [CUSTOM_PROXY]
+    candidates = fetch_proxy_candidates()
+    accepted = find_accepted_proxies(candidates)
+    if not accepted:
+        raise FlarelaxError("没有找到能通过 Flarelax IP 检查的节点")
+    return accepted
+
+
 def main() -> int:
-    log("=" * 58)
-    log("🚀 Flarelax AFK 自动登录与领取启动")
+    log("=" * 62)
+    log("🚀 Flarelax AFK 持续积分模式启动")
     log(f"🕐 北京时间：{now_str()}")
-    log("=" * 58)
+    log("⏱️ 每约 62 秒领取一次，6 小时窗口结束后由 Actions 重新登录")
+    log("=" * 62)
     if not DISCORD_TOKEN:
         log("❌ 缺少 FLARELAX_DISCORD_TOKEN GitHub Secret")
         return 1
 
     try:
-        if CUSTOM_PROXY:
-            log("🔧 检测到 FLARELAX_PROXY，优先尝试自定义节点")
-            accepted = [CUSTOM_PROXY]
-        else:
-            candidates = fetch_proxy_candidates()
-            accepted = find_accepted_proxies(candidates)
-        if not accepted:
-            raise FlarelaxError("没有找到能通过 Flarelax IP 检查的节点")
+        run_minutes = max(1, int(os.environ.get("RUN_MINUTES", "350")))
+    except ValueError:
+        run_minutes = 350
+    deadline = time.monotonic() + run_minutes * 60
+    log(f"🛠️ 本次持续运行窗口：{run_minutes} 分钟")
 
-        last_error: Optional[Exception] = None
-        for index, proxy in enumerate(accepted, 1):
+    try:
+        proxies = build_proxy_list()
+    except Exception as exc:
+        log(f"❌ 获取代理节点失败：{type(exc).__name__}: {exc}")
+        return 1
+
+    session: Optional[requests.Session] = None
+    proxy_index = 0
+    current_proxy = ""
+    claim_count = 0
+    last_coins = None
+    last_earned = None
+    last_error: Optional[Exception] = None
+
+    while time.monotonic() < deadline:
+        # 没有登录会话时，使用下一个节点重新 OAuth 登录。
+        if session is None:
+            if proxy_index >= len(proxies):
+                log("🔄 当前节点已用尽，重新获取一批公开节点...")
+                try:
+                    proxies = build_proxy_list()
+                    proxy_index = 0
+                except Exception as exc:
+                    last_error = exc
+                    log(f"❌ 重新获取节点失败：{type(exc).__name__}: {exc}")
+                    break
+            current_proxy = proxies[proxy_index]
+            proxy_index += 1
             try:
-                session = login_via_proxy(proxy)
-                result = claim_afk(session)
-                message = result.get("message", "claim 请求成功")
-                log(f"🎉 Flarelax AFK claim 完成：{message}")
-                send_telegram(f"🎉 Flarelax AFK claim 成功\n🕐 {now_str()}\n📊 {message}")
-                return 0
+                session = login_via_proxy(current_proxy)
             except Exception as exc:
                 last_error = exc
-                log(f"   ⚠️ 节点 {index}/{len(accepted)} 失败：{type(exc).__name__}: {exc}")
+                log(f"⚠️ 登录节点失败：{type(exc).__name__}: {exc}")
+                session = None
+                continue
 
-        raise FlarelaxError(f"所有候选节点均失败，最后原因：{last_error}")
-    except Exception as exc:
-        log(f"❌ Flarelax 自动领取失败：{type(exc).__name__}: {exc}")
-        send_telegram(f"❌ Flarelax 自动领取失败\n🕐 {now_str()}\n📊 {exc}")
-        return 1
+        try:
+            data = claim_once(session)
+            if claim_reached_daily_limit(data):
+                log("🎯 今日 AFK 积分已达到站点上限，提前结束本次窗口。")
+                break
+
+            if data.get("success") is False:
+                if claim_is_too_fast(data):
+                    log("⏳ 站点提示请求过快，等待下一分钟再试。")
+                else:
+                    raise FlarelaxError(f"claim 业务失败：{data.get('message', '未知原因')}")
+            else:
+                claim_count += 1
+                last_coins = data.get("coins", last_coins)
+                last_earned = data.get("earnedToday", last_earned)
+                log(
+                    f"✅ 第 {claim_count} 次积分领取成功："
+                    f"coins={last_coins}, earnedToday={last_earned}/{data.get('dailyLimit', '?')}"
+                )
+        except Exception as exc:
+            last_error = exc
+            log(f"⚠️ 当前节点请求失败，准备换节点：{type(exc).__name__}: {exc}")
+            session = None
+            continue
+
+        # 页面脚本用 60 秒心跳；留 2 秒余量，避免触发 too fast。
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        time.sleep(min(62, remaining))
+
+    elapsed = run_minutes * 60 - max(0, deadline - time.monotonic())
+    log("=" * 62)
+    log(
+        f"🏁 本次 AFK 窗口结束：运行约 {elapsed / 60:.1f} 分钟，"
+        f"成功领取 {claim_count} 次，当前 coins={last_coins}，earnedToday={last_earned}"
+    )
+    if last_error:
+        log(f"ℹ️ 期间最后一次节点错误（已自动轮换）：{type(last_error).__name__}: {last_error}")
+    log("🔁 下一次 GitHub Actions 运行会重新登录并继续领取。")
+    send_telegram(
+        f"🎉 Flarelax AFK 持续运行窗口结束\n"
+        f"🕐 {now_str()}\n"
+        f"📊 成功领取：{claim_count} 次\n"
+        f"💰 coins：{last_coins}\n"
+        f"📅 earnedToday：{last_earned}"
+    )
+    return 0
 
 
 if __name__ == "__main__":
