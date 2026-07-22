@@ -255,7 +255,22 @@ def login_via_proxy(proxy: str) -> requests.Session:
         raise FlarelaxError(f"Callback 后仍在登录页：{callback.url}")
     if not site_session.cookies.get("connect.sid"):
         raise FlarelaxError("Callback 未生成 connect.sid")
-    log(f"   ✅ 登录成功，当前 URL：{callback.url}")
+
+    # 仅有 connect.sid 不代表 OAuth 登录成功。有些节点会让 callback 返回 200，
+    # 但实际上没有跳到 dashboard，随后 claim 就会得到 401。必须验证最终页面。
+    if "/dashboard" not in callback.url.lower():
+        preview = re.sub(r"\s+", " ", callback.text[:180]).strip()
+        raise FlarelaxError(
+            f"OAuth Callback 未跳转到 dashboard（当前 URL：{callback.url}，响应：{preview}）"
+        )
+
+    # 预热真正的 AFK 页面，确认同一节点上的会话可用于持续心跳。
+    afk_page = site_session.get(f"{BASE_URL}/dashboard/afk", timeout=25)
+    if afk_page.status_code != 200 or "/login" in afk_page.url.lower():
+        raise FlarelaxError(
+            f"AFK 页面验证失败：HTTP {afk_page.status_code}，当前 URL：{afk_page.url}"
+        )
+    log(f"   ✅ 登录成功，会话已验证，当前 URL：{afk_page.url}")
     return site_session
 
 
