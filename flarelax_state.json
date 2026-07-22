@@ -1,6 +1,6 @@
 {
-  "last_server_renew_timestamp": 0,
-  "last_server_renew_time": null,
-  "last_server_renew_coins": null,
-  "last_server_renew_result": null
+  "last_server_renew_timestamp": 1784716758,
+  "last_server_renew_time": "2026-07-22 18:39:25",
+  "last_server_renew_coins": 98,
+  "last_server_renew_result": "✅ Server renewed for 48 hours! New expiry: 7/28/2026, 2:05:08 PM"
 }
