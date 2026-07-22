@@ -1,0 +1,35 @@
+name: Flarelax AFK Auto Claim
+
+on:
+  schedule:
+    # 每 6 小时检查一次；如果站点处于冷却期则正常跳过。
+    - cron: "0 */6 * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: flarelax-afk-claim
+  cancel-in-progress: true
+
+jobs:
+  claim:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install --upgrade pip requests "requests[socks]"
+
+      - name: Run Flarelax AFK claim
+        env:
+          FLARELAX_DISCORD_TOKEN: ${{ secrets.FLARELAX_DISCORD_TOKEN }}
+          FLARELAX_PROXY: ${{ secrets.FLARELAX_PROXY }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: python renew_flarelax.py
