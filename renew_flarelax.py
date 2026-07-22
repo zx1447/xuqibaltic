@@ -160,19 +160,26 @@ def probe_proxy(proxy: str) -> Optional[str]:
 def find_accepted_proxies(candidates: list[str], max_workers: int = 32) -> list[str]:
     accepted: list[str] = []
     log(f"🔍 并发检测 Flarelax IP 过滤（并发数：{max_workers}）...")
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        jobs = {executor.submit(probe_proxy, p): p for p in candidates}
+    # 找到足够节点后立即取消排队任务，不等待整批失效节点超时。
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
+    jobs = {executor.submit(probe_proxy, p): p for p in candidates}
+    try:
         for job in concurrent.futures.as_completed(jobs):
-            result = job.result()
+            try:
+                result = job.result()
+            except Exception:
+                result = None
             if result:
                 accepted.append(result)
                 log(f"   ✅ 发现可尝试节点：{result}")
                 # 保留一批节点，避免某个公开节点刚好失效。
                 if len(accepted) >= 12:
                     break
-    for job in jobs:
-        if not job.done():
-            job.cancel()
+    finally:
+        for job in jobs:
+            if not job.done():
+                job.cancel()
+        executor.shutdown(wait=False, cancel_futures=True)
     log(f"🎯 IP 检测通过节点：{len(accepted)} 个")
     return accepted
 
