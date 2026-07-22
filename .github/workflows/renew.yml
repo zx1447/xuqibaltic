@@ -2,8 +2,8 @@ name: Auto Renew Server
 
 on:
   schedule:
-    - cron: "0 3 * * *"
-    - cron: "0 15 * * *"
+    # 每 4 天检测一次（UTC 03:00，北京时间 11:00）
+    - cron: "0 3 */4 * *"
   workflow_dispatch: {}
 
 concurrency:
