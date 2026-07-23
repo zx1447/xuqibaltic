@@ -1,6 +1,6 @@
 {
-  "encrypted_refresh_token": null,
-  "session_saved_time": null,
-  "last_renew_time": null,
-  "last_token_source": null
+  "encrypted_refresh_token": "gAAAAABqYXQ8hB52yerXPthZnqs_ijwue6oJAkz_r-LlZ7IbWDb0VFesGD-eiaEF8LUF3tTcqa_cUdnIrEvoNpE_0p02iE4ORQ==",
+  "session_saved_time": "2026-07-23 09:54:04",
+  "last_renew_time": "2026-07-23 09:54:04",
+  "last_token_source": "discord-oauth"
 }
