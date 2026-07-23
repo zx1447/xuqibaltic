@@ -29,21 +29,6 @@ jobs:
           ref: bulknodes
           fetch-depth: 0
 
-      - name: Install and start Cloudflare WARP proxy
-        run: |
-          curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | sudo gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
-          echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ noble main" | sudo tee /etc/apt/sources.list.d/cloudflare-client.list
-          sudo apt-get update
-          sudo apt-get install -y cloudflare-warp
-          sudo warp-svc &
-          sleep 3
-          warp-cli --accept-tos registration new || true
-          warp-cli --accept-tos mode proxy || true
-          warp-cli --accept-tos proxy port 40001 || true
-          warp-cli --accept-tos connect || true
-          sleep 4
-          curl -x socks5h://127.0.0.1:40001 https://ipinfo.io/json || true
-
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
@@ -64,7 +49,7 @@ jobs:
         env:
           BULKNODES_DISCORD_TOKEN: ${{ secrets.BULKNODES_DISCORD_TOKEN }}
           BULKNODES_SESSION_KEY: ${{ secrets.BULKNODES_SESSION_KEY }}
-          BULKNODES_PROXY: "socks5://127.0.0.1:40001"
+          BULKNODES_PROXY: ${{ secrets.BULKNODES_PROXY }}
           FORCE_RUN: ${{ github.event.inputs.force }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
