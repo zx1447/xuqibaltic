@@ -1,0 +1,69 @@
+name: BulkNodes AFK Streak
+
+on:
+  schedule:
+    # AFK streak 默认每天检查一次。
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "是否忽略每日间隔并立即执行（true/false）"
+        required: false
+        default: "false"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: bulknodes-afk-streak
+  cancel-in-progress: true
+
+jobs:
+  afk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout BulkNodes branch
+        uses: actions/checkout@v4
+        with:
+          ref: bulknodes
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install browser and dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget gnupg xvfb
+          wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add - 2>/dev/null || true
+          echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
+          sudo apt-get update
+          sudo apt-get install -y google-chrome-stable || sudo apt-get install -y chromium-browser
+          pip install --upgrade pip seleniumbase requests cryptography
+          python -m seleniumbase install chromedriver
+
+      - name: Run BulkNodes AFK streak
+        env:
+          BULKNODES_DISCORD_TOKEN: ${{ secrets.BULKNODES_DISCORD_TOKEN }}
+          BULKNODES_SESSION_KEY: ${{ secrets.BULKNODES_SESSION_KEY }}
+          BULKNODES_PROXY: ${{ secrets.BULKNODES_PROXY }}
+          FORCE_RUN: ${{ github.event.inputs.force }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: python renew_bulknodes.py
+
+      - name: Save BulkNodes session state
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add bulknodes_state.json || true
+          if git diff --cached --quiet; then
+            echo "No BulkNodes state change."
+            exit 0
+          fi
+          git commit -m "Update BulkNodes session state [skip ci]"
+          git push origin HEAD:bulknodes
