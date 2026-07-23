@@ -15,7 +15,9 @@ import requests
 from cryptography.fernet import Fernet, InvalidToken
 
 BASE_URL = "https://dashboard.bulknodes.xyz"
-AUTH_START_URL = f"{BASE_URL}/api/auth/discord/start?next=/dashboard"
+AFK_URL = f"{BASE_URL}/afk"
+WS_URL = "wss://dashboard.bulknodes.xyz/ws"
+AUTH_START_URL = f"{BASE_URL}/api/auth/discord/start?next=/afk"
 AUTH_ME_URL = f"{BASE_URL}/api/auth/me"
 STREAK_URL = f"{BASE_URL}/api/afk/streak"
 DISCORD_API = "https://discord.com/api/v10"
@@ -98,7 +100,7 @@ def restore_browser_cookies(state: dict, sb) -> bool:
     except (InvalidToken, ValueError, TypeError):
         return False
     try:
-        sb.open(BASE_URL)
+        sb.open(AFK_URL)
         sb.wait_for_ready_state_complete()
         for cookie in cookies:
             item = {k: cookie[k] for k in ("name", "value", "domain", "path", "expiry", "secure", "httpOnly") if k in cookie}
@@ -118,16 +120,50 @@ def restore_browser_cookies(state: dict, sb) -> bool:
         return False
 
 
-def browser_fetch(sb, url: str, method: str = "GET") -> dict:
+def browser_fetch(sb, url: str, method: str = "GET", payload: dict | None = None) -> dict:
     """在已通过 Cloudflare 的浏览器上下文中执行同源 fetch。"""
     script = """
     const done = arguments[arguments.length - 1];
-    fetch(arguments[0], {method: arguments[1], credentials: 'include', headers: {'Accept': 'application/json'}})
+    const body = arguments[2] == null ? undefined : JSON.stringify(arguments[2]);
+    fetch(arguments[0], {method: arguments[1], credentials: 'include', headers: {'Accept': 'application/json', ...(body ? {'Content-Type': 'application/json'} : {})}, body})
       .then(async r => done({status: r.status, url: r.url, text: await r.text()}))
       .catch(e => done({error: String(e)}));
     """
-    result = sb.execute_async_script(script, url, method)
+    result = sb.execute_async_script(script, url, method, payload)
     return result if isinstance(result, dict) else {"error": "invalid browser result"}
+
+
+def start_websocket_heartbeat(sb) -> None:
+    """在真实浏览器页面中保持 BulkNodes WebSocket 心跳。"""
+    script = """
+    (() => {
+      if (window.__bulkNodesWsStop) window.__bulkNodesWsStop();
+      let socket = null;
+      let timer = null;
+      window.__bulkNodesWsState = 'connecting';
+      try {
+        socket = new WebSocket(arguments[0]);
+        socket.onopen = () => {
+          window.__bulkNodesWsState = 'open';
+          timer = setInterval(() => {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+              socket.send(JSON.stringify({type: 'ping'}));
+            }
+          }, 1000);
+        };
+        socket.onclose = () => { window.__bulkNodesWsState = 'closed'; };
+        socket.onerror = () => { window.__bulkNodesWsState = 'error'; };
+        window.__bulkNodesWsStop = () => {
+          if (timer) clearInterval(timer);
+          if (socket && socket.readyState <= 1) socket.close();
+          window.__bulkNodesWsState = 'stopped';
+        };
+      } catch (e) {
+        window.__bulkNodesWsState = 'error:' + String(e);
+      }
+    })();
+    """
+    sb.execute_script(script, WS_URL)
 
 
 def browser_auth_valid(sb) -> bool:
@@ -162,9 +198,9 @@ def extract_points(text: str):
 def pass_cloudflare(sb) -> None:
     # GitHub Runner 的出口会触发 Cloudflare Managed Challenge，给浏览器足够时间完成 JS/Turnstile。
     try:
-        sb.uc_open_with_reconnect(BASE_URL, reconnect_time=8)
+        sb.uc_open_with_reconnect(AFK_URL, reconnect_time=8)
     except Exception:
-        sb.open(BASE_URL)
+        sb.open(AFK_URL)
     sb.wait_for_ready_state_complete()
     for attempt in range(4):
         time.sleep(5)
@@ -288,6 +324,11 @@ def main() -> int:
                 save_browser_cookies(state, sb)
                 save_state(state)
 
+            sb.open(AFK_URL)
+            sb.wait_for_ready_state_complete()
+            start_websocket_heartbeat(sb)
+            log("🔌 BulkNodes WebSocket 心跳已启动")
+
             last_points = None
             last_points_increase = time.monotonic()
             last_page_refresh = 0.0
@@ -298,21 +339,30 @@ def main() -> int:
                     now_mono = time.monotonic()
                     if now_mono - last_page_refresh >= 3600:
                         log("🔄 每小时刷新 BulkNodes 页面")
-                        sb.open(BASE_URL)
+                        sb.open(AFK_URL)
                         sb.wait_for_ready_state_complete()
                         time.sleep(3)
                         if "just a moment" in sb.get_title().lower():
                             pass_cloudflare(sb)
+                        start_websocket_heartbeat(sb)
+                        log("🔌 页面刷新后重新启动 WebSocket 心跳")
                         last_page_refresh = time.monotonic()
 
                     if not browser_auth_valid(sb):
                         log("🔐 BulkNodes 会话失效，重新 Discord OAuth 登录")
                         oauth_login(sb)
                         save_browser_cookies(state, sb)
+                        sb.open(AFK_URL)
+                        sb.wait_for_ready_state_complete()
+                        start_websocket_heartbeat(sb)
                         last_points = None
                         last_points_increase = time.monotonic()
 
-                    result = browser_fetch(sb, STREAK_URL, "POST")
+                    payload = {
+                        "streak": max(12, streak_count + 12),
+                        "lastEarnTime": int(time.time() * 1000),
+                    }
+                    result = browser_fetch(sb, STREAK_URL, "POST", payload)
                     log(f"📡 POST /api/afk/streak -> HTTP {result.get('status')}")
                     log("📦 返回摘要：" + result.get("text", "")[:500])
                     if result.get("status") in (401, 403):
@@ -344,6 +394,10 @@ def main() -> int:
                                 log("🔐 刷新后确认登录已失效，才重新 Discord OAuth 登录")
                                 oauth_login(sb)
                                 save_browser_cookies(state, sb)
+                                sb.open(AFK_URL)
+                                sb.wait_for_ready_state_complete()
+                            start_websocket_heartbeat(sb)
+                            log("🔌 刷新后 WebSocket 心跳已恢复")
                             last_points_increase = time.monotonic()
                     else:
                         log(f"⚠️ AFK 请求返回 HTTP {result.get('status')}，保持浏览器继续运行")
