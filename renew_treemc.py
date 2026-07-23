@@ -14,6 +14,7 @@ import datetime
 import urllib.request
 import urllib.parse
 import requests
+from cryptography.fernet import Fernet, InvalidToken
 
 # ============================================================
 # 环境变量与配置
@@ -22,6 +23,8 @@ import requests
 DISCORD_TOKEN = os.environ.get("TREEMC_TOKEN", "").strip()
 REFRESH_TOKEN = os.environ.get("TREEMC_REFRESH_TOKEN", "").strip()
 COOKIE        = os.environ.get("TREEMC_COOKIE", "").strip()
+SESSION_KEY   = os.environ.get("TREEMC_SESSION_KEY", "").strip()
+STATE_FILE    = "treemc_state.json"
 
 TG_CHAT_ID    = os.environ.get("TG_CHAT_ID", "").strip()
 TG_TOKEN      = os.environ.get("TG_BOT_TOKEN", "").strip()
@@ -78,6 +81,41 @@ def create_session() -> requests.Session:
         })
         log(f"🔗 挂载代理: {PROXY}")
     return session
+
+
+def load_state() -> dict:
+    try:
+        with open(STATE_FILE, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+            return data if isinstance(data, dict) else {}
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+
+
+def save_state(data: dict) -> None:
+    temporary = STATE_FILE + ".tmp"
+    with open(temporary, "w", encoding="utf-8") as handle:
+        json.dump(data, handle, ensure_ascii=False, indent=2)
+    os.replace(temporary, STATE_FILE)
+
+
+def restore_refresh_token(state: dict) -> str:
+    encrypted = state.get("encrypted_refresh_token")
+    if not encrypted or not SESSION_KEY:
+        return ""
+    try:
+        return Fernet(SESSION_KEY.encode()).decrypt(encrypted.encode()).decode()
+    except (InvalidToken, ValueError, TypeError):
+        return ""
+
+
+def save_refresh_token(state: dict, token_data: dict) -> None:
+    if not SESSION_KEY or not token_data.get("refresh_token"):
+        return
+    state["encrypted_refresh_token"] = Fernet(SESSION_KEY.encode()).encrypt(
+        token_data["refresh_token"].encode()
+    ).decode()
+    state["session_saved_time"] = now_str()
 
 
 def supabase_refresh(session: requests.Session, refresh_tok: str) -> dict:
@@ -289,35 +327,68 @@ def main():
     log("=" * 50)
 
     session = create_session()
-
+    state = load_state()
     token_data = None
+    token_source = ""
 
-    # 1. 优先尝试静态直接 Cookie
+    # 1. 静态 Cookie（如配置）
     if COOKIE:
+        token_source = "static-cookie"
         log("🍪 优先使用 TREEMC_COOKIE 直连模式...")
         for item in COOKIE.split(";"):
             if "=" in item:
                 k, v = item.strip().split("=", 1)
                 session.cookies.set(k, v, domain="www.treemc.host", path="/")
 
-    # 2. 若配置了 Refresh Token，先尝试 Refresh Token
-    elif REFRESH_TOKEN:
+    # 2. 优先复用加密保存的 Supabase Refresh Token，不重新 Discord OAuth。
+    elif SESSION_KEY and restore_refresh_token(state):
         try:
+            token_source = "saved-refresh-token"
+            log("♻️ 复用已保存的 Supabase Refresh Token，不重新 Discord 登录...")
+            token_data = supabase_refresh(session, restore_refresh_token(state))
+            build_sb_cookie(session, token_data)
+        except Exception as e:
+            token_data = None
+            log(f"⚠️ 已保存会话失效，准备其他鉴权方式：{e}")
+
+    # 3. 兼容手工配置的 Refresh Token
+    if not COOKIE and token_data is None and REFRESH_TOKEN:
+        try:
+            token_source = "configured-refresh-token"
             token_data = supabase_refresh(session, REFRESH_TOKEN)
             build_sb_cookie(session, token_data)
         except Exception as e:
             log(f"⚠️ Refresh Token 刷新失败: {e}")
 
-    # 3. 兜底尝试 Discord OAuth
+    # 4. 最后才进行 Discord OAuth；成功后把 Refresh Token 加密保存。
     if not COOKIE and token_data is None:
         if not DISCORD_TOKEN:
-            log("❌ 缺少 TREEMC_TOKEN (Discord Token) 或 TREEMC_COOKIE！")
+            log("❌ 缺少 TREEMC_TOKEN (Discord Token) 或可复用会话！")
             sys.exit(1)
+        token_source = "discord-oauth"
         token_data = get_fresh_token_via_discord(session)
         build_sb_cookie(session, token_data)
+        save_refresh_token(state, token_data)
+        save_state(state)
 
     try:
-        do_renew(session)
+        try:
+            do_renew(session)
+        except Exception as renew_error:
+            if token_source in ("saved-refresh-token", "configured-refresh-token") and DISCORD_TOKEN:
+                log(f"⌛ 已保存会话无法续期，重新 Discord OAuth 一次：{renew_error}")
+                token_data = get_fresh_token_via_discord(session)
+                build_sb_cookie(session, token_data)
+                token_source = "discord-oauth-after-expiry"
+                save_refresh_token(state, token_data)
+                do_renew(session)
+            else:
+                raise
+        if token_data and SESSION_KEY:
+            save_refresh_token(state, token_data)
+        state["last_renew_time"] = now_str()
+        state["last_token_source"] = token_source
+        save_state(state)
         time_left = fetch_time_left(session)
         send_tg("✅ 续期成功", time_left)
         sys.exit(0)
