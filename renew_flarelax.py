@@ -25,6 +25,7 @@ import urllib.parse
 from typing import Optional
 
 import requests
+from cryptography.fernet import Fernet, InvalidToken
 
 BASE_URL = "https://free-dash.flarelax.com"
 WARNING_URL = f"{BASE_URL}/auth/warning"
@@ -41,6 +42,8 @@ STATE_FILE = "flarelax_state.json"
 
 DISCORD_TOKEN = os.environ.get("FLARELAX_DISCORD_TOKEN", "").strip()
 CUSTOM_PROXY = os.environ.get("FLARELAX_PROXY", "").strip()
+SESSION_KEY = os.environ.get("FLARELAX_SESSION_KEY", "").strip()
+SESSION_COOKIE_NAME = "connect.sid"
 TG_TOKEN = os.environ.get("TG_BOT_TOKEN", "").strip()
 TG_CHAT_ID = os.environ.get("TG_CHAT_ID", "").strip()
 
@@ -341,6 +344,46 @@ def save_state(data: dict) -> None:
     os.replace(temporary, STATE_FILE)
 
 
+def save_encrypted_session(state: dict, session: requests.Session, proxy: str) -> None:
+    if not SESSION_KEY:
+        log("⚠️ 未配置 FLARELAX_SESSION_KEY，本次不持久化 Flarelax 会话")
+        return
+    cookie_value = next(
+        (cookie.value for cookie in session.cookies if cookie.name == SESSION_COOKIE_NAME),
+        None,
+    )
+    if not cookie_value:
+        log("⚠️ 当前 Flarelax 会话没有 connect.sid，无法持久化")
+        return
+    try:
+        state["encrypted_session_cookie"] = Fernet(SESSION_KEY.encode()).encrypt(cookie_value.encode()).decode()
+        state["last_session_proxy"] = proxy
+        state["session_saved_time"] = now_str()
+    except Exception as exc:
+        log(f"⚠️ 加密 Flarelax 会话失败：{type(exc).__name__}")
+
+
+def restore_encrypted_session(state: dict, proxy: str) -> requests.Session | None:
+    encrypted = state.get("encrypted_session_cookie")
+    if not encrypted or not SESSION_KEY:
+        return None
+    try:
+        cookie_value = Fernet(SESSION_KEY.encode()).decrypt(encrypted.encode()).decode()
+    except (InvalidToken, ValueError, TypeError):
+        return None
+    session = make_session(proxy)
+    session.cookies.set(SESSION_COOKIE_NAME, cookie_value, domain="free-dash.flarelax.com", path="/")
+    return session
+
+
+def session_is_valid(session: requests.Session) -> bool:
+    try:
+        page = session.get(f"{BASE_URL}/dashboard/afk", allow_redirects=True, timeout=20)
+        return page.status_code == 200 and "/login" not in page.url.lower() and "authentication required" not in page.text.lower()
+    except requests.RequestException:
+        return False
+
+
 def maybe_renew_server(session: requests.Session, coins: object) -> bool:
     """积分超过 50 且距离上次成功续期至少 48 小时时，POST 服务器续期。"""
     try:
@@ -426,10 +469,6 @@ def main() -> int:
     log(f"🕐 北京时间：{now_str()}")
     log("⏱️ 每约 62 秒检测一次；若积分不变则自动退避到 90~180 秒")
     log("=" * 62)
-    if not DISCORD_TOKEN:
-        log("❌ 缺少 FLARELAX_DISCORD_TOKEN GitHub Secret")
-        return 1
-
     try:
         run_minutes = max(1, int(os.environ.get("RUN_MINUTES", "350")))
     except ValueError:
@@ -437,15 +476,31 @@ def main() -> int:
     deadline = time.monotonic() + run_minutes * 60
     log(f"🛠️ 本次持续运行窗口：{run_minutes} 分钟")
 
-    try:
-        proxies = build_proxy_list()
-    except Exception as exc:
-        log(f"❌ 获取代理节点失败：{type(exc).__name__}: {exc}")
-        return 1
-
+    state = load_state()
     session: Optional[requests.Session] = None
     proxy_index = 0
     current_proxy = ""
+    proxies: list[str] = []
+
+    # 优先尝试上次成功节点和加密会话；代理/IP 与会话都有效时完全跳过代理扫描和 OAuth。
+    saved_proxy = state.get("last_session_proxy", "")
+    if saved_proxy:
+        log(f"♻️ 尝试复用上次 Flarelax 登录节点：{saved_proxy}")
+        restored = restore_encrypted_session(state, saved_proxy)
+        if restored is not None and session_is_valid(restored):
+            session = restored
+            current_proxy = saved_proxy
+            proxies = [saved_proxy]
+            log("✅ Flarelax Discord 会话仍有效，本次不重新 OAuth 登录")
+        else:
+            log("⌛ 上次 Flarelax 会话或节点已失效，准备按需重新登录")
+
+    if session is None:
+        try:
+            proxies = build_proxy_list()
+        except Exception as exc:
+            log(f"❌ 获取代理节点失败：{type(exc).__name__}: {exc}")
+            return 1
     request_count = 0
     claim_count = 0
     unchanged_count = 0
@@ -498,6 +553,8 @@ def main() -> int:
             oauth_attempts += 1
             try:
                 session = login_via_proxy(current_proxy)
+                save_encrypted_session(state, session, current_proxy)
+                save_state(state)
             except Exception as exc:
                 last_error = exc
                 log(f"⚠️ 登录节点失败：{type(exc).__name__}: {exc}")
