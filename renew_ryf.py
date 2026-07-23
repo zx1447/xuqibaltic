@@ -12,6 +12,7 @@ import time
 import urllib.parse
 
 import requests
+from cryptography.fernet import Fernet, InvalidToken
 
 API_BASE = "https://edge-public.ryf.sh"
 APP_BASE = "https://app.ryf.sh"
@@ -26,6 +27,8 @@ RENEW_INTERVAL_SECONDS = 20 * 60 * 60
 
 DISCORD_TOKEN = os.environ.get("RYF_DISCORD_TOKEN", "").strip()
 PROXY = os.environ.get("RYF_PROXY", "").strip()
+SESSION_KEY = os.environ.get("RYF_SESSION_KEY", "").strip()
+SESSION_COOKIE_NAME = "ryf_session"
 FORCE_RUN = os.environ.get("FORCE_RUN", "false").lower() == "true"
 TG_TOKEN = os.environ.get("TG_BOT_TOKEN", "").strip()
 TG_CHAT_ID = os.environ.get("TG_CHAT_ID", "").strip()
@@ -91,6 +94,45 @@ def save_state(data: dict) -> None:
     with open(temporary, "w", encoding="utf-8") as handle:
         json.dump(data, handle, ensure_ascii=False, indent=2)
     os.replace(temporary, STATE_FILE)
+
+
+def save_encrypted_session(state: dict, session: requests.Session) -> None:
+    if not SESSION_KEY:
+        log("⚠️ 未配置 RYF_SESSION_KEY，本次不持久化登录会话")
+        return
+    cookie_value = next(
+        (cookie.value for cookie in session.cookies if cookie.name == SESSION_COOKIE_NAME),
+        None,
+    )
+    if not cookie_value:
+        log("⚠️ 当前 RYF 会话没有 session Cookie，无法持久化")
+        return
+    try:
+        state["encrypted_session_cookie"] = Fernet(SESSION_KEY.encode()).encrypt(cookie_value.encode()).decode()
+        state["session_saved_time"] = now_str()
+    except Exception as exc:
+        log(f"⚠️ 加密 RYF 登录会话失败：{type(exc).__name__}")
+
+
+def restore_encrypted_session(state: dict) -> requests.Session | None:
+    encrypted = state.get("encrypted_session_cookie")
+    if not encrypted or not SESSION_KEY:
+        return None
+    try:
+        cookie_value = Fernet(SESSION_KEY.encode()).decrypt(encrypted.encode()).decode()
+    except (InvalidToken, ValueError, TypeError):
+        return None
+    session = make_session(PROXY)
+    session.cookies.set(SESSION_COOKIE_NAME, cookie_value, domain="edge-public.ryf.sh", path="/")
+    return session
+
+
+def session_is_valid(session: requests.Session) -> bool:
+    try:
+        response = session.get(ME_URL, timeout=20)
+        return response.status_code == 200 and response.json().get("authenticated", True) is not False
+    except (requests.RequestException, ValueError):
+        return False
 
 
 def should_run() -> bool:
@@ -225,21 +267,38 @@ def main() -> int:
     log(f"🕐 北京时间：{now_str()}")
     log(f"🖥 服务器 ID：{SERVER_ID}")
     log("=" * 56)
-    if not DISCORD_TOKEN:
-        log("❌ 缺少 RYF_DISCORD_TOKEN GitHub Secret")
-        return 1
+    state = load_state()
     if not should_run():
         return 0
 
     try:
-        session = oauth_login()
-        result = renew_server(session)
-        state = load_state()
+        session = restore_encrypted_session(state)
+        if session is not None and session_is_valid(session):
+            log("♻️ Discord 登录会话仍有效，复用现有会话，不重新 OAuth 登录")
+        else:
+            if session is not None:
+                log("⌛ 已保存的 Discord 会话已失效，重新进行 OAuth 登录")
+            if not DISCORD_TOKEN:
+                raise RyfError("缺少 RYF_DISCORD_TOKEN，且没有可复用的有效会话")
+            session = oauth_login()
+            save_encrypted_session(state, session)
+
+        try:
+            result = renew_server(session)
+        except RyfError as renew_exc:
+            if "登录会话失效" not in str(renew_exc) or not DISCORD_TOKEN:
+                raise
+            log("🔐 续期确认会话失效，重新 OAuth 登录一次后重试")
+            session = oauth_login()
+            save_encrypted_session(state, session)
+            result = renew_server(session)
+
         state.update({
             "last_renew_timestamp": int(time.time()),
             "last_renew_time": now_str(),
             "last_result": result.get("message", "success"),
         })
+        save_encrypted_session(state, session)
         save_state(state)
         message = result.get("message", "RYF 续期请求成功")
         log(f"🎉 RYF 服务器续期成功：{message}")
