@@ -17,9 +17,11 @@ from cryptography.fernet import Fernet, InvalidToken
 BASE_URL = "https://dashboard.bulknodes.xyz"
 AFK_URL = f"{BASE_URL}/afk"
 WS_URL = "wss://dashboard.bulknodes.xyz/ws"
-AUTH_START_URL = f"{BASE_URL}/api/auth/discord/start?next=/afk"
 AUTH_ME_URL = f"{BASE_URL}/api/auth/me"
 STREAK_URL = f"{BASE_URL}/api/afk/streak"
+# F12 确认的 Discord OAuth 应用与回调地址。
+DISCORD_CLIENT_ID = "1524335669189672960"
+DISCORD_REDIRECT_URI = f"{BASE_URL}/callback"
 DISCORD_API = "https://discord.com/api/v10"
 STATE_FILE = "bulknodes_state.json"
 VISIT_INTERVAL_SECONDS = 20 * 60 * 60
@@ -225,24 +227,31 @@ def pass_cloudflare(sb) -> None:
 def oauth_login(sb):
     if not DISCORD_TOKEN:
         raise BulkNodesError("缺少 BULKNODES_DISCORD_TOKEN")
-    log("🔗 打开 BulkNodes Discord OAuth 入口...")
-    sb.open(AUTH_START_URL)
-    sb.wait_for_ready_state_complete()
-    time.sleep(2)
-    oauth_location = sb.get_current_url()
-    if "discord.com" not in oauth_location:
-        raise BulkNodesError(f"未跳转到 Discord OAuth：{oauth_location}")
-    query = urllib.parse.parse_qs(urllib.parse.urlparse(oauth_location).query)
-    client_id = query.get("client_id", [""])[0]
-    redirect_uri = query.get("redirect_uri", [""])[0]
-    state = query.get("state", [""])[0]
-    scope = query.get("scope", ["identify email"])[0]
-    if not client_id or not redirect_uri or not state:
-        raise BulkNodesError("BulkNodes OAuth 参数不完整")
+    log("🔗 使用 F12 确认的 BulkNodes Discord OAuth 入口...")
+    client_id = DISCORD_CLIENT_ID
+    redirect_uri = DISCORD_REDIRECT_URI
+    scope = "identify email"
+    oauth_location = "https://discord.com/api/v9/oauth2/authorize?" + urllib.parse.urlencode({
+        "client_id": client_id,
+        "response_type": "code",
+        "redirect_uri": redirect_uri,
+        "scope": scope,
+    })
 
     # Discord Token 直连 Discord，不经过可选代理。
     discord = requests.Session()
     discord.trust_env = False
+    # F12 还显示 Discord application disclosures 请求，先按浏览器顺序调用。
+    try:
+        discord.post(
+            f"{DISCORD_API}/applications/{client_id}/disclosures",
+            headers={"Authorization": DISCORD_TOKEN, "Origin": "https://discord.com", "Referer": oauth_location},
+            json={},
+            timeout=15,
+        )
+    except requests.RequestException:
+        pass
+
     response = discord.post(
         f"{DISCORD_API}/oauth2/authorize",
         params={
@@ -250,7 +259,6 @@ def oauth_login(sb):
             "redirect_uri": redirect_uri,
             "response_type": "code",
             "scope": scope,
-            "state": state,
         },
         json={
             "permissions": "0",
