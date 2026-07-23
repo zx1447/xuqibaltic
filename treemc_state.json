@@ -1,6 +1,6 @@
 {
-  "encrypted_refresh_token": "gAAAAABqYXQ8hB52yerXPthZnqs_ijwue6oJAkz_r-LlZ7IbWDb0VFesGD-eiaEF8LUF3tTcqa_cUdnIrEvoNpE_0p02iE4ORQ==",
-  "session_saved_time": "2026-07-23 09:54:04",
-  "last_renew_time": "2026-07-23 09:54:04",
-  "last_token_source": "discord-oauth"
+  "encrypted_refresh_token": "gAAAAABqYbOx5cZ-90fcuQB4gQxV-93huZsNYNuzt4N7k1-gaIbPy8hCRWsRIEkG2khSFUFEU0j3bFF1dXvirHuwrQn4TrKEHw==",
+  "session_saved_time": "2026-07-23 14:24:49",
+  "last_renew_time": "2026-07-23 14:24:49",
+  "last_token_source": "saved-refresh-token"
 }
