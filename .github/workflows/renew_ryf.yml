@@ -1,0 +1,61 @@
+name: RYF Server Auto Renew
+
+on:
+  schedule:
+    # 每 2 天检查一次
+    - cron: "0 2 */2 * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "是否忽略 2 天间隔并立即续期（true/false）"
+        required: false
+        default: "false"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ryf-auto-renew
+  cancel-in-progress: true
+
+jobs:
+  renew:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout RYF branch
+        uses: actions/checkout@v4
+        with:
+          ref: ryf
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install --upgrade pip requests "requests[socks]"
+
+      - name: Run RYF renew
+        env:
+          # 与之前 Discord OAuth 自动化共用同一个 Discord Token Secret。
+          RYF_DISCORD_TOKEN: ${{ secrets.FLARELAX_DISCORD_TOKEN }}
+          RYF_PROXY: ${{ secrets.RYF_PROXY }}
+          FORCE_RUN: ${{ github.event.inputs.force }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: python renew_ryf.py
+
+      - name: Save RYF renewal state
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add ryf_state.json || true
+          if git diff --cached --quiet; then
+            echo "No RYF state change."
+            exit 0
+          fi
+          git commit -m "Update RYF renewal state [skip ci]"
+          git push origin HEAD:ryf
