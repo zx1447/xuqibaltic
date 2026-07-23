@@ -253,7 +253,7 @@ def main() -> int:
     log("=" * 62)
     log("🚀 BulkNodes AFK streak 真实浏览器持续模式启动")
     log(f"🕐 北京时间：{now_str()}")
-    log("⏱️ 保持浏览器在线：每分钟发送 AFK heartbeat，每 1 小时刷新页面；4 分钟无积分增加则重新登录")
+    log("⏱️ 保持浏览器在线：每分钟发送 AFK heartbeat，每 1 小时刷新页面；4 分钟无积分增加先刷新网页")
     log("=" * 62)
 
     try:
@@ -333,10 +333,17 @@ def main() -> int:
                         state["last_streak_timestamp"] = int(time.time())
                         state["last_streak_time"] = now_str()
                         if time.monotonic() - last_points_increase >= RELOGIN_AFTER_NO_INCREASE_SECONDS:
-                            log("⛔ 连续 4 分钟积分没有增加，判定会话/AFK 已失效，重新 Discord OAuth 登录")
-                            oauth_login(sb)
-                            save_browser_cookies(state, sb)
-                            last_points = None
+                            log("🔄 连续 4 分钟积分没有增加，先刷新网页以重新触发 Cloudflare/AFK 状态检查")
+                            sb.refresh()
+                            sb.wait_for_ready_state_complete()
+                            time.sleep(5)
+                            if "just a moment" in sb.get_title().lower():
+                                pass_cloudflare(sb)
+                            # 刷新后只验证会话；只有确认 401/未登录时才进行 OAuth。
+                            if not browser_auth_valid(sb):
+                                log("🔐 刷新后确认登录已失效，才重新 Discord OAuth 登录")
+                                oauth_login(sb)
+                                save_browser_cookies(state, sb)
                             last_points_increase = time.monotonic()
                     else:
                         log(f"⚠️ AFK 请求返回 HTTP {result.get('status')}，保持浏览器继续运行")
