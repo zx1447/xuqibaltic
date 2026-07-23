@@ -35,12 +35,13 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install --upgrade pip requests "requests[socks]"
+        run: pip install --upgrade pip requests "requests[socks]" cryptography
 
       - name: Run LunoraHost renew
         env:
           # 复用已验证的 Discord Token Secret，不把 Token 写进仓库。
           LUNORAHOST_DISCORD_TOKEN: ${{ secrets.FLARELAX_DISCORD_TOKEN }}
+          LUNORAHOST_SESSION_KEY: ${{ secrets.LUNORAHOST_SESSION_KEY }}
           LUNORAHOST_PROXY: ${{ secrets.LUNORAHOST_PROXY }}
           FORCE_RUN: ${{ github.event.inputs.force }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
