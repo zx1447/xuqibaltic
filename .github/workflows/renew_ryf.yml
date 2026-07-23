@@ -2,12 +2,12 @@ name: RYF Server Auto Renew
 
 on:
   schedule:
-    # 每 2 天检查一次
-    - cron: "0 2 */2 * *"
+    # 每 12 小时检查一次；状态文件确保不会在 20 小时内重复续期。
+    - cron: "0 */12 * * *"
   workflow_dispatch:
     inputs:
       force:
-        description: "是否忽略 2 天间隔并立即续期（true/false）"
+        description: "是否忽略最短 20 小时间隔并立即续期（true/false）"
         required: false
         default: "false"
 
