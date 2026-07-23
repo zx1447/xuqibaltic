@@ -1,0 +1,61 @@
+name: LunoraHost Server Auto Renew
+
+on:
+  schedule:
+    # 每 4 天检查一次；状态文件避免重复续期。
+    - cron: "0 1 */4 * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "是否忽略 4 天间隔并立即续期（true/false）"
+        required: false
+        default: "false"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: lunorahost-auto-renew
+  cancel-in-progress: true
+
+jobs:
+  renew:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout LunoraHost branch
+        uses: actions/checkout@v4
+        with:
+          ref: lunorahost
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install --upgrade pip requests "requests[socks]"
+
+      - name: Run LunoraHost renew
+        env:
+          # 复用已验证的 Discord Token Secret，不把 Token 写进仓库。
+          LUNORAHOST_DISCORD_TOKEN: ${{ secrets.FLARELAX_DISCORD_TOKEN }}
+          LUNORAHOST_PROXY: ${{ secrets.LUNORAHOST_PROXY }}
+          FORCE_RUN: ${{ github.event.inputs.force }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: python renew_lunorahost.py
+
+      - name: Save LunoraHost renewal state
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add lunorahost_state.json || true
+          if git diff --cached --quiet; then
+            echo "No LunoraHost state change."
+            exit 0
+          fi
+          git commit -m "Update LunoraHost renewal state [skip ci]"
+          git push origin HEAD:lunorahost
