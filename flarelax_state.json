@@ -2,5 +2,8 @@
   "last_server_renew_timestamp": 1784716758,
   "last_server_renew_time": "2026-07-22 18:39:25",
   "last_server_renew_coins": 98,
-  "last_server_renew_result": "✅ Server renewed for 48 hours! New expiry: 7/28/2026, 2:05:08 PM"
+  "last_server_renew_result": "✅ Server renewed for 48 hours! New expiry: 7/28/2026, 2:05:08 PM",
+  "encrypted_session_cookie": "gAAAAABqYbp0ca87aktlXpE8rw3RmcIIhr1gDbtJksjXpYPvbptjiEctvJpHO0evX1UD6heHdg3GFWRuvKOdmncs-BB84rT9Mqb4deBjSMEL-PYrazx_r35pxbi-glYALbT2-bWPkGyldjFUIQ3lI6qRSmas4q8bEIbHmVldHt6-GWUu4bBg4WTGlZCKAUz0Azv_fpbUOlrE",
+  "last_session_proxy": "socks5h://84.42.111.17:1080",
+  "session_saved_time": "2026-07-23 14:53:40"
 }
