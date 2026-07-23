@@ -21,6 +21,8 @@ STREAK_URL = f"{BASE_URL}/api/afk/streak"
 DISCORD_API = "https://discord.com/api/v10"
 STATE_FILE = "bulknodes_state.json"
 VISIT_INTERVAL_SECONDS = 20 * 60 * 60
+HEARTBEAT_INTERVAL_SECONDS = 60
+RELOGIN_AFTER_NO_INCREASE_SECONDS = 4 * 60
 
 DISCORD_TOKEN = os.environ.get("BULKNODES_DISCORD_TOKEN", "").strip()
 SESSION_KEY = os.environ.get("BULKNODES_SESSION_KEY", "").strip()
@@ -138,6 +140,25 @@ def browser_auth_valid(sb) -> bool:
         return False
 
 
+def extract_points(text: str):
+    """从 streak 返回中提取积分/余额字段，兼容不同 API 字段命名。"""
+    try:
+        data = json.loads(text)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    keys = (
+        "coins", "points", "afkPoints", "totalPoints", "balance",
+        "totalCoins", "earnedToday", "earned", "score", "total",
+    )
+    for key in keys:
+        value = data.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return float(value)
+    return None
+
+
 def pass_cloudflare(sb) -> None:
     # GitHub Runner 的出口会触发 Cloudflare Managed Challenge，给浏览器足够时间完成 JS/Turnstile。
     try:
@@ -232,7 +253,7 @@ def main() -> int:
     log("=" * 62)
     log("🚀 BulkNodes AFK streak 真实浏览器持续模式启动")
     log(f"🕐 北京时间：{now_str()}")
-    log("⏱️ 保持浏览器在线，每 1 小时刷新并发送一次 AFK streak")
+    log("⏱️ 保持浏览器在线：每分钟发送 AFK heartbeat，每 1 小时刷新页面；4 分钟无积分增加则重新登录")
     log("=" * 62)
 
     try:
@@ -267,44 +288,68 @@ def main() -> int:
                 save_browser_cookies(state, sb)
                 save_state(state)
 
+            last_points = None
+            last_points_increase = time.monotonic()
+            last_page_refresh = 0.0
+
             while time.monotonic() < deadline:
-                # 保持真实浏览器页面活跃；若登录失效则只在这里重新登录一次。
+                # 每分钟发送一次 heartbeat；页面每小时完整刷新一次。
                 try:
-                    sb.open(BASE_URL)
-                    sb.wait_for_ready_state_complete()
-                    time.sleep(3)
-                    if "just a moment" in sb.get_title().lower():
-                        pass_cloudflare(sb)
+                    now_mono = time.monotonic()
+                    if now_mono - last_page_refresh >= 3600:
+                        log("🔄 每小时刷新 BulkNodes 页面")
+                        sb.open(BASE_URL)
+                        sb.wait_for_ready_state_complete()
+                        time.sleep(3)
+                        if "just a moment" in sb.get_title().lower():
+                            pass_cloudflare(sb)
+                        last_page_refresh = time.monotonic()
+
                     if not browser_auth_valid(sb):
                         log("🔐 BulkNodes 会话失效，重新 Discord OAuth 登录")
                         oauth_login(sb)
                         save_browser_cookies(state, sb)
+                        last_points = None
+                        last_points_increase = time.monotonic()
 
                     result = browser_fetch(sb, STREAK_URL, "POST")
                     log(f"📡 POST /api/afk/streak -> HTTP {result.get('status')}")
                     log("📦 返回摘要：" + result.get("text", "")[:500])
                     if result.get("status") in (401, 403):
                         log("⚠️ AFK 接口返回未登录，下一轮重新登录")
-                        # 下一轮 browser_auth_valid 会触发 OAuth，避免在同一轮重复提交。
                         state["session_invalid_at"] = now_str()
                     elif result.get("status") == 200:
                         streak_count += 1
+                        points = extract_points(result.get("text", ""))
+                        if points is not None and (last_points is None or points > last_points):
+                            log(f"✅ 积分增加：{last_points} -> {points}")
+                            last_points = points
+                            last_points_increase = time.monotonic()
+                        elif points is None:
+                            log("⚠️ 本次返回没有识别到积分字段，继续观察 4 分钟")
+                        else:
+                            log(f"ℹ️ 本次积分未增加：仍为 {points}")
+
                         state["last_streak_timestamp"] = int(time.time())
                         state["last_streak_time"] = now_str()
-                        log(f"✅ 第 {streak_count} 次 AFK streak 请求成功")
+                        if time.monotonic() - last_points_increase >= RELOGIN_AFTER_NO_INCREASE_SECONDS:
+                            log("⛔ 连续 4 分钟积分没有增加，判定会话/AFK 已失效，重新 Discord OAuth 登录")
+                            oauth_login(sb)
+                            save_browser_cookies(state, sb)
+                            last_points = None
+                            last_points_increase = time.monotonic()
                     else:
-                        log(f"⚠️ AFK 请求返回 HTTP {result.get('status')}，保留浏览器继续运行")
+                        log(f"⚠️ AFK 请求返回 HTTP {result.get('status')}，保持浏览器继续运行")
 
                     save_browser_cookies(state, sb)
                     save_state(state)
                 except Exception as exc:
-                    log(f"⚠️ 本轮浏览器访问异常，保持浏览器并等待下轮：{type(exc).__name__}: {exc}")
+                    log(f"⚠️ 本轮浏览器访问异常，保持浏览器并等待下一分钟：{type(exc).__name__}: {exc}")
 
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     break
-                log("⏳ 浏览器保持开启，约 1 小时后刷新下一轮")
-                time.sleep(min(3600, remaining))
+                time.sleep(min(HEARTBEAT_INTERVAL_SECONDS, remaining))
 
             log(f"🏁 BulkNodes 浏览器窗口结束，共成功请求 AFK streak {streak_count} 次")
             send_telegram(f"✅ BulkNodes AFK 窗口结束\n🕐 {now_str()}\n📊 成功请求：{streak_count} 次")
