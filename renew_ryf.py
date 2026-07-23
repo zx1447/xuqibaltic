@@ -21,7 +21,8 @@ SERVER_ID = "eef132a6-1001-40e5-9abc-281df97f3eed"
 RENEW_URL = f"{API_BASE}/servers/{SERVER_ID}/renew"
 DISCORD_API = "https://discord.com/api/v10"
 STATE_FILE = "ryf_state.json"
-RENEW_INTERVAL_SECONDS = 2 * 24 * 60 * 60
+# 实测 RYF 接口返回 renew_by 约为 24 小时后；每 12 小时检查，最短间隔留 20 小时余量。
+RENEW_INTERVAL_SECONDS = 20 * 60 * 60
 
 DISCORD_TOKEN = os.environ.get("RYF_DISCORD_TOKEN", "").strip()
 PROXY = os.environ.get("RYF_PROXY", "").strip()
@@ -100,7 +101,7 @@ def should_run() -> bool:
     last = int(state.get("last_renew_timestamp", 0) or 0)
     if last and time.time() - last < RENEW_INTERVAL_SECONDS:
         remaining = (RENEW_INTERVAL_SECONDS - (time.time() - last)) / 3600
-        log(f"⏳ 距离上次 RYF 续期不足 2 天，跳过本次（约剩 {remaining:.1f} 小时）")
+        log(f"⏳ 距离上次 RYF 续期不足最短间隔 20 小时，跳过本次（约剩 {remaining:.1f} 小时）")
         return False
     return True
 
@@ -116,10 +117,11 @@ def oauth_login() -> requests.Session:
     client_id = query.get("client_id", [""])[0]
     redirect_uri = query.get("redirect_uri", [""])[0]
     scope = query.get("scope", [""])[0]
-    if not client_id or not redirect_uri:
-        raise RyfError("RYF OAuth 地址缺少必要参数")
+    state = query.get("state", [""])[0]
+    if not client_id or not redirect_uri or not state:
+        raise RyfError("RYF OAuth 地址缺少 client_id、redirect_uri 或 state")
 
-    log(f"🔐 获取 RYF OAuth 参数：client_id={client_id}，scope={scope}")
+    log(f"🔐 获取 RYF OAuth 参数：client_id={client_id}，scope={scope}，state 已获取")
     # Discord Token 只直连 Discord，不通过可选代理。
     discord = make_session()
     auth = discord.post(
@@ -129,6 +131,7 @@ def oauth_login() -> requests.Session:
             "redirect_uri": redirect_uri,
             "scope": scope,
             "client_id": client_id,
+            "state": state,
         },
         json={
             "permissions": "0",
@@ -205,7 +208,12 @@ def renew_server(session: requests.Session) -> dict:
         data = response.json()
     except ValueError as exc:
         raise RyfError(f"RYF 续期返回非 JSON：{response.text[:300]}") from exc
-    log("📦 续期返回：" + json.dumps(data, ensure_ascii=False, separators=(",", ":")))
+    safe_summary = {
+        key: data.get(key)
+        for key in ("message", "id", "name", "status", "renew_by")
+        if key in data
+    }
+    log("📦 续期返回摘要：" + json.dumps(safe_summary, ensure_ascii=False, separators=(",", ":")))
     if data.get("success") is False:
         raise RyfError(f"RYF 续期业务失败：{data.get('message', '未知原因')}")
     return data
@@ -230,7 +238,7 @@ def main() -> int:
         state.update({
             "last_renew_timestamp": int(time.time()),
             "last_renew_time": now_str(),
-            "last_result": result,
+            "last_result": result.get("message", "success"),
         })
         save_state(state)
         message = result.get("message", "RYF 续期请求成功")
