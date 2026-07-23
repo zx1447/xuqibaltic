@@ -17,7 +17,10 @@ from cryptography.fernet import Fernet, InvalidToken
 BASE_URL = "https://host.coredlabgame.cloud"
 AUTH_START_URL = f"{BASE_URL}/api/auth/discord/start?next=/dashboard/server"
 ME_URL = f"{BASE_URL}/api/auth/me"
-VISIT_URL = f"{BASE_URL}/dashboard/server?server=minecraft&tab=console"
+VISIT_URLS = [
+    f"{BASE_URL}/dashboard",
+    f"{BASE_URL}/dashboard/server?server=minecraft&tab=console",
+]
 DISCORD_API = "https://discord.com/api/v10"
 STATE_FILE = "coredlab_state.json"
 VISIT_INTERVAL_SECONDS = 20 * 60 * 60
@@ -203,13 +206,14 @@ def oauth_login() -> requests.Session:
 
 
 def visit_dashboard(session: requests.Session) -> None:
-    log(f"🌐 访问 CoredLab 控制台：{VISIT_URL}")
-    response = session.get(VISIT_URL, allow_redirects=False, timeout=25)
-    if response.status_code in (301, 302, 303, 307, 308) and "discord/start" in response.headers.get("Location", ""):
-        raise CoredLabError("CoredLab 登录会话已失效")
-    if response.status_code != 200:
-        raise CoredLabError(f"CoredLab 控制台访问失败：HTTP {response.status_code}")
-    log("✅ CoredLab 控制台访问成功")
+    for url in VISIT_URLS:
+        log(f"🌐 访问 CoredLab 页面：{url}")
+        response = session.get(url, allow_redirects=False, timeout=25)
+        if response.status_code in (301, 302, 303, 307, 308) and "discord/start" in response.headers.get("Location", ""):
+            raise CoredLabError("CoredLab 登录会话已失效")
+        if response.status_code != 200:
+            raise CoredLabError(f"CoredLab 页面访问失败：HTTP {response.status_code}，URL={url}")
+        log(f"✅ 页面访问成功：{url}")
 
 
 def main() -> int:
