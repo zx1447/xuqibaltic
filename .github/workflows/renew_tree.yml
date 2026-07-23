@@ -6,6 +6,9 @@ on:
     - cron: "0 */4 * * *"
   workflow_dispatch: {}
 
+permissions:
+  contents: write
+
 concurrency:
   group: treemc-auto-renew
   cancel-in-progress: true
@@ -15,8 +18,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Checkout
+      - name: Checkout TreeMC branch
         uses: actions/checkout@v4
+        with:
+          ref: tree
+          fetch-depth: 0
 
       - name: Install and Start Cloudflare WARP (SOCKS5 Proxy)
         run: |
@@ -50,7 +56,7 @@ jobs:
           google-chrome --version || chromium-browser --version
 
       - name: Install Python deps
-        run: pip install --upgrade pip seleniumbase requests "requests[socks]"
+        run: pip install --upgrade pip seleniumbase requests "requests[socks]" cryptography
 
       - name: Install chromedriver
         run: python -m seleniumbase install chromedriver
@@ -58,9 +64,23 @@ jobs:
       - name: Run TreeMC Renew
         env:
           TREEMC_TOKEN: ${{ secrets.TREEMC_TOKEN }}
+          TREEMC_SESSION_KEY: ${{ secrets.TREEMC_SESSION_KEY }}
           TREEMC_COOKIE: ${{ secrets.TREEMC_COOKIE }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
           PROXY_SERVER: "socks5://127.0.0.1:40001"
           HEADLESS: "true"
         run: python renew_treemc.py
+
+      - name: Save TreeMC session state
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add treemc_state.json || true
+          if git diff --cached --quiet; then
+            echo "No TreeMC session state change."
+            exit 0
+          fi
+          git commit -m "Update TreeMC session state [skip ci]"
+          git push origin HEAD:tree
