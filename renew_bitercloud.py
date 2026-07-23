@@ -14,6 +14,7 @@ import datetime
 import urllib.parse
 import concurrent.futures
 import requests
+from cryptography.fernet import Fernet, InvalidToken
 
 USER = os.environ.get("BITERCLOUD_USER", "").strip()
 PASS = os.environ.get("BITERCLOUD_PASS", "").strip()
@@ -23,6 +24,8 @@ SERVER_ID = (os.environ.get("BITERCLOUD_SERVER_ID") or "Oh1vni0cCpJ1GHW-4qZMj").
 TG_CHAT_ID = os.environ.get("TG_CHAT_ID", "").strip()
 TG_TOKEN = os.environ.get("TG_BOT_TOKEN", "").strip()
 CUSTOM_PROXY = os.environ.get("CUSTOM_PROXY", "").strip()
+SESSION_KEY = os.environ.get("BITERCLOUD_SESSION_KEY", "").strip()
+STATE_FILE = "bitercloud_state.json"
 
 BASE_URL = "https://dashboard.bitercloud.lat"
 LOGIN_URL = f"{BASE_URL}/login"
@@ -77,6 +80,79 @@ def get_public_proxies():
     return list(dict.fromkeys(proxies))
 
 
+def load_state():
+    try:
+        import json
+        with open(STATE_FILE, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+            return data if isinstance(data, dict) else {}
+    except (FileNotFoundError, ValueError, OSError):
+        return {}
+
+
+def save_state(data):
+    import json
+    temporary = STATE_FILE + ".tmp"
+    with open(temporary, "w", encoding="utf-8") as handle:
+        json.dump(data, handle, ensure_ascii=False, indent=2)
+    os.replace(temporary, STATE_FILE)
+
+
+def save_encrypted_cookies(state, cookies, proxy):
+    if not SESSION_KEY or not cookies:
+        return
+    import json
+    payload = json.dumps(cookies, separators=(",", ":"))
+    state["encrypted_cookies"] = Fernet(SESSION_KEY.encode()).encrypt(payload.encode()).decode()
+    state["last_proxy"] = proxy
+    state["session_saved_time"] = now_str()
+
+
+def restore_cookies(state, proxy):
+    encrypted = state.get("encrypted_cookies")
+    if not encrypted or not SESSION_KEY:
+        return None
+    import json
+    try:
+        cookies = json.loads(Fernet(SESSION_KEY.encode()).decrypt(encrypted.encode()).decode())
+    except (InvalidToken, ValueError, TypeError):
+        return None
+    s = requests.Session()
+    s.proxies = {"http": proxy, "https": proxy}
+    s.headers.update({
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "Origin": BASE_URL,
+        "Referer": SERVERS_URL,
+    })
+    for name, value in cookies.items():
+        s.cookies.set(name, value, domain="dashboard.bitercloud.lat", path="/")
+    xsrf = s.cookies.get("XSRF-TOKEN")
+    if xsrf:
+        s.headers["X-XSRF-TOKEN"] = urllib.parse.unquote(xsrf)
+    return s
+
+
+def renew_with_saved_session(state):
+    proxy = state.get("last_proxy", "")
+    if not proxy:
+        return False
+    s = restore_cookies(state, proxy)
+    if s is None:
+        return False
+    try:
+        response = s.patch(RENEW_URL, allow_redirects=False, timeout=15)
+        log(f"♻️ 复用 Bitercloud 登录会话：PATCH 续期 -> HTTP {response.status_code}")
+        if response.status_code in (200, 302):
+            log("✅ Bitercloud 会话仍有效，本次不重新账号密码登录")
+            state["last_renew_time"] = now_str()
+            save_state(state)
+            return True
+    except Exception as exc:
+        log(f"⚠️ 已保存 Bitercloud 会话不可用：{type(exc).__name__}")
+    return False
+
+
 def try_login_and_renew_via_proxy(proxy):
     s = requests.Session()
     s.proxies = {"http": proxy, "https": proxy}
@@ -116,7 +192,7 @@ def try_login_and_renew_via_proxy(proxy):
 
         # 3. 发起 PATCH 续期请求 (Laravel 成功后会返回 302 Redirect 并带 Alert 提示)
         r_renew = s.patch(RENEW_URL, allow_redirects=False, timeout=8)
-        return (proxy, r_post.status_code, r_renew.status_code, r_renew.headers.get("Location"), r_renew.text)
+        return (proxy, r_post.status_code, r_renew.status_code, r_renew.headers.get("Location"), r_renew.text, s.cookies.get_dict())
     except Exception:
         return None
 
@@ -127,8 +203,14 @@ def main():
     log(f"🕐 北京时间: {now_str()}")
     log(f"🖥 服务器 ID: {SERVER_ID}")
     log("=" * 50)
+    state = load_state()
 
-    # 1. 优先使用 COOKIE 模式 (如有)
+    # 1. 优先复用上次加密保存的登录会话；失效才进入账号密码流程。
+    if renew_with_saved_session(state):
+        send_tg(f"✅ Bitercloud 复用会话续期成功（{SERVER_ID}）")
+        sys.exit(0)
+
+    # 2. 兼容手工 COOKIE 模式（如有）
     if COOKIE:
         log("🍪 方式 1: 使用已配置的 BITERCLOUD_COOKIE 发起续期...")
         s = requests.Session()
@@ -176,7 +258,7 @@ def main():
             results = executor.map(try_login_and_renew_via_proxy, proxy_list)
             for res in results:
                 if res:
-                    proxy, post_status, renew_status, loc_hdr, body = res
+                    proxy, post_status, renew_status, loc_hdr, body, cookies = res
                     log(f"🎉 成功匹配可用代理节点 [{proxy}]！")
                     log(f"   步骤 1: 账号密码 POST 登录 -> 状态码 {post_status}")
                     log(f"   步骤 2: 发起 PATCH 续期请求 ({RENEW_URL}) -> 状态码 {renew_status}")
@@ -189,6 +271,9 @@ def main():
                                f"🔄 续期状态: {renew_status} -> {loc_hdr or 'Success'}")
                         log(msg)
                         send_tg(msg)
+                        save_encrypted_cookies(state, cookies, proxy)
+                        state["last_renew_time"] = now_str()
+                        save_state(state)
                         success = True
                         break
 
