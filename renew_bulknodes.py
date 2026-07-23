@@ -198,30 +198,20 @@ def extract_points(text: str):
 
 
 def pass_cloudflare(sb) -> None:
-    # GitHub Runner 的出口会触发 Cloudflare Managed Challenge，给浏览器足够时间完成 JS/Turnstile。
+    # BulkNodes 的盾牌是自动 Managed Challenge：不点击，只给 JS 约 6 秒自动跳转。
+    log("🛡️ 等待 Cloudflare 自动验证 6 秒（不点击盾牌）...")
     try:
-        sb.uc_open_with_reconnect(AFK_URL, reconnect_time=8)
+        sb.uc_open_with_reconnect(AFK_URL, reconnect_time=6)
     except Exception:
         sb.open(AFK_URL)
     sb.wait_for_ready_state_complete()
-    for attempt in range(4):
-        time.sleep(5)
-        title = sb.get_title().lower()
-        source = sb.get_page_source().lower()
-        if "just a moment" not in title and "challenge-platform" not in source and "cf-chl-" not in source:
-            return
-        log(f"🛡️ Cloudflare Challenge 处理中（第 {attempt + 1}/4 次）...")
-        try:
-            sb.uc_gui_click_captcha()
-        except Exception as exc:
-            log(f"⚠️ Cloudflare Challenge 点击提示：{type(exc).__name__}")
-        time.sleep(8)
-        try:
-            sb.refresh()
-            sb.wait_for_ready_state_complete()
-        except Exception:
-            pass
-    raise BulkNodesError("Cloudflare Challenge 未通过")
+    time.sleep(6)
+    title = sb.get_title().lower()
+    source = sb.get_page_source().lower()
+    if "just a moment" not in title and "challenge-platform" not in source and "cf-chl-" not in source:
+        log("✅ Cloudflare 已自动跳转")
+        return
+    raise BulkNodesError("Cloudflare 6 秒自动验证后仍未跳转")
 
 
 def oauth_login(sb):
