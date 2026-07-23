@@ -139,19 +139,30 @@ def browser_auth_valid(sb) -> bool:
 
 
 def pass_cloudflare(sb) -> None:
-    sb.open(BASE_URL)
+    # GitHub Runner 的出口会触发 Cloudflare Managed Challenge，给浏览器足够时间完成 JS/Turnstile。
+    try:
+        sb.uc_open_with_reconnect(BASE_URL, reconnect_time=8)
+    except Exception:
+        sb.open(BASE_URL)
     sb.wait_for_ready_state_complete()
-    time.sleep(3)
-    title = sb.get_title().lower()
-    if "just a moment" in title or "challenge" in sb.get_page_source().lower():
-        log("🛡️ 检测到 Cloudflare Challenge，尝试浏览器通过...")
+    for attempt in range(4):
+        time.sleep(5)
+        title = sb.get_title().lower()
+        source = sb.get_page_source().lower()
+        if "just a moment" not in title and "challenge-platform" not in source and "cf-chl-" not in source:
+            return
+        log(f"🛡️ Cloudflare Challenge 处理中（第 {attempt + 1}/4 次）...")
         try:
             sb.uc_gui_click_captcha()
         except Exception as exc:
             log(f"⚠️ Cloudflare Challenge 点击提示：{type(exc).__name__}")
         time.sleep(8)
-    if "just a moment" in sb.get_title().lower():
-        raise BulkNodesError("Cloudflare Challenge 未通过")
+        try:
+            sb.refresh()
+            sb.wait_for_ready_state_complete()
+        except Exception:
+            pass
+    raise BulkNodesError("Cloudflare Challenge 未通过")
 
 
 def oauth_login(sb):
