@@ -229,17 +229,18 @@ def oauth_login(sb):
 
 
 def main() -> int:
-    log("=" * 58)
-    log("🚀 BulkNodes AFK streak 自动访问启动")
+    log("=" * 62)
+    log("🚀 BulkNodes AFK streak 真实浏览器持续模式启动")
     log(f"🕐 北京时间：{now_str()}")
-    log("=" * 58)
-    state = load_state()
-    if not FORCE_RUN:
-        last = int(state.get("last_streak_timestamp", 0) or 0)
-        if last and time.time() - last < VISIT_INTERVAL_SECONDS:
-            remaining = (VISIT_INTERVAL_SECONDS - (time.time() - last)) / 3600
-            log(f"⏳ 距离上次 BulkNodes AFK 不足 20 小时，跳过（约剩 {remaining:.1f} 小时）")
-            return 0
+    log("⏱️ 保持浏览器在线，每 1 小时刷新并发送一次 AFK streak")
+    log("=" * 62)
+
+    try:
+        run_minutes = max(1, int(os.environ.get("RUN_MINUTES", "350")))
+    except ValueError:
+        run_minutes = 350
+    deadline = time.monotonic() + run_minutes * 60
+    log(f"🛠️ 本次浏览器窗口：{run_minutes} 分钟")
 
     try:
         from seleniumbase import SB
@@ -247,9 +248,12 @@ def main() -> int:
         log("❌ 缺少 seleniumbase 依赖")
         return 1
 
+    state = load_state()
     sb_kwargs = {"uc": True, "xvfb": True, "headless": False}
     if PROXY:
         sb_kwargs["proxy"] = PROXY
+    streak_count = 0
+
     try:
         with SB(**sb_kwargs) as sb:
             pass_cloudflare(sb)
@@ -261,21 +265,49 @@ def main() -> int:
                     log("⌛ 已保存 BulkNodes 会话失效，重新 Discord OAuth 登录")
                 oauth_login(sb)
                 save_browser_cookies(state, sb)
+                save_state(state)
 
-            result = browser_fetch(sb, STREAK_URL, "POST")
-            log(f"📡 POST /api/afk/streak -> HTTP {result.get('status')}")
-            log("📦 返回摘要：" + result.get("text", "")[:500])
-            if result.get("status") in (401, 403):
-                raise BulkNodesError("BulkNodes AFK 会话失效")
-            if result.get("status") != 200:
-                raise BulkNodesError(f"BulkNodes AFK 请求失败：HTTP {result.get('status')}")
+            while time.monotonic() < deadline:
+                # 保持真实浏览器页面活跃；若登录失效则只在这里重新登录一次。
+                try:
+                    sb.open(BASE_URL)
+                    sb.wait_for_ready_state_complete()
+                    time.sleep(3)
+                    if "just a moment" in sb.get_title().lower():
+                        pass_cloudflare(sb)
+                    if not browser_auth_valid(sb):
+                        log("🔐 BulkNodes 会话失效，重新 Discord OAuth 登录")
+                        oauth_login(sb)
+                        save_browser_cookies(state, sb)
 
-            state["last_streak_timestamp"] = int(time.time())
-            state["last_streak_time"] = now_str()
-            save_browser_cookies(state, sb)
-            save_state(state)
-            log("🎉 BulkNodes AFK streak 完成")
-            send_telegram(f"✅ BulkNodes AFK streak 成功\n🕐 {now_str()}")
+                    result = browser_fetch(sb, STREAK_URL, "POST")
+                    log(f"📡 POST /api/afk/streak -> HTTP {result.get('status')}")
+                    log("📦 返回摘要：" + result.get("text", "")[:500])
+                    if result.get("status") in (401, 403):
+                        log("⚠️ AFK 接口返回未登录，下一轮重新登录")
+                        # 下一轮 browser_auth_valid 会触发 OAuth，避免在同一轮重复提交。
+                        state["session_invalid_at"] = now_str()
+                    elif result.get("status") == 200:
+                        streak_count += 1
+                        state["last_streak_timestamp"] = int(time.time())
+                        state["last_streak_time"] = now_str()
+                        log(f"✅ 第 {streak_count} 次 AFK streak 请求成功")
+                    else:
+                        log(f"⚠️ AFK 请求返回 HTTP {result.get('status')}，保留浏览器继续运行")
+
+                    save_browser_cookies(state, sb)
+                    save_state(state)
+                except Exception as exc:
+                    log(f"⚠️ 本轮浏览器访问异常，保持浏览器并等待下轮：{type(exc).__name__}: {exc}")
+
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                log("⏳ 浏览器保持开启，约 1 小时后刷新下一轮")
+                time.sleep(min(3600, remaining))
+
+            log(f"🏁 BulkNodes 浏览器窗口结束，共成功请求 AFK streak {streak_count} 次")
+            send_telegram(f"✅ BulkNodes AFK 窗口结束\n🕐 {now_str()}\n📊 成功请求：{streak_count} 次")
             return 0
     except Exception as exc:
         log(f"❌ BulkNodes 自动访问失败：{type(exc).__name__}: {exc}")

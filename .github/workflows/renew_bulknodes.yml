@@ -1,15 +1,15 @@
-name: BulkNodes AFK Streak
+name: BulkNodes AFK Streak Continuous Browser
 
 on:
   schedule:
-    # AFK streak 默认每天检查一次。
-    - cron: "0 3 * * *"
+    # 每 6 小时启动一个新的真实浏览器窗口；窗口内每小时刷新一次。
+    - cron: "0 */6 * * *"
   workflow_dispatch:
     inputs:
-      force:
-        description: "是否忽略每日间隔并立即执行（true/false）"
+      duration_minutes:
+        description: "浏览器持续运行分钟数（测试可填 2；默认 350）"
         required: false
-        default: "false"
+        default: "350"
 
 permissions:
   contents: write
@@ -21,7 +21,7 @@ concurrency:
 jobs:
   afk:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 355
     steps:
       - name: Checkout BulkNodes branch
         uses: actions/checkout@v4
@@ -45,12 +45,12 @@ jobs:
           pip install --upgrade pip seleniumbase requests cryptography
           python -m seleniumbase install chromedriver
 
-      - name: Run BulkNodes AFK streak
+      - name: Run BulkNodes continuous AFK browser
         env:
           BULKNODES_DISCORD_TOKEN: ${{ secrets.BULKNODES_DISCORD_TOKEN }}
           BULKNODES_SESSION_KEY: ${{ secrets.BULKNODES_SESSION_KEY }}
           BULKNODES_PROXY: ${{ secrets.BULKNODES_PROXY }}
-          FORCE_RUN: ${{ github.event.inputs.force }}
+          RUN_MINUTES: ${{ github.event.inputs.duration_minutes || '350' }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
         run: python renew_bulknodes.py
