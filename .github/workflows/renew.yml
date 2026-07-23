@@ -6,6 +6,9 @@ on:
     - cron: "0 3 */4 * *"
   workflow_dispatch: {}
 
+permissions:
+  contents: write
+
 concurrency:
   group: auto-renew
   cancel-in-progress: true
@@ -15,8 +18,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Checkout
+      - name: Checkout main branch
         uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
 
       - name: Install and Start Cloudflare WARP SOCKS5 Proxy
         run: |
@@ -50,7 +56,7 @@ jobs:
           google-chrome --version || chromium-browser --version
 
       - name: Install Python deps
-        run: pip install --upgrade pip seleniumbase
+        run: pip install --upgrade pip seleniumbase cryptography
 
       - name: Install chromedriver
         run: python -m seleniumbase install chromedriver
@@ -60,9 +66,23 @@ jobs:
           BLINKY_USER: ${{ secrets.BLINKY_USER }}
           BLINKY_PASS: ${{ secrets.BLINKY_PASS }}
           SESSION_COOKIE: ${{ secrets.SESSION_COOKIE }}
+          BLINKY_SESSION_KEY: ${{ secrets.BLINKY_SESSION_KEY }}
           SERVER_ID: ${{ secrets.SERVER_ID }}
           PROXY_SERVER: "socks5://127.0.0.1:40001"
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
           HEADLESS: "true"
         run: python renew.py
+
+      - name: Save BalticHost session state
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add baltichost_state.json || true
+          if git diff --cached --quiet; then
+            echo "No BalticHost session state change."
+            exit 0
+          fi
+          git commit -m "Update BalticHost session state [skip ci]"
+          git push origin HEAD:main

@@ -25,11 +25,14 @@ BalticHost / hostingmitherz 面板自动续期脚本（SeleniumBase 真浏览器
   TG_CHAT_ID      可选，Telegram 接收 chat id
   HEADLESS        可选，"true" 用无头（CI 默认）；"false" 用有头（本地调试）
 """
+import json
 import os
 import re
 import sys
 import time
 from datetime import datetime
+
+from cryptography.fernet import Fernet, InvalidToken
 
 try:
     from seleniumbase import SB
@@ -39,6 +42,8 @@ except ImportError:
 EMAIL = os.environ.get("BLINKY_USER", "").strip()
 PASSWORD = os.environ.get("BLINKY_PASS", "").strip()
 SESSION_COOKIE = os.environ.get("SESSION_COOKIE", "").strip()
+SESSION_KEY = os.environ.get("BLINKY_SESSION_KEY", "").strip()
+STATE_FILE = "baltichost_state.json"
 SERVER_ID = (os.environ.get("SERVER_ID") or "04dd7781").strip()
 BASE = os.environ.get("BASE_URL", "https://blinky.baltichost.de").rstrip("/")
 TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN", "").strip()
@@ -84,12 +89,76 @@ def mask(s):
     return s[:2] + "****" + s[-1]
 
 
+def load_state():
+    try:
+        with open(STATE_FILE, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+            return data if isinstance(data, dict) else {}
+    except (FileNotFoundError, ValueError, OSError):
+        return {}
+
+
+def save_state(data):
+    temporary = STATE_FILE + ".tmp"
+    with open(temporary, "w", encoding="utf-8") as handle:
+        json.dump(data, handle, ensure_ascii=False, indent=2)
+    os.replace(temporary, STATE_FILE)
+
+
+def restore_browser_session(sb, state):
+    encrypted = state.get("encrypted_cookies")
+    if not encrypted or not SESSION_KEY:
+        return False
+    try:
+        cookies = json.loads(Fernet(SESSION_KEY.encode()).decrypt(encrypted.encode()).decode())
+    except (InvalidToken, ValueError, TypeError):
+        return False
+    try:
+        sb.open(BASE)
+        sb.wait_for_ready_state_complete()
+        for cookie in cookies:
+            item = {key: cookie[key] for key in ("name", "value", "path", "domain", "expiry", "secure", "httpOnly") if key in cookie}
+            # Selenium 不接受 None 或小数 expiry。
+            if item.get("expiry") is None:
+                item.pop("expiry", None)
+            if isinstance(item.get("expiry"), float):
+                item["expiry"] = int(item["expiry"])
+            try:
+                sb.add_cookie(item)
+            except Exception:
+                # 某些浏览器版本不接受 domain/expiry 附加字段，退回最小 Cookie。
+                sb.add_cookie({"name": cookie["name"], "value": cookie["value"], "path": "/"})
+        sb.refresh()
+        sb.wait_for_ready_state_complete()
+        time.sleep(2)
+        current = sb.get_current_url().lower()
+        return "login" not in current and "meow" not in sb.get_title().lower()
+    except Exception as exc:
+        print(f"⚠️ 恢复 BalticHost 会话失败：{type(exc).__name__}")
+        return False
+
+
+def save_browser_session(sb, state):
+    if not SESSION_KEY:
+        print("⚠️ 未配置 BLINKY_SESSION_KEY，本次不持久化 BalticHost 会话")
+        return
+    try:
+        cookies = sb.get_cookies()
+        encrypted = Fernet(SESSION_KEY.encode()).encrypt(
+            json.dumps(cookies, ensure_ascii=False, separators=(",", ":")).encode()
+        ).decode()
+        state["encrypted_cookies"] = encrypted
+        state["session_saved_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    except Exception as exc:
+        print(f"⚠️ 保存 BalticHost 会话失败：{type(exc).__name__}")
+
+
 def main():
     print("#" * 28)
     print("   BalticHost 自动登录续期")
     print("#" * 28)
-    if not EMAIL and not PASSWORD and not SESSION_COOKIE:
-        print("❌ 请设置 BLINKY_USER/BLINKY_PASS 或 SESSION_COOKIE")
+    if not EMAIL and not PASSWORD and not SESSION_COOKIE and not SESSION_KEY:
+        print("❌ 请设置 BLINKY_USER/BLINKY_PASS、SESSION_COOKIE 或 BLINKY_SESSION_KEY")
         sys.exit(1)
 
     print(f"🌐 启动浏览器 (headless={HEADLESS})")
@@ -99,81 +168,89 @@ def main():
         sb_kwargs["proxy"] = proxy
         print(f"🔗 使用代理: {proxy}")
     with SB(**sb_kwargs) as sb:
-        # 1) 进入登录页（这一步会先过反爬盾）
-        print(f"🌐 打开登录页 {LOGIN_URL}")
-        sb.open(LOGIN_URL)
-        sb.wait_for_ready_state_complete()
-        time.sleep(2)
+        state = load_state()
+        restored = restore_browser_session(sb, state)
+        if restored:
+            print("♻️ BalticHost 登录会话仍有效，复用现有浏览器会话，不重新登录")
+        else:
+            if not EMAIL and not PASSWORD and not SESSION_COOKIE:
+                print("❌ 没有可用账号密码或静态 Cookie，且持久化会话已失效")
+                sys.exit(1)
+            # 1) 进入登录页（这一步会先过反爬盾）
+            print(f"🌐 打开登录页 {LOGIN_URL}")
+            sb.open(LOGIN_URL)
+            sb.wait_for_ready_state_complete()
+            time.sleep(2)
 
-        # 处理可能的 Turnstile / 反爬挑战
-        try:
-            sb.uc_gui_click_captcha()
-            print("✅ 已尝试处理反爬/验证码挑战")
-        except Exception as e:
-            print(f"⚠️ 反爬挑战处理跳过: {e}")
+            # 处理可能的 Turnstile / 反爬挑战
+            try:
+                sb.uc_gui_click_captcha()
+                print("✅ 已尝试处理反爬/验证码挑战")
+            except Exception as e:
+                print(f"⚠️ 反爬挑战处理跳过: {e}")
 
-        title = sb.get_title()
-        if "M.E.O.W" in title or "hiding" in title:
-            msg = "❌ 仍被反爬盾拦截（M.E.O.W）。该面板对数据中心 IP 极严，" \
-                  "请改用家庭网络 IP（自托管 runner / 本机定时任务）。"
-            print(msg)
-            send_tg(TG_BOT_TOKEN, TG_CHAT_ID, msg)
-            sys.exit(1)
-
-        # 2) 登录
-        if EMAIL and PASSWORD:
-            print(f"🔑 填写账号 {mask(EMAIL)} ...")
-            sb.type("#username", EMAIL, timeout=10)
-            sb.type("#password", PASSWORD, timeout=10)
-            print("🖱️ 点击登录按钮 #loginBtn")
-            sb.uc_click("#loginBtn")
-            # 等待跳离登录页（成功会跳到 / 或 next）
-            logged_in = False
-            err_text = ""
-            for _ in range(20):
-                cur = sb.get_current_url()
-                if "login" not in cur:
-                    logged_in = True
-                    break
-                # 读取页面内错误提示
-                try:
-                    err = sb.get_text("#errorMessage", timeout=0.5)
-                    if err and err.strip():
-                        err_text = err.strip()
-                except Exception:
-                    pass
-                time.sleep(1)
-            if not logged_in:
-                # 抓取更多诊断信息
-                title = sb.get_title()
-                page = sb.get_page_source()
-                if "M.E.O.W" in title or "hiding" in title:
-                    diag = "被反爬盾拦截（M.E.O.W）"
-                elif "ip_banned" in page or "Access denied from your location" in page:
-                    diag = "IP 在登录端点被封 (ip_banned)"
-                elif "invalid_credentials" in page or "Invalid username or password" in page:
-                    diag = "账号或密码错误 (invalid_credentials)"
-                else:
-                    diag = f"登录失败，页面错误提示: {err_text or '无'}"
-                msg = f"❌ 登录后未跳转：{diag}"
+            title = sb.get_title()
+            if "M.E.O.W" in title or "hiding" in title:
+                msg = "❌ 仍被反爬盾拦截（M.E.O.W）。该面板对数据中心 IP 极严，" \
+                      "请改用家庭网络 IP（自托管 runner / 本机定时任务）。"
                 print(msg)
                 send_tg(TG_BOT_TOKEN, TG_CHAT_ID, msg)
                 sys.exit(1)
-            print(f"✅ 登录成功，当前 URL: {sb.get_current_url()}")
-        elif SESSION_COOKIE:
-            print("🍪 注入静态 session cookie")
-            cookie_val = SESSION_COOKIE.split("session=", 1)[-1].split(";")[0].strip()
-            sb.open(BASE)  # 先到域名下放 cookie
-            sb.add_cookie({
-                "name": "session",
-                "value": cookie_val,
-                "domain": BASE.split("//", 1)[-1],
-                "path": "/",
-            })
-            sb.refresh()
-        else:
-            print("❌ 未配置任何鉴权方式")
-            sys.exit(1)
+
+            # 2) 登录
+            if EMAIL and PASSWORD:
+                print(f"🔑 填写账号 {mask(EMAIL)} ...")
+                sb.type("#username", EMAIL, timeout=10)
+                sb.type("#password", PASSWORD, timeout=10)
+                print("🖱️ 点击登录按钮 #loginBtn")
+                sb.uc_click("#loginBtn")
+                # 等待跳离登录页（成功会跳到 / 或 next）
+                logged_in = False
+                err_text = ""
+                for _ in range(20):
+                    cur = sb.get_current_url()
+                    if "login" not in cur:
+                        logged_in = True
+                        break
+                    # 读取页面内错误提示
+                    try:
+                        err = sb.get_text("#errorMessage", timeout=0.5)
+                        if err and err.strip():
+                            err_text = err.strip()
+                    except Exception:
+                        pass
+                    time.sleep(1)
+                if not logged_in:
+                    # 抓取更多诊断信息
+                    title = sb.get_title()
+                    page = sb.get_page_source()
+                    if "M.E.O.W" in title or "hiding" in title:
+                        diag = "被反爬盾拦截（M.E.O.W）"
+                    elif "ip_banned" in page or "Access denied from your location" in page:
+                        diag = "IP 在登录端点被封 (ip_banned)"
+                    elif "invalid_credentials" in page or "Invalid username or password" in page:
+                        diag = "账号或密码错误 (invalid_credentials)"
+                    else:
+                        diag = f"登录失败，页面错误提示: {err_text or '无'}"
+                    msg = f"❌ 登录后未跳转：{diag}"
+                    print(msg)
+                    send_tg(TG_BOT_TOKEN, TG_CHAT_ID, msg)
+                    sys.exit(1)
+                print(f"✅ 登录成功，当前 URL: {sb.get_current_url()}")
+            elif SESSION_COOKIE:
+                print("🍪 注入静态 session cookie")
+                cookie_val = SESSION_COOKIE.split("session=", 1)[-1].split(";")[0].strip()
+                sb.open(BASE)  # 先到域名下放 cookie
+                sb.add_cookie({
+                    "name": "session",
+                    "value": cookie_val,
+                    "domain": BASE.split("//", 1)[-1],
+                    "path": "/",
+                })
+                sb.refresh()
+            else:
+                print("❌ 未配置任何鉴权方式")
+                sys.exit(1)
 
         # 3) 进入续期页
         print(f"📄 导航到续期页 {RENEWAL_URL}")
@@ -182,6 +259,8 @@ def main():
         time.sleep(3)
 
         page = sb.get_page_source()
+        save_browser_session(sb, state)
+        save_state(state)
 
         # 提取到期日（页面里有 id=expiration-date）
         exp = re.search(r'id="expiration-date"[^>]*>\s*([0-9.\s:]+)', page)
