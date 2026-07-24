@@ -1,0 +1,62 @@
+name: Arkya Free Server Auto Renew
+
+on:
+  schedule:
+    # 每 3 天自动续期一次。
+    - cron: "0 1 */3 * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "是否忽略 3 天间隔并立即续期（true/false）"
+        required: false
+        default: "false"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: arkya-auto-renew
+  cancel-in-progress: true
+
+jobs:
+  renew:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout Arkya branch
+        uses: actions/checkout@v4
+        with:
+          ref: arkya
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install --upgrade pip requests "requests[socks]" cryptography
+
+      - name: Run Arkya renew
+        env:
+          ARKYA_USER: ${{ secrets.ARKYA_USER }}
+          ARKYA_PASS: ${{ secrets.ARKYA_PASS }}
+          ARKYA_SESSION_KEY: ${{ secrets.ARKYA_SESSION_KEY }}
+          ARKYA_PROXY: ${{ secrets.ARKYA_PROXY }}
+          FORCE_RUN: ${{ github.event.inputs.force }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: python renew_arkya.py
+
+      - name: Save Arkya session state
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add arkya_state.json || true
+          if git diff --cached --quiet; then
+            echo "No Arkya state change."
+            exit 0
+          fi
+          git commit -m "Update Arkya session state [skip ci]"
+          git push origin HEAD:arkya
