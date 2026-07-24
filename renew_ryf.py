@@ -19,7 +19,9 @@ APP_BASE = "https://app.ryf.sh"
 AUTH_URL = f"{API_BASE}/auth/discord"
 ME_URL = f"{API_BASE}/auth/me"
 SERVER_ID = "eef132a6-1001-40e5-9abc-281df97f3eed"
+SERVER_URL = f"{API_BASE}/servers/{SERVER_ID}"
 RENEW_URL = f"{API_BASE}/servers/{SERVER_ID}/renew"
+POWER_URL = f"{API_BASE}/servers/{SERVER_ID}/power"
 DISCORD_API = "https://discord.com/api/v10"
 STATE_FILE = "ryf_state.json"
 # 实测 RYF 接口返回 renew_by 约为 24 小时后；每 12 小时检查，最短间隔留 20 小时余量。
@@ -230,6 +232,61 @@ def oauth_login() -> requests.Session:
     return site
 
 
+def fetch_server(session: requests.Session) -> dict:
+    response = session.get(
+        SERVER_URL,
+        headers={"Origin": APP_BASE, "Referer": f"{APP_BASE}/servers/{SERVER_ID}"},
+        timeout=25,
+    )
+    if response.status_code in (401, 403):
+        raise RyfError(f"RYF 登录会话失效：HTTP {response.status_code}")
+    if response.status_code != 200:
+        raise RyfError(f"RYF 服务器状态请求失败：HTTP {response.status_code}")
+    try:
+        data = response.json()
+    except ValueError as exc:
+        raise RyfError("RYF 服务器状态返回非 JSON") from exc
+    return data.get("server", data) if isinstance(data, dict) else {}
+
+
+def ensure_server_started(session: requests.Session) -> str:
+    server = fetch_server(session)
+    status = str(
+        server.get("status")
+        or server.get("state")
+        or server.get("power_status")
+        or server.get("powerStatus")
+        or "unknown"
+    ).lower()
+    log(f"🖥 RYF 当前服务器状态：{status}")
+    running = {"running", "online", "active", "starting", "installing", "provisioning", "ready"}
+    blocked = {"suspended", "expired", "deleted", "pending_deletion"}
+    if status in running:
+        return status
+    if status in blocked:
+        log(f"⚠️ 服务器状态为 {status}，不能自动启动")
+        return status
+
+    log("▶️ 检测到服务器未运行，发送 power=start 启动指令...")
+    response = session.post(
+        POWER_URL,
+        json={"signal": "start"},
+        headers={
+            "Origin": APP_BASE,
+            "Referer": f"{APP_BASE}/servers/{SERVER_ID}",
+            "X-Requested-With": "XMLHttpRequest",
+        },
+        timeout=25,
+    )
+    log(f"📡 POST /servers/{SERVER_ID}/power (start) -> HTTP {response.status_code}")
+    if response.status_code in (401, 403):
+        raise RyfError(f"RYF 登录会话失效：HTTP {response.status_code}")
+    if response.status_code not in (200, 202, 204):
+        raise RyfError(f"RYF 启动服务器失败：HTTP {response.status_code} {response.text[:200]}")
+    log("✅ RYF 启动指令已发送")
+    return "starting"
+
+
 def renew_server(session: requests.Session) -> dict:
     log(f"🔄 发起 RYF 服务器续期 POST：{RENEW_URL}")
     response = session.post(
@@ -244,12 +301,16 @@ def renew_server(session: requests.Session) -> dict:
     log(f"📡 POST /servers/{SERVER_ID}/renew -> HTTP {response.status_code}")
     if response.status_code in (401, 403):
         raise RyfError(f"RYF 登录会话失效：HTTP {response.status_code}")
-    if response.status_code != 200:
-        raise RyfError(f"RYF 续期请求失败：HTTP {response.status_code}")
     try:
         data = response.json()
     except ValueError as exc:
         raise RyfError(f"RYF 续期返回非 JSON：{response.text[:300]}") from exc
+    if response.status_code != 200:
+        error_code = str(data.get("error", "")).lower()
+        if "cooldown" in error_code or "not_renew" in error_code or "later" in str(data).lower():
+            log(f"ℹ️ RYF 当前不可续期，保留会话继续下一小时检查：{data}")
+            return data
+        raise RyfError(f"RYF 续期请求失败：HTTP {response.status_code}")
     safe_summary = {
         key: data.get(key)
         for key in ("message", "id", "name", "status", "renew_by")
@@ -262,14 +323,19 @@ def renew_server(session: requests.Session) -> dict:
 
 
 def main() -> int:
-    log("=" * 56)
-    log("🚀 RYF 服务器自动续期启动")
+    log("=" * 62)
+    log("🚀 RYF 服务器持续检测与自动续期启动")
     log(f"🕐 北京时间：{now_str()}")
     log(f"🖥 服务器 ID：{SERVER_ID}")
-    log("=" * 56)
+    log("⏱️ 工作流保持运行，每小时检查续期并确认服务器是否启动")
+    log("=" * 62)
+
+    try:
+        run_minutes = max(1, int(os.environ.get("RUN_MINUTES", "350")))
+    except ValueError:
+        run_minutes = 350
+    deadline = time.monotonic() + run_minutes * 60
     state = load_state()
-    if not should_run():
-        return 0
 
     try:
         session = restore_encrypted_session(state)
@@ -277,36 +343,68 @@ def main() -> int:
             log("♻️ Discord 登录会话仍有效，复用现有会话，不重新 OAuth 登录")
         else:
             if session is not None:
-                log("⌛ 已保存的 Discord 会话已失效，重新进行 OAuth 登录")
+                log("⌛ 已保存的 Discord 会话失效，重新进行 OAuth 登录")
             if not DISCORD_TOKEN:
                 raise RyfError("缺少 RYF_DISCORD_TOKEN，且没有可复用的有效会话")
             session = oauth_login()
             save_encrypted_session(state, session)
+            save_state(state)
 
-        try:
-            result = renew_server(session)
-        except RyfError as renew_exc:
-            if "登录会话失效" not in str(renew_exc) or not DISCORD_TOKEN:
-                raise
-            log("🔐 续期确认会话失效，重新 OAuth 登录一次后重试")
-            session = oauth_login()
-            save_encrypted_session(state, session)
-            result = renew_server(session)
+        check_count = 0
+        renew_count = 0
+        start_count = 0
+        last_error = None
 
-        state.update({
-            "last_renew_timestamp": int(time.time()),
-            "last_renew_time": now_str(),
-            "last_result": result.get("message", "success"),
-        })
-        save_encrypted_session(state, session)
-        save_state(state)
-        message = result.get("message", "RYF 续期请求成功")
-        log(f"🎉 RYF 服务器续期成功：{message}")
-        send_telegram(f"🎉 RYF 服务器续期成功\n🕐 {now_str()}\n📊 {message}")
+        while time.monotonic() < deadline:
+            try:
+                status = ensure_server_started(session)
+                if status == "starting":
+                    start_count += 1
+
+                result = renew_server(session)
+                check_count += 1
+                if result.get("renew_by") or result.get("message"):
+                    renew_count += 1
+                state["last_check_time"] = now_str()
+                state["last_server_status"] = status
+                state["last_renew_result"] = result.get("message", result.get("error", "checked"))
+                save_encrypted_session(state, session)
+                save_state(state)
+                log(f"✅ 第 {check_count} 次每小时检查完成：状态={status}")
+            except RyfError as exc:
+                last_error = exc
+                log(f"⚠️ 本轮 RYF 检查异常：{exc}")
+                if "登录会话失效" in str(exc):
+                    if not DISCORD_TOKEN:
+                        break
+                    log("🔐 仅因确认会话失效，重新 OAuth 登录一次")
+                    session = oauth_login()
+                    save_encrypted_session(state, session)
+                else:
+                    # 续期冷却/临时 API 错误不重新登录，下一小时继续检查。
+                    pass
+            except requests.RequestException as exc:
+                last_error = exc
+                log(f"⚠️ RYF 网络异常，保留会话等待下一小时：{type(exc).__name__}")
+
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            log("⏳ RYF 工作流保持运行，1 小时后进行下一次检查")
+            time.sleep(min(3600, remaining))
+
+        log("=" * 62)
+        log(f"🏁 RYF 持续窗口结束：检查 {check_count} 次，续期响应 {renew_count} 次，启动指令 {start_count} 次")
+        if last_error:
+            log(f"ℹ️ 最后一次异常：{last_error}")
+        send_telegram(
+            f"✅ RYF 持续窗口结束\n🕐 {now_str()}\n"
+            f"📊 检查：{check_count} 次\n🔄 续期响应：{renew_count} 次\n▶️ 启动指令：{start_count} 次"
+        )
         return 0
     except Exception as exc:
-        log(f"❌ RYF 自动续期失败：{type(exc).__name__}: {exc}")
-        send_telegram(f"❌ RYF 自动续期失败\n🕐 {now_str()}\n📊 {exc}")
+        log(f"❌ RYF 持续任务失败：{type(exc).__name__}: {exc}")
+        send_telegram(f"❌ RYF 持续任务失败\n🕐 {now_str()}\n📊 {exc}")
         return 1
 
 
