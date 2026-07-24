@@ -3,7 +3,7 @@
   "last_server_renew_time": "2026-07-22 18:39:25",
   "last_server_renew_coins": 98,
   "last_server_renew_result": "✅ Server renewed for 48 hours! New expiry: 7/28/2026, 2:05:08 PM",
-  "encrypted_session_cookie": "gAAAAABqYbp0ca87aktlXpE8rw3RmcIIhr1gDbtJksjXpYPvbptjiEctvJpHO0evX1UD6heHdg3GFWRuvKOdmncs-BB84rT9Mqb4deBjSMEL-PYrazx_r35pxbi-glYALbT2-bWPkGyldjFUIQ3lI6qRSmas4q8bEIbHmVldHt6-GWUu4bBg4WTGlZCKAUz0Azv_fpbUOlrE",
-  "last_session_proxy": "socks5h://84.42.111.17:1080",
-  "session_saved_time": "2026-07-23 14:53:40"
+  "encrypted_session_cookie": "gAAAAABqYt1CeFtZBVnt7OS5yzYAQ3Oj0jbHw3gg6ZVJzDf4oEYPdfhcB9QV8ViEAkQbgSJCKKKlI00h5oVcPXPTHB3rl5jYz8lewuxSH5YUcD8AqxbsFpIsXT0Igd8HeuEAKrHIUcu5EyjyGl7FkPoVJCT_HPsNCN3wrOI36J4J7BMO_uyPL2NOx33QTnmzXYGuI6QKt_a1",
+  "last_session_proxy": "http://168.184.84.85:443",
+  "session_saved_time": "2026-07-24 11:34:26"
 }
