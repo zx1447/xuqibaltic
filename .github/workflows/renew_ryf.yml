@@ -1,15 +1,15 @@
-name: RYF Server Auto Renew
+name: RYF Continuous Check and Renew
 
 on:
   schedule:
-    # 每 12 小时检查一次；状态文件确保不会在 20 小时内重复续期。
-    - cron: "0 */12 * * *"
+    # 每 6 小时启动一个持续窗口；窗口内每小时检查一次。
+    - cron: "0 */6 * * *"
   workflow_dispatch:
     inputs:
-      force:
-        description: "是否忽略最短 20 小时间隔并立即续期（true/false）"
+      duration_minutes:
+        description: "持续运行分钟数（测试可填 2；默认 350 分钟）"
         required: false
-        default: "false"
+        default: "350"
 
 permissions:
   contents: write
@@ -21,7 +21,7 @@ concurrency:
 jobs:
   renew:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 355
     steps:
       - name: Checkout RYF branch
         uses: actions/checkout@v4
@@ -37,18 +37,17 @@ jobs:
       - name: Install dependencies
         run: pip install --upgrade pip requests "requests[socks]" cryptography
 
-      - name: Run RYF renew
+      - name: Run RYF continuous check
         env:
-          # 与之前 Discord OAuth 自动化共用同一个 Discord Token Secret。
           RYF_DISCORD_TOKEN: ${{ secrets.FLARELAX_DISCORD_TOKEN }}
           RYF_SESSION_KEY: ${{ secrets.RYF_SESSION_KEY }}
           RYF_PROXY: ${{ secrets.RYF_PROXY }}
-          FORCE_RUN: ${{ github.event.inputs.force }}
+          RUN_MINUTES: ${{ github.event.inputs.duration_minutes || '350' }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
         run: python renew_ryf.py
 
-      - name: Save RYF renewal state
+      - name: Save RYF session state
         if: always()
         run: |
           git config user.name "github-actions[bot]"
@@ -58,5 +57,5 @@ jobs:
             echo "No RYF state change."
             exit 0
           fi
-          git commit -m "Update RYF renewal state [skip ci]"
+          git commit -m "Update RYF continuous state [skip ci]"
           git push origin HEAD:ryf
