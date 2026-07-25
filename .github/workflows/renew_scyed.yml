@@ -1,8 +1,7 @@
 name: SCYED Random Renew
 
 on:
-  schedule:
-    - cron: "0 4 * * *"
+  # 已暂停自动运行，仅保留手动 workflow_dispatch。
   workflow_dispatch:
     inputs:
       force:
