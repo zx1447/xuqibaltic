@@ -9,6 +9,7 @@ from cryptography.fernet import Fernet, InvalidToken
 BASE = "https://scyed.com"
 LOGIN_URL = f"{BASE}/en/login"
 RENEW_URL = f"{BASE}/en/gameserver/6100ef84/upgrade/freeServer"
+SESSION_URL = f"{BASE}/api/auth/get-session"
 STATE_FILE = "scyed_state.json"
 USER = os.environ.get("SCYED_USER", "").strip()
 PASSWORD = os.environ.get("SCYED_PASS", "").strip()
@@ -50,7 +51,7 @@ def restore_browser_cookies(st,sb):
             try:sb.add_cookie({k:c[k] for k in ("name","value","domain","path","expiry","secure","httpOnly") if k in c})
             except:pass
         sb.refresh();sb.wait_for_ready_state_complete();time.sleep(2)
-        return "login" not in sb.get_current_url().lower() and "attention required" not in sb.get_title().lower()
+        return "login" not in sb.get_current_url().lower() and "attention required" not in sb.get_title().lower() and browser_session_valid(sb)
     except:return False
 
 def should_run(st):
@@ -74,6 +75,22 @@ def wait_cf_auto(sb):
         log(f"🛡️ 等待 SCYED Cloudflare 自动验证（第 {i+1}/4 次）")
     raise ScyedError("SCYED Cloudflare 自动验证未通过")
 
+def browser_session_valid(sb):
+    script = """
+    const done=arguments[arguments.length-1];
+    fetch(arguments[0],{credentials:'include',headers:{'Accept':'application/json'}})
+      .then(async r=>done({status:r.status,text:await r.text()})).catch(e=>done({error:String(e)}));
+    """
+    result=sb.execute_async_script(script,SESSION_URL)
+    if result.get('status') != 200:
+        return False
+    try:
+        data=json.loads(result.get('text','{}'))
+        return bool(data.get('user') or data.get('session'))
+    except ValueError:
+        return False
+
+
 def first_selector(sb, selectors):
     for selector in selectors:
         try:
@@ -95,7 +112,8 @@ def login(sb):
     sb.uc_click(button)
     time.sleep(6)
     if "login" in sb.get_current_url().lower():raise ScyedError("SCYED 登录后仍在登录页")
-    log("✅ SCYED 登录成功")
+    if not browser_session_valid(sb):raise ScyedError("SCYED 登录后 /api/auth/get-session 未确认会话")
+    log("✅ SCYED 登录成功，会话接口验证通过")
 
 def renew_in_browser(sb):
     sb.open(RENEW_URL);sb.wait_for_ready_state_complete();time.sleep(3)
