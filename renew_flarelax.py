@@ -496,11 +496,19 @@ def main() -> int:
             log("⌛ 上次 Flarelax 会话或节点已失效，准备按需重新登录")
 
     if session is None:
-        try:
-            proxies = build_proxy_list()
-        except Exception as exc:
-            log(f"❌ 获取代理节点失败：{type(exc).__name__}: {exc}")
-            return 1
+        # 节点池暂时没有可用节点时，不让整个 6 小时任务立刻失败；等待后继续扫描。
+        while not proxies and time.monotonic() < deadline:
+            try:
+                proxies = build_proxy_list()
+            except Exception as exc:
+                remaining = deadline - time.monotonic()
+                log(f"⚠️ 当前没有可用 Flarelax 节点：{type(exc).__name__}；10 分钟后重试")
+                if remaining <= 10 * 60:
+                    break
+                time.sleep(10 * 60)
+        if not proxies:
+            log("⚠️ 本次窗口没有找到可用节点，保持任务正常结束，等待下次调度")
+            return 0
     request_count = 0
     claim_count = 0
     unchanged_count = 0
