@@ -145,6 +145,15 @@ def oauth_login() -> requests.Session:
     if cb.status_code >= 400:
         raise SiamError(f"Siam Callback 被拒绝：HTTP {cb.status_code}")
     log("✅ Siam Callback 完成")
+    # Callback 必须真的建立面板会话；否则不要把后续 200 错误响应误判成签到成功。
+    try:
+        probe = site.get(HISTORY_URL, headers={"Referer": f"{BASE}/"}, timeout=20)
+        probe_data = parse_json(probe)
+        if probe.status_code in (401, 403) or (isinstance(probe_data, dict) and probe_data.get("status") == "error"):
+            raise SiamError(f"Siam 登录会话未建立：HTTP {probe.status_code}")
+    except requests.RequestException as exc:
+        raise SiamError(f"Siam Callback 会话验证失败：{type(exc).__name__}") from exc
+    log("✅ Siam 登录会话验证成功")
     return site
 
 
@@ -171,6 +180,8 @@ def do_checkins(session: requests.Session) -> int:
             raise SiamError(f"Siam 登录会话失效：HTTP {response.status_code}")
         if response.status_code != 200:
             raise SiamError(f"Siam 签到请求失败：HTTP {response.status_code}")
+        if isinstance(data, dict) and data.get("status") == "error":
+            raise SiamError(f"Siam 签到业务失败：{data.get('message', '需要登录')}")
         count += 1
         if is_no_more_reward(data):
             log("ℹ️ Siam 返回无法继续获取积分，停止本日签到")
