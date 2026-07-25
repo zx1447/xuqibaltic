@@ -197,31 +197,106 @@ def do_checkins(session: requests.Session) -> int:
     return count
 
 
+def inject_session_to_browser(sb, session: requests.Session) -> None:
+    sb.open(BASE)
+    sb.wait_for_ready_state_complete()
+    for cookie in session.cookies:
+        item = {"name": cookie.name, "value": cookie.value, "domain": "my.siam-node.cloud", "path": "/"}
+        try:
+            sb.add_cookie(item)
+        except Exception:
+            pass
+    sb.refresh()
+    sb.wait_for_ready_state_complete()
+    time.sleep(2)
+
+
+def save_browser_session(state: dict, sb) -> None:
+    if not SESSION_KEY:
+        return
+    cookies = sb.get_cookies()
+    if cookies:
+        encrypted = Fernet(SESSION_KEY.encode()).encrypt(
+            json.dumps(cookies, separators=(",", ":")).encode()
+        ).decode()
+        state["encrypted_browser_cookies"] = encrypted
+        # 同时保存简化 Cookie，下一次可直接恢复 requests 会话。
+        simple = {item.get("name"): item.get("value") for item in cookies if item.get("name") and item.get("value")}
+        state["encrypted_cookies"] = Fernet(SESSION_KEY.encode()).encrypt(
+            json.dumps(simple, separators=(",", ":")).encode()
+        ).decode()
+        state["browser_session_saved_time"] = now_str()
+
+
+def click_checkin_until_done(sb) -> int:
+    """使用真实浏览器点击截图中的 #checkin-btn，直到按钮不可用/无奖励。"""
+    sb.open(PROFILE_URL)
+    sb.wait_for_ready_state_complete()
+    time.sleep(3)
+    count = 0
+    for i in range(10):
+        if not sb.is_element_visible("#checkin-btn"):
+            log("ℹ️ 未发现签到按钮 #checkin-btn，可能今日已完成或页面未登录")
+            break
+        try:
+            text = sb.get_text("#checkin-btn", timeout=2)
+        except Exception:
+            text = ""
+        log(f"🖱️ 点击签到按钮 #{i + 1}：{text[:120]}")
+        try:
+            if not sb.is_element_enabled("#checkin-btn"):
+                log("ℹ️ 签到按钮已禁用，停止点击")
+                break
+        except Exception:
+            pass
+        sb.uc_click("#checkin-btn")
+        count += 1
+        time.sleep(3)
+        try:
+            if not sb.is_element_visible("#checkin-btn") or not sb.is_element_enabled("#checkin-btn"):
+                log("✅ 页面已显示无法继续签到，停止本日点击")
+                break
+        except Exception:
+            break
+    return count
+
+
 def main() -> int:
-    log("=" * 56); log("🚀 Siam Node 每日签到启动"); log(f"🕐 北京时间：{now_str()}"); log("=" * 56)
+    log("=" * 56); log("🚀 Siam Node 浏览器签到启动"); log(f"🕐 北京时间：{now_str()}"); log("=" * 56)
     state = load_state()
     if not should_run(state):
         return 0
+    try:
+        from seleniumbase import SB
+    except ImportError:
+        log("❌ 缺少 seleniumbase 依赖")
+        return 1
     try:
         session = restore_session(state)
         if session is not None:
             log("♻️ 尝试复用 Siam 登录会话")
         else:
             session = oauth_login()
-        count = do_checkins(session)
-        state["last_checkin_timestamp"] = int(time.time())
-        state["last_checkin_time"] = now_str()
-        state["checkin_count"] = count
-        save_session(state, session); save_state(state)
-        log(f"🎉 Siam 每日签到完成，共请求 {count} 次")
-        send_tg(f"✅ Siam 签到完成\n🕐 {now_str()}\n📊 请求：{count} 次")
+        sb_kwargs = {"uc": True, "xvfb": True, "headless": False}
+        if PROXY:
+            sb_kwargs["proxy"] = PROXY
+        with SB(**sb_kwargs) as sb:
+            inject_session_to_browser(sb, session)
+            count = click_checkin_until_done(sb)
+            state["last_checkin_timestamp"] = int(time.time())
+            state["last_checkin_time"] = now_str()
+            state["checkin_count"] = count
+            save_browser_session(state, sb)
+        save_state(state)
+        log(f"🎉 Siam 浏览器签到完成，共点击 {count} 次")
+        send_tg(f"✅ Siam 签到完成\n🕐 {now_str()}\n📊 点击：{count} 次")
         return 0
     except SiamError as exc:
         log(f"❌ Siam 自动签到失败：{exc}")
         send_tg(f"❌ Siam 签到失败\n🕐 {now_str()}\n📊 {exc}")
         return 1
     except Exception as exc:
-        log(f"❌ Siam 异常：{type(exc).__name__}: {exc}")
+        log(f"❌ Siam 浏览器异常：{type(exc).__name__}: {exc}")
         return 1
 
 
