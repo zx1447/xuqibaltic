@@ -13,7 +13,7 @@ LOGIN_URL = f"{BASE}/auth/login"
 CSRF_URL = "https://panel.host-ship.com/sanctum/csrf-cookie"
 RENEW_URL = f"{BASE}/api/client/servers/{SERVER_ID}/renew"
 STATE_FILE = "shiphsot_state.json"
-INTERVAL = 4 * 24 * 60 * 60
+INTERVAL = 7 * 24 * 60 * 60
 USER = os.environ.get("SHIPHSOT_USER", "").strip()
 PASSWORD = os.environ.get("SHIPHSOT_PASS", "").strip()
 SESSION_KEY = os.environ.get("SHIPHSOT_SESSION_KEY", "").strip()
@@ -85,17 +85,17 @@ def renew(s):
     log(f"📡 POST /api/client/servers/{SERVER_ID}/renew -> HTTP {r.status_code}")
     if r.status_code in (401,403):raise ShiphsotError("Host Ship 会话失效")
     if r.status_code==400 and "more than 30 days" in r.text.lower():
-        log("ℹ️ Host Ship 当前剩余时间已超过 30 天，本次无需续期，等待下一个 4 天检查")
+        log("ℹ️ Host Ship 当前剩余时间已超过 30 天，本次无需续期，等待下一个 7 天检查")
         return False
     if r.status_code!=204:raise ShiphsotError(f"续期失败：HTTP {r.status_code} {r.text[:300]}")
     log("🎉 Host Ship 续期成功（204 No Content）")
     return True
 
 def main():
-    log("🚀 Host Ship 每 4 天续期启动");log(f"🕐 北京时间：{now_str()}")
+    log("🚀 Host Ship 每 7 天续期启动");log(f"🕐 北京时间：{now_str()}")
     st=load_state();last=int(st.get("last_renew_timestamp",0) or 0)
     if not FORCE_RUN and last and time.time()-last<INTERVAL:
-        log("⏳ 尚未到 4 天续期时间，跳过");return 0
+        log("⏳ 尚未到 7 天续期时间，跳过");return 0
     try:
         s=restore_session(st)
         if s and session_valid(s):log("♻️ 复用 Host Ship 登录会话")
