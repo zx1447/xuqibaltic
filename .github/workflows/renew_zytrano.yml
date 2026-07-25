@@ -1,9 +1,7 @@
 name: Zytrano Server Auto Renew
 
 on:
-  schedule:
-    # 每天 04:00 UTC (北京时间 12:00) 自动校验是否达到了随机 2~10 天时间节点
-    - cron: "0 4 * * *"
+  # 已暂停自动运行，仅保留手动 workflow_dispatch，不会自动启动。
   workflow_dispatch:
     inputs:
       force:
