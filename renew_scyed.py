@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""SCYED Hosting 5~14 天随机续期（账号密码 API 模式）。"""
+"""SCYED Hosting 5~14 天随机续期（真实浏览器自动过 CF 后登录）。"""
 from __future__ import annotations
 import datetime as dt
 import json, os, random, sys, time
-import requests
 from cryptography.fernet import Fernet, InvalidToken
 
 BASE = "https://scyed.com"
-LOGIN_URL = f"{BASE}/api/auth/sign-in/email"
-SESSION_URL = f"{BASE}/api/auth/get-session"
+LOGIN_URL = f"{BASE}/en/login"
 RENEW_URL = f"{BASE}/en/gameserver/6100ef84/upgrade/freeServer"
 STATE_FILE = "scyed_state.json"
 USER = os.environ.get("SCYED_USER", "").strip()
@@ -26,14 +24,10 @@ def log(x): print(x, flush=True)
 def now_str(): return dt.datetime.now(dt.timezone.utc).astimezone(dt.timezone(dt.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S")
 def send_tg(msg):
     if TG_TOKEN and TG_CHAT_ID:
-        try: requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",json={"chat_id":TG_CHAT_ID,"text":msg},timeout=15)
+        try:
+            import requests
+            requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",json={"chat_id":TG_CHAT_ID,"text":msg},timeout=15)
         except: pass
-
-def make_session():
-    s=requests.Session();s.trust_env=False
-    s.headers.update({"User-Agent":"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36","Accept":"application/json, text/plain, */*","Origin":BASE,"Referer":f"{BASE}/en/login"})
-    if PROXY:s.proxies.update({"http":PROXY,"https":PROXY});log("🔗 使用 SCYED_PROXY")
-    return s
 
 def load_state():
     try:
@@ -41,23 +35,23 @@ def load_state():
     except (FileNotFoundError,ValueError,OSError):return {}
 def save_state(st):
     tmp=STATE_FILE+".tmp";open(tmp,"w",encoding="utf-8").write(json.dumps(st,ensure_ascii=False,indent=2));os.replace(tmp,STATE_FILE)
-def save_session(st,s):
+def save_browser_cookies(st,sb):
     if SESSION_KEY:
-        c={x.name:x.value for x in s.cookies}
-        if c:st["encrypted_cookies"]=Fernet(SESSION_KEY.encode()).encrypt(json.dumps(c,separators=(",",":")).encode()).decode();st["session_saved_time"]=now_str()
-def restore_session(st):
-    if not SESSION_KEY or not st.get("encrypted_cookies"):return None
-    try:c=json.loads(Fernet(SESSION_KEY.encode()).decrypt(st["encrypted_cookies"].encode()).decode())
-    except (InvalidToken,ValueError,TypeError):return None
-    s=make_session()
-    for k,v in c.items():s.cookies.set(k,v,domain="scyed.com",path="/")
-    return s
-
-def session_valid(s):
+        cookies=sb.get_cookies()
+        if cookies:
+            st["encrypted_cookies"]=Fernet(SESSION_KEY.encode()).encrypt(json.dumps(cookies,separators=(",",":")).encode()).decode();st["session_saved_time"]=now_str()
+def restore_browser_cookies(st,sb):
+    if not SESSION_KEY or not st.get("encrypted_cookies"):return False
+    try:cookies=json.loads(Fernet(SESSION_KEY.encode()).decrypt(st["encrypted_cookies"].encode()).decode())
+    except (InvalidToken,ValueError,TypeError):return False
     try:
-        r=s.get(SESSION_URL,timeout=20)
-        return r.status_code==200 and bool(r.json().get("user") or r.json().get("session"))
-    except (requests.RequestException,ValueError):return False
+        sb.open(BASE);sb.wait_for_ready_state_complete()
+        for c in cookies:
+            try:sb.add_cookie({k:c[k] for k in ("name","value","domain","path","expiry","secure","httpOnly") if k in c})
+            except:pass
+        sb.refresh();sb.wait_for_ready_state_complete();time.sleep(2)
+        return "login" not in sb.get_current_url().lower() and "attention required" not in sb.get_title().lower()
+    except:return False
 
 def should_run(st):
     if FORCE_RUN:return True
@@ -66,38 +60,78 @@ def should_run(st):
         log(f"⏳ SCYED 尚未到随机续期时间：{st.get('next_renew_time','未知')}");return False
     return True
 
-def login():
-    if not USER or not PASSWORD:raise ScyedError("缺少 SCYED_USER/SCYED_PASS")
-    s=make_session();log(f"🔑 使用账号密码请求 SCYED 登录：{USER[:2]}****")
-    r=s.post(LOGIN_URL,json={"email":USER,"password":PASSWORD,"callbackURL":f"{BASE}/en/gameserver/6100ef84/upgrade/freeServer"},headers={"Content-Type":"application/json","Accept":"application/json"},timeout=25)
-    if r.status_code!=200:raise ScyedError(f"SCYED 登录失败：HTTP {r.status_code} {r.text[:300]}")
-    if not session_valid(s):raise ScyedError("SCYED 登录返回 200 但 /api/auth/get-session 未登录")
-    log("✅ SCYED API 登录成功");return s
+def wait_cf_auto(sb):
+    try:sb.uc_open_with_reconnect(LOGIN_URL,reconnect_time=6)
+    except:sb.open(LOGIN_URL)
+    sb.wait_for_ready_state_complete()
+    # SCYED 的 CF 盾会自动完成，不主动点击，只等待 JS 跳转。
+    for i in range(4):
+        time.sleep(6)
+        title=sb.get_title().lower();source=sb.get_page_source().lower()
+        if "just a moment" not in title and "attention required" not in title and "cf-chl-" not in source:
+            log(f"✅ SCYED Cloudflare 自动验证通过（等待 {6*(i+1)} 秒）")
+            return
+        log(f"🛡️ 等待 SCYED Cloudflare 自动验证（第 {i+1}/4 次）")
+    raise ScyedError("SCYED Cloudflare 自动验证未通过")
 
-def renew(s):
-    r=s.post(RENEW_URL,headers={"Accept":"application/json, text/plain, */*","X-Requested-With":"XMLHttpRequest"},allow_redirects=False,timeout=25)
-    log(f"📡 POST {RENEW_URL} -> HTTP {r.status_code}")
-    if r.status_code in (401,403):raise ScyedError("SCYED 登录会话失效")
-    if r.status_code!=200:raise ScyedError(f"SCYED 续期失败：HTTP {r.status_code} {r.text[:300]}")
-    log("📦 返回摘要："+r.text[:500]);return r
+def first_selector(sb, selectors):
+    for selector in selectors:
+        try:
+            if sb.is_element_present(selector) and sb.is_element_visible(selector): return selector
+        except: pass
+    return None
+
+def login(sb):
+    wait_cf_auto(sb)
+    email=first_selector(sb,["input[type='email']","input[name='email']","#email","input[name='username']","#username","input[name='user']"])
+    password=first_selector(sb,["input[type='password']","input[name='password']","#password"])
+    if not email or not password:
+        raise ScyedError("Cloudflare 已返回但未找到账号/密码输入框")
+    log("🔑 Cloudflare 自动通过，开始填写 SCYED 登录表单")
+    sb.type(email,USER,timeout=10);sb.type(password,PASSWORD,timeout=10)
+    button=first_selector(sb,["button[type='submit']","input[type='submit']","button.btn-primary","button"])
+    if not button:raise ScyedError("未找到 SCYED 登录按钮")
+    log("🖱️ 点击 SCYED 登录按钮")
+    sb.uc_click(button)
+    time.sleep(6)
+    if "login" in sb.get_current_url().lower():raise ScyedError("SCYED 登录后仍在登录页")
+    log("✅ SCYED 登录成功")
+
+def renew_in_browser(sb):
+    sb.open(RENEW_URL);sb.wait_for_ready_state_complete();time.sleep(3)
+    script="""
+    const done=arguments[arguments.length-1];
+    fetch(arguments[0],{method:'POST',credentials:'include',headers:{'Accept':'application/json, text/plain, */*','X-Requested-With':'XMLHttpRequest'}})
+      .then(async r=>done({status:r.status,text:await r.text(),url:r.url})).catch(e=>done({error:String(e)}));
+    """
+    result=sb.execute_async_script(script,RENEW_URL)
+    log(f"📡 POST {RENEW_URL} -> HTTP {result.get('status')}")
+    log("📦 返回摘要："+result.get('text','')[:500])
+    if result.get('status')==401:raise ScyedError("SCYED 登录会话失效")
+    if result.get('status')!=200:raise ScyedError(f"SCYED 续期失败：HTTP {result.get('status')}")
 
 def main():
-    log("🚀 SCYED API 随机续期启动");log(f"🕐 北京时间：{now_str()}")
+    log("🚀 SCYED 真实浏览器随机续期启动");log(f"🕐 北京时间：{now_str()}")
+    if not USER or not PASSWORD:return log("❌ 缺少 SCYED_USER/SCYED_PASS") or 1
     st=load_state()
     if not should_run(st):return 0
     try:
-        s=restore_session(st)
-        if s and session_valid(s):log("♻️ 复用 SCYED API 登录会话")
-        else:
-            if s:log("⌛ SCYED 已保存会话失效，重新账号密码登录")
-            s=login();save_session(st,s)
-        try:renew(s)
-        except ScyedError as e:
-            if "会话失效" not in str(e):raise
-            log("🔐 SCYED 会话失效，重新登录后重试");s=login();save_session(st,s);renew(s)
-        days=random.randint(5,14);nxt=int(time.time()+days*86400)
-        st.update({"last_renew_timestamp":int(time.time()),"last_renew_time":now_str(),"next_interval_days":days,"next_renew_timestamp":nxt,"next_renew_time":dt.datetime.fromtimestamp(nxt,dt.timezone.utc).astimezone(dt.timezone(dt.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S")});save_session(st,s);save_state(st)
-        log(f"🎲 下次 SCYED 随机续期：{days} 天后");send_tg(f"✅ SCYED 续期成功\n🕐 {now_str()}\n🎲 下次：{days} 天后");return 0
+        from seleniumbase import SB
+        kw={"uc":True,"xvfb":True,"headless":False}
+        if PROXY:kw["proxy"]=PROXY
+        with SB(**kw) as sb:
+            reused=restore_browser_cookies(st,sb)
+            if reused:log("♻️ 复用 SCYED 浏览器登录会话")
+            else:login(sb)
+            try:renew_in_browser(sb)
+            except ScyedError as e:
+                if "会话失效" not in str(e):raise
+                log("🔐 确认会话失效，重新登录后重试")
+                login(sb);renew_in_browser(sb)
+            days=random.randint(5,14);nxt=int(time.time()+days*86400)
+            st.update({"last_renew_timestamp":int(time.time()),"last_renew_time":now_str(),"next_interval_days":days,"next_renew_timestamp":nxt,"next_renew_time":dt.datetime.fromtimestamp(nxt,dt.timezone.utc).astimezone(dt.timezone(dt.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S")})
+            save_browser_cookies(st,sb);save_state(st)
+            log(f"🎲 下次 SCYED 随机续期：{days} 天后");send_tg(f"✅ SCYED 续期成功\n🕐 {now_str()}\n🎲 下次：{days} 天后");return 0
     except Exception as e:
         log(f"❌ SCYED 续期失败：{type(e).__name__}: {e}");send_tg(f"❌ SCYED 续期失败\n{e}");return 1
 if __name__=="__main__":sys.exit(main())
