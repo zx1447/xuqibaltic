@@ -1,9 +1,7 @@
 name: Siam Daily Browser Check-in
 
 on:
-  schedule:
-    # 每天打开页面并点击签到按钮，直到按钮不可用。
-    - cron: "0 2 * * *"
+  # 已暂停自动运行，仅保留手动 workflow_dispatch。
   workflow_dispatch:
     inputs:
       force:
