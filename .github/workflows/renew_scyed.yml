@@ -1,4 +1,5 @@
 name: SCYED Random Renew
+
 on:
   schedule:
     - cron: "0 4 * * *"
@@ -8,23 +9,40 @@ on:
         description: "是否立即强制续期（true/false）"
         required: false
         default: "false"
+
 permissions:
   contents: write
+
 concurrency:
   group: scyed-auto-renew
   cancel-in-progress: true
+
 jobs:
   renew:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 10
     steps:
       - name: Checkout SCYED branch
         uses: actions/checkout@v4
-        with: {ref: scyed, fetch-depth: 0}
+        with:
+          ref: scyed
+          fetch-depth: 0
+
       - uses: actions/setup-python@v5
-        with: {python-version: "3.12"}
-      - name: Install dependencies
-        run: pip install --upgrade pip requests cryptography
+        with:
+          python-version: "3.12"
+
+      - name: Install real browser and dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget gnupg xvfb
+          wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add 2>/dev/null || true
+          echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
+          sudo apt-get update
+          sudo apt-get install -y google-chrome-stable || sudo apt-get install -y chromium-browser
+          pip install --upgrade pip seleniumbase cryptography requests
+          python -m seleniumbase install chromedriver
+
       - name: Run SCYED renew
         env:
           SCYED_USER: ${{ secrets.SCYED_USER }}
@@ -35,6 +53,7 @@ jobs:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
         run: python renew_scyed.py
+
       - name: Save SCYED session state
         if: always()
         run: |
