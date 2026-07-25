@@ -18,6 +18,7 @@ DISCORD_API = "https://discord.com/api/v9"
 CLIENT_ID = "1415389053955739753"
 REDIRECT_URI = f"{BASE}/DISCORDOAUTH2/process-oauth.php"
 CHECKIN_URL = f"{BASE}/api/checkin.php"
+PROFILE_URL = f"{BASE}/?p=profile"
 HISTORY_URL = f"{BASE}/api/user_balance.php?action=history&limit=5"
 STATE_FILE = "siam_state.json"
 VISIT_INTERVAL_SECONDS = 20 * 60 * 60
@@ -145,15 +146,16 @@ def oauth_login() -> requests.Session:
     if cb.status_code >= 400:
         raise SiamError(f"Siam Callback 被拒绝：HTTP {cb.status_code}")
     log("✅ Siam Callback 完成")
-    # Callback 必须真的建立面板会话；否则不要把后续 200 错误响应误判成签到成功。
+    # 使用 F12 确认的 profile 页面验证 Cookie 是否真正建立。
     try:
-        probe = site.get(HISTORY_URL, headers={"Referer": f"{BASE}/"}, timeout=20)
-        probe_data = parse_json(probe)
-        if probe.status_code in (401, 403) or (isinstance(probe_data, dict) and probe_data.get("status") == "error"):
-            raise SiamError(f"Siam 登录会话未建立：HTTP {probe.status_code}")
+        profile = site.get(PROFILE_URL, headers={"Referer": f"{BASE}/"}, timeout=20)
+        if profile.status_code != 200:
+            raise SiamError(f"Siam profile 页面验证失败：HTTP {profile.status_code}")
+        if "login" in profile.url.lower() or "เข้าสู่ระบบ" in profile.text:
+            raise SiamError("Siam profile 页面仍显示未登录")
     except requests.RequestException as exc:
         raise SiamError(f"Siam Callback 会话验证失败：{type(exc).__name__}") from exc
-    log("✅ Siam 登录会话验证成功")
+    log("✅ Siam profile 登录会话验证成功")
     return site
 
 
