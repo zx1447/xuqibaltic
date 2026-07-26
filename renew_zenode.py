@@ -74,29 +74,44 @@ def confirm(s):
  r=s.post(CONFIRM_URL,json={},headers={"Accept":"application/json","Content-Type":"application/json"},timeout=20)
  log(f"📡 POST confirm-activity -> HTTP {r.status_code}")
  if r.status_code in (401,403):raise ZenodeError("Zenode 登录会话失效")
- if r.status_code!=200:raise ZenodeError(f"活跃确认失败：HTTP {r.status_code} {r.text[:300]}")
- data=r.json();log("📦 返回摘要："+json.dumps({k:data.get(k) for k in ("ok","message","activity_confirmation") if k in data},ensure_ascii=False)[:800]);return data
+ try:data=r.json()
+ except ValueError:data={"raw":r.text[:500]}
+ if r.status_code!=200:
+  text=json.dumps(data,ensure_ascii=False).lower()
+  if r.status_code in (400,409) and any(x in text for x in ("cooldown","later","not due","already")):
+   log(f"ℹ️ Zenode 当前不可续期，保留会话等待明天：{data}")
+   return {"skipped":True,**(data if isinstance(data,dict) else {})}
+  raise ZenodeError(f"活跃确认失败：HTTP {r.status_code} {str(data)[:300]}")
+ log("📦 返回摘要："+json.dumps({k:data.get(k) for k in ("ok","message","activity_confirmation") if k in data},ensure_ascii=False)[:800])
+ return data
+
 def main():
- log("🚀 Zenode 服务器活跃确认启动");log(f"🕐 北京时间：{now_str()}")
+ log("🚀 Zenode 每日检测并按需确认启动");log(f"🕐 北京时间：{now_str()}")
  st=load()
  try:
   s=restore(st)
   if s and valid(s):log("♻️ 复用 Zenode 登录会话")
-  else:s=oauth();save_session(st,s)
-  info=server(s);activity=info.get("activity_confirmation") or {};hours=activity.get("hours_remaining")
-  days=activity.get("days_remaining")
+  else:
+   if s:log("⌛ Zenode 会话失效，重新 Discord OAuth 登录")
+   s=oauth();save_session(st,s)
+
+  info=server(s);activity=info.get("activity_confirmation") or {}
+  hours=activity.get("hours_remaining");days=activity.get("days_remaining")
   log(f"🕒 Zenode 剩余活跃时间：{days} 天 / {hours} 小时")
-  # 只在最后 2 天确认，避免无意义重复请求。
-  due=False
-  if isinstance(hours,(int,float)):due=hours<=48
-  elif isinstance(days,(int,float)):due=days<=2
-  elif activity.get("expires_at"):
-   try:due=(dt.datetime.fromisoformat(activity["expires_at"].replace("Z","+00:00"))-dt.datetime.now(dt.timezone.utc)).total_seconds()<=48*3600
-   except:pass
-  if due:
-   confirm(s);st["last_confirm_time"]=now_str();st["last_confirm_timestamp"]=int(time.time())
-  else:log("ℹ️ 还没到最后 2 天，暂不确认活跃")
-  save_session(st,s);save(st);send_tg(f"✅ Zenode 检查完成\n🕐 {now_str()}\n📅 剩余：{days} 天");return 0
+  # 每天检查一次：只要接口当前允许确认，就执行；如果尚未到期，接口会返回冷却/不可续期。
+  try:
+   result=confirm(s)
+  except ZenodeError as exc:
+   if "登录会话失效" not in str(exc):raise
+   log("🔐 Zenode 确认会话失效，重新 OAuth 登录一次后重试")
+   s=oauth();save_session(st,s);result=confirm(s)
+  st["last_check_time"]=now_str();st["last_confirm_result"]=result.get("message", "skipped" if result.get("skipped") else "ok") if isinstance(result,dict) else "ok"
+  if isinstance(result,dict) and not result.get("skipped"):
+   st["last_confirm_time"]=now_str();st["last_confirm_timestamp"]=int(time.time())
+  save_session(st,s);save(st)
+  send_tg(f"✅ Zenode 每日检查完成\n🕐 {now_str()}\n📅 剩余：{days} 天")
+  return 0
  except Exception as e:
   log(f"❌ Zenode 失败：{type(e).__name__}: {e}");send_tg(f"❌ Zenode 失败\n{e}");return 1
+
 if __name__=="__main__":sys.exit(main())
