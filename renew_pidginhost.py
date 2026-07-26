@@ -25,6 +25,8 @@ import requests
 BASE = "https://www.pidginhost.ro"
 SERVER_ID = os.environ.get("PIDGINHOST_SERVER_ID", "3853").strip() or "3853"
 SERVER_URL = f"{BASE}/panel/cloud/servers/{SERVER_ID}/"
+API_SERVER_URL = f"{BASE}/api/cloud/servers/{SERVER_ID}/"
+API_ACTIVITY_URL = f"{BASE}/api/cloud/servers/{SERVER_ID}/activity/"
 LOGIN_URL = f"{BASE}/panel/account/login?next=/panel/cloud/servers/{SERVER_ID}/"
 STATE_FILE = "pidginhost_state.json"
 INTERVAL_DAYS = int(os.environ.get("PIDGINHOST_INTERVAL_DAYS", "4") or "4")
@@ -123,15 +125,10 @@ def apply_auth(s: requests.Session) -> None:
     elif TOKEN and COOKIE_NAME:
         s.cookies.set(COOKIE_NAME, TOKEN, domain="www.pidginhost.ro", path="/")
 
-    # Harmless for cookie-based sites; useful if the token is actually an API token.
+    # PidginHost API tokens use DRF token auth, not Bearer/X-API-Key.
+    # Verified: Authorization: Token <token> can read /api/cloud/servers/<id>/.
     if TOKEN and "=" not in TOKEN and ";" not in TOKEN:
-        s.headers.update(
-            {
-                "Authorization": f"Bearer {TOKEN}",
-                "X-Api-Key": TOKEN,
-                "X-Auth-Token": TOKEN,
-            }
-        )
+        s.headers.update({"Authorization": f"Token {TOKEN}"})
 
 
 def is_login_redirect(resp: requests.Response) -> bool:
@@ -175,6 +172,33 @@ def extract_hidden_fields(html: str) -> dict:
         fields[name] = value
     return fields
 
+
+
+def api_server_status(s: requests.Session) -> dict:
+    r = s.get(API_SERVER_URL, headers={"Accept": "application/json"}, timeout=25)
+    log(f"📡 GET {API_SERVER_URL} -> HTTP {r.status_code}")
+    if r.status_code == 401:
+        raise PidginHostError("PidginHost API Token 无效或未按 Authorization: Token 传递")
+    if r.status_code != 200:
+        raise PidginHostError(f"PidginHost API 读取服务器失败：HTTP {r.status_code} {r.text[:200]}")
+    data = r.json()
+    log(f"✅ API Token 有效：server={data.get('id')} hostname={data.get('hostname')} status={data.get('status')}")
+    return data
+
+
+def api_recent_renew_log(s: requests.Session) -> str | None:
+    try:
+        r = s.get(API_ACTIVITY_URL, headers={"Accept": "application/json"}, timeout=25)
+        if r.status_code != 200:
+            return None
+        logs = r.json().get("logs", [])
+        for item in logs:
+            msg = str(item.get("message", ""))
+            if "Free VM renewal extended" in msg:
+                return f"{item.get('date')} - {msg}"
+    except Exception:
+        return None
+    return None
 
 def renew(s: requests.Session) -> requests.Response:
     page = get_server_page(s)
@@ -222,7 +246,20 @@ def main() -> int:
             raise PidginHostError("缺少 PIDGINHOST_TOKEN 或 PIDGINHOST_COOKIE Secret")
 
         s = make_session()
-        renew(s)
+        if TOKEN:
+            api_server_status(s)
+            latest = api_recent_renew_log(s)
+            if latest:
+                log(f"🧾 最近续期日志：{latest}")
+
+        if COOKIE or (TOKEN and ("=" in TOKEN or ";" in TOKEN)) or COOKIE_NAME:
+            renew(s)
+        else:
+            raise PidginHostError(
+                "API Token 已验证有效，但 PidginHost 的免费 VM 续期 F12 是面板 POST，"
+                "当前公开 API schema 没有 renew/free-renew 端点；需要完整 Cookie/CSRF 或新的 F12 API 续期请求。"
+            )
+
         st["last_check_time"] = now_cn()
         st["last_renew_time"] = now_cn()
         st["last_renew_timestamp"] = now_ts()
