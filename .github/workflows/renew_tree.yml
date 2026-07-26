@@ -1,13 +1,13 @@
-name: Auto Renew Server
+name: TreeMC Host Auto Renew
 
 on:
   schedule:
-    - cron: "0 3 * * *"
-    - cron: "0 15 * * *"
+    # 每 4 小时运行一次 (00:00, 04:00, 08:00, 12:00, 16:00, 20:00 UTC)
+    - cron: "0 */4 * * *"
   workflow_dispatch: {}
 
 concurrency:
-  group: auto-renew
+  group: treemc-auto-renew
   cancel-in-progress: true
 
 jobs:
@@ -18,7 +18,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install and Start Cloudflare WARP SOCKS5 Proxy
+      - name: Install and Start Cloudflare WARP (SOCKS5 Proxy)
         run: |
           curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | sudo gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
           echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ noble main" | sudo tee /etc/apt/sources.list.d/cloudflare-client.list
@@ -31,7 +31,7 @@ jobs:
           warp-cli --accept-tos proxy port 40001 || true
           warp-cli --accept-tos connect || true
           sleep 3
-          echo "=== WARP SOCKS5 PROXY CHECK ==="
+          echo "=== WARP PROXY CHECK ==="
           curl -x socks5h://127.0.0.1:40001 https://ipinfo.io/json || true
 
       - name: Setup Python
@@ -50,19 +50,17 @@ jobs:
           google-chrome --version || chromium-browser --version
 
       - name: Install Python deps
-        run: pip install --upgrade pip seleniumbase
+        run: pip install --upgrade pip seleniumbase requests "requests[socks]"
 
       - name: Install chromedriver
         run: python -m seleniumbase install chromedriver
 
-      - name: Run renew
+      - name: Run TreeMC Renew
         env:
-          BLINKY_USER: ${{ secrets.BLINKY_USER }}
-          BLINKY_PASS: ${{ secrets.BLINKY_PASS }}
-          SESSION_COOKIE: ${{ secrets.SESSION_COOKIE }}
-          SERVER_ID: ${{ secrets.SERVER_ID }}
-          PROXY_SERVER: "socks5://127.0.0.1:40001"
+          TREEMC_TOKEN: ${{ secrets.TREEMC_TOKEN }}
+          TREEMC_COOKIE: ${{ secrets.TREEMC_COOKIE }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          PROXY_SERVER: "socks5://127.0.0.1:40001"
           HEADLESS: "true"
-        run: python renew.py
+        run: python renew_treemc.py
