@@ -25,8 +25,8 @@ import requests
 BASE = "https://www.pidginhost.ro"
 SERVER_ID = os.environ.get("PIDGINHOST_SERVER_ID", "3853").strip() or "3853"
 SERVER_URL = f"{BASE}/panel/cloud/servers/{SERVER_ID}/"
-API_SERVER_URL = f"{BASE}/api/cloud/servers/{SERVER_ID}/"
-API_ACTIVITY_URL = f"{BASE}/api/cloud/servers/{SERVER_ID}/activity/"
+API_SERVER_URL = f"{BASE}/api/v1/cloud/servers/{SERVER_ID}/"
+API_ACTIVITY_URL = f"{BASE}/api/v1/cloud/servers/{SERVER_ID}/activity/"
 LOGIN_URL = f"{BASE}/panel/account/login?next=/panel/cloud/servers/{SERVER_ID}/"
 STATE_FILE = "pidginhost_state.json"
 INTERVAL_DAYS = int(os.environ.get("PIDGINHOST_INTERVAL_DAYS", "4") or "4")
@@ -126,7 +126,7 @@ def apply_auth(s: requests.Session) -> None:
         s.cookies.set(COOKIE_NAME, TOKEN, domain="www.pidginhost.ro", path="/")
 
     # PidginHost API tokens use DRF token auth, not Bearer/X-API-Key.
-    # Verified: Authorization: Token <token> can read /api/cloud/servers/<id>/.
+    # Verified: Authorization: Token <token> can read /api/v1/cloud/servers/<id>/.
     if TOKEN and "=" not in TOKEN and ";" not in TOKEN:
         s.headers.update({"Authorization": f"Token {TOKEN}"})
 
@@ -257,7 +257,7 @@ def main() -> int:
         else:
             raise PidginHostError(
                 "API Token 已验证有效，但 PidginHost 的免费 VM 续期 F12 是面板 POST，"
-                "当前公开 API schema 没有 renew/free-renew 端点；需要完整 Cookie/CSRF 或新的 F12 API 续期请求。"
+                "当前 v1 API schema 没有 renew/free-renew 端点；需要完整 Cookie/CSRF 或新的 F12 API 续期请求。"
             )
 
         st["last_check_time"] = now_cn()
