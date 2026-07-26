@@ -31,6 +31,7 @@ LOGIN_URL = f"{BASE}/panel/account/login?next=/panel/cloud/servers/{SERVER_ID}/"
 STATE_FILE = "pidginhost_state.json"
 INTERVAL_DAYS = int(os.environ.get("PIDGINHOST_INTERVAL_DAYS", "4") or "4")
 FORCE = str(os.environ.get("FORCE_RUN", "")).lower() in ("1", "true", "yes", "y")
+CLICK_DELAY_SECONDS = float(os.environ.get("PIDGINHOST_CLICK_DELAY_SECONDS", "2") or "2")
 
 # Recommended: PIDGINHOST_COOKIE='sessionid=...; csrftoken=...'
 # If only a raw token value is available, also set PIDGINHOST_COOKIE_NAME.
@@ -211,6 +212,9 @@ def renew(s: requests.Session) -> requests.Response:
         "X-CSRFToken": csrf,
         "Content-Type": "application/x-www-form-urlencoded",
     }
+    if CLICK_DELAY_SECONDS > 0:
+        log(f"⏳ 模拟页面点击延迟 {CLICK_DELAY_SECONDS:g} 秒后提交 POST")
+        time.sleep(CLICK_DELAY_SECONDS)
     r = s.post(SERVER_URL, data=data, headers=headers, allow_redirects=False, timeout=25)
     log(f"📡 POST {SERVER_URL} -> HTTP {r.status_code}")
     if r.status_code == 403 and "CSRF" in r.text.upper():
