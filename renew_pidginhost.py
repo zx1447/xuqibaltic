@@ -166,12 +166,12 @@ def extract_csrf(s: requests.Session, html: str) -> str:
 def extract_hidden_fields(fragment: str) -> dict:
     fields = {}
     for tag in re.findall(r"<input[^>]+>", fragment, flags=re.I):
-        if not re.search(r"type=["']hidden["']", tag, flags=re.I):
+        if not re.search(r"type=[\"\']hidden[\"\']", tag, flags=re.I):
             continue
-        name = re.search(r"name=["']([^"']+)", tag, flags=re.I)
+        name = re.search(r"name=[\"\']([^\"\']+)", tag, flags=re.I)
         if not name:
             continue
-        value = re.search(r"value=["']([^"']*)", tag, flags=re.I)
+        value = re.search(r"value=[\"\']([^\"\']*)", tag, flags=re.I)
         fields[name.group(1)] = value.group(1) if value else ""
     return fields
 
