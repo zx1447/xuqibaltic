@@ -163,15 +163,29 @@ def extract_csrf(s: requests.Session, html: str) -> str:
     raise PidginHostError("未找到 CSRF Token，请补充 F12 的请求载荷和 Cookie")
 
 
-def extract_hidden_fields(html: str) -> dict:
+def extract_hidden_fields(fragment: str) -> dict:
     fields = {}
-    for name, value in re.findall(
-        r'<input[^>]+type=["\']hidden["\'][^>]*name=["\']([^"\']+)["\'][^>]*value=["\']([^"\']*)["\'][^>]*>',
-        html,
-        flags=re.I,
-    ):
-        fields[name] = value
+    for tag in re.findall(r"<input[^>]+>", fragment, flags=re.I):
+        if not re.search(r"type=["']hidden["']", tag, flags=re.I):
+            continue
+        name = re.search(r"name=["']([^"']+)", tag, flags=re.I)
+        if not name:
+            continue
+        value = re.search(r"value=["']([^"']*)", tag, flags=re.I)
+        fields[name.group(1)] = value.group(1) if value else ""
     return fields
+
+
+def extract_renew_fields(html: str, csrf: str) -> dict:
+    # PidginHost 免费 VM 续期不是 /api/v1 端点，而是面板表单：
+    # POST /panel/cloud/servers/<id>/ with action=extend_renewal.
+    for form in re.findall(r"<form[\s\S]*?</form>", html, flags=re.I):
+        if "extend_renewal" in form:
+            fields = extract_hidden_fields(form)
+            fields.setdefault("csrfmiddlewaretoken", csrf)
+            fields["action"] = "extend_renewal"
+            return fields
+    return {"csrfmiddlewaretoken": csrf, "action": "extend_renewal"}
 
 
 
@@ -204,8 +218,8 @@ def api_recent_renew_log(s: requests.Session) -> str | None:
 def renew(s: requests.Session) -> requests.Response:
     page = get_server_page(s)
     csrf = extract_csrf(s, page.text)
-    data = extract_hidden_fields(page.text)
-    data.setdefault("csrfmiddlewaretoken", csrf)
+    data = extract_renew_fields(page.text, csrf)
+    log(f"🧩 PidginHost 续期表单 action={data.get('action')}")
     headers = {
         "Referer": SERVER_URL,
         "Origin": BASE,
