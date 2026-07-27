@@ -26,8 +26,16 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install dependencies
-        run: pip install --upgrade pip requests "requests[socks]"
+      - name: Install browser dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget gnupg xvfb
+          wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add - 2>/dev/null || true
+          echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
+          sudo apt-get update
+          sudo apt-get install -y google-chrome-stable || sudo apt-get install -y chromium-browser
+          pip install --upgrade pip requests "requests[socks]" seleniumbase
+          python -m seleniumbase install chromedriver
 
       - name: Run CastleHost check
         env:
