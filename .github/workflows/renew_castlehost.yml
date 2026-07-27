@@ -1,0 +1,54 @@
+name: CastleHost Server Check
+
+on:
+  # 暂时只保留手动运行；等确认续期周期/POST 接口后再开启 schedule。
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: castlehost-check
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout CastleHost branch
+        uses: actions/checkout@v4
+        with:
+          ref: castlehost
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install --upgrade pip requests "requests[socks]"
+
+      - name: Run CastleHost check
+        env:
+          CASTLEHOST_COOKIE: ${{ secrets.CASTLEHOST_COOKIE }}
+          CASTLEHOST_EMAIL: ${{ secrets.CASTLEHOST_EMAIL }}
+          CASTLEHOST_PASSWORD: ${{ secrets.CASTLEHOST_PASSWORD }}
+          CASTLEHOST_SERVER_ID: ${{ secrets.CASTLEHOST_SERVER_ID || '140640' }}
+          CASTLEHOST_PROXY: ${{ secrets.CASTLEHOST_PROXY }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: python renew_castlehost.py
+
+      - name: Save CastleHost state
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add castlehost_state.json || true
+          if git diff --cached --quiet; then
+            echo "No CastleHost state change."
+            exit 0
+          fi
+          git commit -m "Update CastleHost state [skip ci]"
+          git push origin HEAD:castlehost
