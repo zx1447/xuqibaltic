@@ -32,15 +32,28 @@ jobs:
           echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ noble main" | sudo tee /etc/apt/sources.list.d/cloudflare-client.list
           sudo apt-get update
           sudo apt-get install -y cloudflare-warp
-          sudo warp-svc &
-          sleep 3
+          sudo systemctl restart warp-svc || sudo service warp-svc restart || true
+          sleep 5
           warp-cli --accept-tos registration new || true
           warp-cli --accept-tos mode proxy || true
           warp-cli --accept-tos proxy port 40001 || true
           warp-cli --accept-tos connect || true
-          sleep 5
           echo "=== WARP SOCKS5 PROXY CHECK ==="
-          curl -x socks5h://127.0.0.1:40001 https://ipinfo.io/json || true
+          ok=0
+          for i in $(seq 1 12); do
+            if curl -fsS -x socks5h://127.0.0.1:40001 https://ipinfo.io/json; then
+              ok=1
+              break
+            fi
+            echo "WARP proxy not ready yet: $i/12"
+            sleep 5
+          done
+          if [ "$ok" = "1" ]; then
+            echo "CASTLEHOST_PROXY=socks5://127.0.0.1:40001" >> "$GITHUB_ENV"
+            echo "✅ WARP proxy ready; CastleHost will use WARP"
+          else
+            echo "⚠️ WARP proxy unavailable; CastleHost will run without WARP"
+          fi
 
       - name: Install Playwright stealth browser dependencies
         run: |
@@ -55,7 +68,6 @@ jobs:
           CASTLEHOST_EMAIL: ${{ secrets.CASTLEHOST_EMAIL }}
           CASTLEHOST_PASSWORD: ${{ secrets.CASTLEHOST_PASSWORD }}
           CASTLEHOST_SERVER_ID: ${{ secrets.CASTLEHOST_SERVER_ID || '140640' }}
-          CASTLEHOST_PROXY: ${{ secrets.CASTLEHOST_PROXY || 'socks5://127.0.0.1:40001' }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
         run: xvfb-run --auto-servernum --server-args="-screen 0 1365x768x24" node castlehost_browser.js
