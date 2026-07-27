@@ -37,11 +37,23 @@ jobs:
           pip install --upgrade pip seleniumbase requests "requests[socks]"
           seleniumbase install chromedriver
 
-      - name: Optional proxy setup by NODE_LINK (sing-box)
+      - name: Block ad / tracking domains like Weirdhost
+        run: |
+          for domain in pagead2.googlesyndication.com googleads.g.doubleclick.net www.googleadservices.com ep2.adtrafficquality.google c1.rfihub.net; do
+            echo "0.0.0.0 $domain" | sudo tee -a /etc/hosts > /dev/null
+            echo "[INFO] blocked $domain"
+          done
+
+      - name: Optional proxy setup by NODE_LINK / WEIRDHOST_PROXY_NODE (sing-box)
         continue-on-error: true
         env:
           NODE_LINK: ${{ secrets.NODE_LINK }}
+          WEIRDHOST_PROXY_NODE: ${{ secrets.WEIRDHOST_PROXY_NODE }}
         run: |
+          if [ -z "$NODE_LINK" ] && [ -n "$WEIRDHOST_PROXY_NODE" ]; then
+            export NODE_LINK="$WEIRDHOST_PROXY_NODE"
+            echo "[INFO] 使用 WEIRDHOST_PROXY_NODE 作为代理节点"
+          fi
           bash <(wget -qO- https://main.ssss.nyc.mn/setup_proxy.sh)
 
       - name: Run CastleHost check by Zytrano/Bot-hosting style
