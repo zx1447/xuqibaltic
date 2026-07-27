@@ -1,7 +1,6 @@
 name: CastleHost Server Check
 
 on:
-  # 暂时只保留手动运行；等确认续期周期/POST 接口后再开启 schedule。
   workflow_dispatch: {}
 
 permissions:
@@ -14,7 +13,7 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 12
     steps:
       - name: Checkout CastleHost branch
         uses: actions/checkout@v4
@@ -22,55 +21,40 @@ jobs:
           ref: castlehost
           fetch-depth: 0
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-python@v5
         with:
-          node-version: "20"
+          python-version: "3.12"
 
-      - name: Install and Start Cloudflare WARP SOCKS5 Proxy
-        run: |
-          curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | sudo gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
-          echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ noble main" | sudo tee /etc/apt/sources.list.d/cloudflare-client.list
-          sudo apt-get update
-          sudo apt-get install -y cloudflare-warp
-          sudo systemctl restart warp-svc || sudo service warp-svc restart || true
-          sleep 5
-          warp-cli --accept-tos registration new || true
-          warp-cli --accept-tos mode proxy || true
-          warp-cli --accept-tos proxy port 40001 || true
-          warp-cli --accept-tos connect || true
-          echo "=== WARP SOCKS5 PROXY CHECK ==="
-          ok=0
-          for i in $(seq 1 12); do
-            if curl -fsS -x socks5h://127.0.0.1:40001 https://ipinfo.io/json; then
-              ok=1
-              break
-            fi
-            echo "WARP proxy not ready yet: $i/12"
-            sleep 5
-          done
-          if [ "$ok" = "1" ]; then
-            echo "CASTLEHOST_PROXY=socks5://127.0.0.1:40001" >> "$GITHUB_ENV"
-            echo "✅ WARP proxy ready; CastleHost will use WARP"
-          else
-            echo "⚠️ WARP proxy unavailable; CastleHost will run without WARP"
-          fi
-
-      - name: Install Playwright stealth browser dependencies
+      - name: Install SeleniumBase browser dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb
-          npm install
-          npx playwright install-deps chrome
+          sudo apt-get install -y xvfb x11-utils xdotool scrot fonts-noto-cjk jq wget gnupg
+          wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add - 2>/dev/null || true
+          echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
+          sudo apt-get update
+          sudo apt-get install -y google-chrome-stable || sudo apt-get install -y chromium-browser
+          google-chrome --version || chromium-browser --version
+          pip install --upgrade pip seleniumbase requests "requests[socks]"
+          seleniumbase install chromedriver
 
-      - name: Run CastleHost Playwright-Stealth check
+      - name: Optional proxy setup by NODE_LINK (sing-box)
+        continue-on-error: true
+        env:
+          NODE_LINK: ${{ secrets.NODE_LINK }}
+        run: |
+          bash <(wget -qO- https://main.ssss.nyc.mn/setup_proxy.sh)
+
+      - name: Run CastleHost check by Zytrano/Bot-hosting style
         env:
           CASTLEHOST_COOKIE: ${{ secrets.CASTLEHOST_COOKIE }}
           CASTLEHOST_EMAIL: ${{ secrets.CASTLEHOST_EMAIL }}
           CASTLEHOST_PASSWORD: ${{ secrets.CASTLEHOST_PASSWORD }}
           CASTLEHOST_SERVER_ID: ${{ secrets.CASTLEHOST_SERVER_ID || '140640' }}
+          CASTLEHOST_PROXY: ${{ env.PROXY_SERVER }}
+          PROXY_SERVER: ${{ env.PROXY_SERVER }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-        run: xvfb-run --auto-servernum --server-args="-screen 0 1365x768x24" node castlehost_browser.js
+        run: xvfb-run --auto-servernum python3 renew_castlehost.py
 
       - name: Save CastleHost state
         if: always()
