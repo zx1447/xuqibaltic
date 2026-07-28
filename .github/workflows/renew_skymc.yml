@@ -1,0 +1,52 @@
+name: SkyMC Cookie Check
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: skymc-cookie-check
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout SkyMC branch
+        uses: actions/checkout@v4
+        with:
+          ref: skymc
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install --upgrade pip requests "requests[socks]"
+
+      - name: Run SkyMC cookie check
+        env:
+          SKYMC_COOKIE: ${{ secrets.SKYMC_COOKIE }}
+          SKYMC_USER: ${{ secrets.SKYMC_USER }}
+          SKYMC_PASS: ${{ secrets.SKYMC_PASS }}
+          SKYMC_PROXY: ${{ secrets.SKYMC_PROXY }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: python renew_skymc.py
+
+      - name: Save SkyMC state
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add skymc_state.json || true
+          if git diff --cached --quiet; then
+            echo "No SkyMC state change."
+            exit 0
+          fi
+          git commit -m "Update SkyMC state [skip ci]"
+          git push origin HEAD:skymc
