@@ -1,17 +1,25 @@
 {
-  "last_visit_timestamp": 1785210872,
-  "last_visit_time": "2026-07-28 11:54:32",
-  "next_visit_timestamp": 1785502052,
-  "next_visit_time": "2026-07-31 20:47:32",
-  "next_interval_days": 3,
+  "last_visit_timestamp": 1785211364,
+  "last_visit_time": "2026-07-28 12:02:44",
+  "next_visit_timestamp": 1785385605,
+  "next_visit_time": "2026-07-30 12:26:45",
+  "next_interval_days": 2,
   "server_id": "2d24e7a5",
   "last_status": "success",
-  "last_url": "https://cloud.panel.enzonic.com/server/2d24e7a5/files/edit/server.properties/",
-  "next_interval_hours": 8,
-  "next_interval_minutes": 53,
-  "visit_urls_count": 2,
+  "last_url": "https://cloud.panel.enzonic.com/server/2d24e7a5/files/versions",
+  "next_interval_hours": 0,
+  "next_interval_minutes": 24,
+  "visit_urls_count": 3,
   "visit_urls": [
     "https://cloud.panel.enzonic.com/server/2d24e7a5/files/edit/server.properties/",
-    "https://cloud.panel.enzonic.com/server/2d24e7a5/files/versions"
-  ]
+    "https://cloud.panel.enzonic.com/server/2d24e7a5/files/versions",
+    "https://cloud.panel.enzonic.com/server/2d24e7a5/files/edit/eula.txt/"
+  ],
+  "last_api_result": {
+    "enabled": true,
+    "target": "server",
+    "server_identifier": "8ede0df4",
+    "name": "vip01",
+    "status": null
+  }
 }
