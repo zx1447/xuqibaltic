@@ -52,6 +52,8 @@ jobs:
           ENZONIC_COOKIE: ${{ secrets.ENZONIC_COOKIE }}
           ENZONIC_SERVER_ID: ${{ secrets.ENZONIC_SERVER_ID || '2d24e7a5' }}
           ENZONIC_PROXY: ${{ secrets.ENZONIC_PROXY }}
+          ENZONIC_API_KEY: ${{ secrets.ENZONIC_API_KEY }}
+          ENZONIC_API_SERVER_ID: ${{ secrets.ENZONIC_API_SERVER_ID }}
           FORCE_RUN: ${{ github.event.inputs.force }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}

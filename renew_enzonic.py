@@ -27,12 +27,16 @@ VERSIONS_URL = os.environ.get(
     "ENZONIC_VERSIONS_URL",
     f"{BASE}/server/{SERVER_ID}/files/versions",
 ).strip()
+EULA_URL = os.environ.get(
+    "ENZONIC_EULA_URL",
+    f"{BASE}/server/{SERVER_ID}/files/edit/eula.txt/",
+).strip()
 # Multiple visit targets. You can override with ENZONIC_VISIT_URLS as newline/comma separated URLs.
 _raw_visit_urls = os.environ.get("ENZONIC_VISIT_URLS", "").strip()
 if _raw_visit_urls:
     VISIT_URLS = [u.strip() for part in _raw_visit_urls.splitlines() for u in part.split(",") if u.strip()]
 else:
-    VISIT_URLS = [FILES_URL, VERSIONS_URL]
+    VISIT_URLS = [FILES_URL, VERSIONS_URL, EULA_URL]
 LOGIN_URL = f"{BASE}/login"
 STATE_FILE = "enzonic_state.json"
 USER = os.environ.get("ENZONIC_USER", "").strip()
@@ -42,6 +46,8 @@ PROXY = (os.environ.get("ENZONIC_PROXY") or os.environ.get("PROXY_SERVER") or ""
 FORCE_RUN = str(os.environ.get("FORCE_RUN", "")).lower() in ("1", "true", "yes", "y")
 TG_TOKEN = os.environ.get("TG_BOT_TOKEN", "").strip()
 TG_CHAT_ID = os.environ.get("TG_CHAT_ID", "").strip()
+API_KEY = os.environ.get("ENZONIC_API_KEY", "").strip()
+API_SERVER_ID = os.environ.get("ENZONIC_API_SERVER_ID", "").strip()
 
 
 class EnzonicError(RuntimeError):
@@ -105,9 +111,10 @@ def should_run(state: dict) -> bool:
 
 
 def update_next_schedule(state: dict) -> None:
-    days = random.randint(1, 4)
-    # Add hour/minute jitter to avoid a fixed daily pattern.
-    hours = random.randint(0, 23)
+    # User requested: every 2 days, randomly visit one of the configured pages.
+    days = 2
+    # Small minute jitter avoids triggering at the exact same minute every run.
+    hours = 0
     minutes = random.randint(0, 59)
     next_ts = int(time.time() + days * 86400 + hours * 3600 + minutes * 60)
     next_dt = dt.datetime.fromtimestamp(next_ts, dt.timezone.utc).astimezone(
@@ -118,7 +125,77 @@ def update_next_schedule(state: dict) -> None:
     state["next_interval_minutes"] = minutes
     state["next_visit_timestamp"] = next_ts
     state["next_visit_time"] = next_dt.strftime("%Y-%m-%d %H:%M:%S")
-    log(f"🎲 下次 Enzonic 随机访问：{days} 天 {hours} 小时 {minutes} 分钟后（{state['next_visit_time']}）")
+    log(f"🎲 下次 Enzonic 访问：{days} 天 {minutes} 分钟后（{state['next_visit_time']}）")
+
+
+def api_headers() -> dict:
+    return {
+        "Authorization": f"Bearer {API_KEY}",
+        "Accept": "application/json",
+        "User-Agent": "Mozilla/5.0",
+    }
+
+
+def api_get_json(path: str, timeout: int = 15) -> dict:
+    url = path if path.startswith("http") else BASE + path
+    resp = requests.get(url, headers=api_headers(), timeout=timeout)
+    log(f"📡 API GET {path} -> HTTP {resp.status_code}")
+    try:
+        data = resp.json()
+    except ValueError:
+        data = {"raw": resp.text[:500]}
+    if resp.status_code >= 400:
+        raise EnzonicError(f"API 请求失败 HTTP {resp.status_code}: {str(data)[:300]}")
+    return data
+
+
+def api_detect_server_identifier() -> str:
+    if API_SERVER_ID:
+        return API_SERVER_ID
+    data = api_get_json("/api/client")
+    servers = data.get("data") or []
+    # Prefer a server whose URL identifier/UUID starts with SERVER_ID; otherwise use first server.
+    for item in servers:
+        attrs = item.get("attributes", {}) if isinstance(item, dict) else {}
+        if str(attrs.get("identifier", "")).startswith(SERVER_ID) or str(attrs.get("uuid", "")).startswith(SERVER_ID):
+            return attrs.get("identifier") or SERVER_ID
+    if servers:
+        attrs = servers[0].get("attributes", {})
+        ident = attrs.get("identifier")
+        if ident:
+            log(f"🔎 API 自动识别 Enzonic server identifier: {ident}")
+            return ident
+    return SERVER_ID
+
+
+def api_random_touch() -> dict:
+    """Touch Enzonic Client API using the pacc_ token.
+
+    The browser page URL uses 2d24e7a5, while the Client API may use a different
+    server identifier (observed from /api/client). File APIs can be slow when the
+    daemon is unavailable, so the stable API touch is metadata/resources.
+    """
+    if not API_KEY:
+        return {"enabled": False}
+    ident = api_detect_server_identifier()
+    choices = [
+        ("server", f"/api/client/servers/{ident}"),
+        ("resources", f"/api/client/servers/{ident}/resources"),
+    ]
+    name, path = random.choice(choices)
+    data = api_get_json(path, timeout=15)
+    summary = {"enabled": True, "target": name, "server_identifier": ident}
+    try:
+        if name == "server":
+            attrs = data.get("attributes", {})
+            summary.update({"name": attrs.get("name"), "status": attrs.get("status")})
+        elif name == "resources":
+            attrs = data.get("attributes", {})
+            summary.update({"current_state": attrs.get("current_state"), "is_suspended": attrs.get("is_suspended")})
+    except Exception:
+        pass
+    log("✅ Enzonic API 访问完成：" + json.dumps(summary, ensure_ascii=False))
+    return summary
 
 
 def add_cookie_header(sb) -> None:
@@ -260,8 +337,10 @@ def main() -> int:
         state["last_visit_timestamp"] = int(time.time())
         state["last_visit_time"] = now_cn()
         state["server_id"] = SERVER_ID
+        api_result = api_random_touch()
         state["last_status"] = "success"
         state["last_url"] = final_url
+        state["last_api_result"] = api_result
         state["visit_urls_count"] = len(VISIT_URLS)
         state["visit_urls"] = VISIT_URLS
         update_next_schedule(state)
