@@ -1,9 +1,12 @@
 {
-  "last_visit_timestamp": 0,
-  "last_visit_time": null,
-  "next_visit_timestamp": 0,
-  "next_visit_time": null,
-  "next_interval_days": null,
+  "last_visit_timestamp": 1785210501,
+  "last_visit_time": "2026-07-28 11:48:21",
+  "next_visit_timestamp": 1785495501,
+  "next_visit_time": "2026-07-31 18:58:21",
+  "next_interval_days": 3,
   "server_id": "2d24e7a5",
-  "last_status": null
+  "last_status": "success",
+  "last_url": "https://cloud.panel.enzonic.com/server/2d24e7a5/files/edit/server.properties/",
+  "next_interval_hours": 7,
+  "next_interval_minutes": 10
 }
