@@ -30,8 +30,7 @@ VERSIONS_URL = os.environ.get(
 # Multiple visit targets. You can override with ENZONIC_VISIT_URLS as newline/comma separated URLs.
 _raw_visit_urls = os.environ.get("ENZONIC_VISIT_URLS", "").strip()
 if _raw_visit_urls:
-    VISIT_URLS = [u.strip() for part in _raw_visit_urls.split("
-") for u in part.split(",") if u.strip()]
+    VISIT_URLS = [u.strip() for part in _raw_visit_urls.splitlines() for u in part.split(",") if u.strip()]
 else:
     VISIT_URLS = [FILES_URL, VERSIONS_URL]
 LOGIN_URL = f"{BASE}/login"
