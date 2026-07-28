@@ -1,0 +1,71 @@
+name: Enzonic Random Files Visit
+
+on:
+  schedule:
+    # 每天检查一次；脚本内部按 1~4 天随机间隔决定是否真正登录访问。
+    - cron: "20 2 * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "是否忽略随机间隔并立即访问（true/false）"
+        required: false
+        default: "false"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: enzonic-random-visit
+  cancel-in-progress: true
+
+jobs:
+  visit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout Enzonic branch
+        uses: actions/checkout@v4
+        with:
+          ref: enzonic
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install browser dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb x11-utils xdotool scrot fonts-noto-cjk wget gnupg
+          wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add - 2>/dev/null || true
+          echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
+          sudo apt-get update
+          sudo apt-get install -y google-chrome-stable || sudo apt-get install -y chromium-browser
+          google-chrome --version || chromium-browser --version
+          pip install --upgrade pip seleniumbase requests "requests[socks]"
+          seleniumbase install chromedriver
+
+      - name: Run Enzonic random visit
+        env:
+          ENZONIC_USER: ${{ secrets.ENZONIC_USER }}
+          ENZONIC_PASS: ${{ secrets.ENZONIC_PASS }}
+          ENZONIC_COOKIE: ${{ secrets.ENZONIC_COOKIE }}
+          ENZONIC_SERVER_ID: ${{ secrets.ENZONIC_SERVER_ID || '2d24e7a5' }}
+          ENZONIC_PROXY: ${{ secrets.ENZONIC_PROXY }}
+          FORCE_RUN: ${{ github.event.inputs.force }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: xvfb-run --auto-servernum python3 renew_enzonic.py
+
+      - name: Save Enzonic state
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add enzonic_state.json || true
+          if git diff --cached --quiet; then
+            echo "No Enzonic state change."
+            exit 0
+          fi
+          git commit -m "Update Enzonic random visit state [skip ci]"
+          git push origin HEAD:enzonic
