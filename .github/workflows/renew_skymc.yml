@@ -1,7 +1,12 @@
 name: SkyMC Cookie Check
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      password_login:
+        description: "是否忽略 Cookie，强制测试账号密码浏览器登录（true/false）"
+        required: false
+        default: "false"
 
 permissions:
   contents: write
@@ -25,8 +30,17 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install dependencies
-        run: pip install --upgrade pip requests "requests[socks]"
+      - name: Install browser dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb x11-utils xdotool scrot fonts-noto-cjk wget gnupg
+          wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add - 2>/dev/null || true
+          echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
+          sudo apt-get update
+          sudo apt-get install -y google-chrome-stable || sudo apt-get install -y chromium-browser
+          google-chrome --version || chromium-browser --version
+          pip install --upgrade pip requests "requests[socks]" seleniumbase
+          seleniumbase install chromedriver
 
       - name: Run SkyMC cookie check
         env:
@@ -34,6 +48,7 @@ jobs:
           SKYMC_USER: ${{ secrets.SKYMC_USER }}
           SKYMC_PASS: ${{ secrets.SKYMC_PASS }}
           SKYMC_PROXY: ${{ secrets.SKYMC_PROXY }}
+          SKYMC_FORCE_PASSWORD_LOGIN: ${{ github.event.inputs.password_login }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
         run: python renew_skymc.py
