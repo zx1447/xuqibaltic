@@ -23,6 +23,17 @@ FILES_URL = os.environ.get(
     "ENZONIC_FILES_URL",
     f"{BASE}/server/{SERVER_ID}/files/edit/server.properties/",
 ).strip()
+VERSIONS_URL = os.environ.get(
+    "ENZONIC_VERSIONS_URL",
+    f"{BASE}/server/{SERVER_ID}/files/versions",
+).strip()
+# Multiple visit targets. You can override with ENZONIC_VISIT_URLS as newline/comma separated URLs.
+_raw_visit_urls = os.environ.get("ENZONIC_VISIT_URLS", "").strip()
+if _raw_visit_urls:
+    VISIT_URLS = [u.strip() for part in _raw_visit_urls.split("
+") for u in part.split(",") if u.strip()]
+else:
+    VISIT_URLS = [FILES_URL, VERSIONS_URL]
 LOGIN_URL = f"{BASE}/login"
 STATE_FILE = "enzonic_state.json"
 USER = os.environ.get("ENZONIC_USER", "").strip()
@@ -202,9 +213,13 @@ def login_if_needed(sb) -> None:
 
 
 def visit_files_page(sb) -> str:
-    # Randomly visit once; currently only one target URL is provided.
-    target = FILES_URL
-    log(f"🌐 随机访问 Enzonic Files 页面：{target}")
+    # Randomly visit one target from the configured Enzonic pages.
+    targets = [u for u in VISIT_URLS if u]
+    if not targets:
+        targets = [FILES_URL]
+    target = random.choice(targets)
+    log(f"🎲 本次从 {len(targets)} 个 Enzonic 地址中随机选择访问")
+    log(f"🌐 随机访问 Enzonic 页面：{target}")
     sb.open(target)
     sb.wait_for_ready_state_complete()
     time.sleep(random.randint(6, 12))
@@ -214,9 +229,9 @@ def visit_files_page(sb) -> str:
         title = sb.get_title()
     except Exception:
         pass
-    log(f"✅ Enzonic Files 访问完成：{cur} title={title[:120]}")
+    log(f"✅ Enzonic 页面访问完成：{cur} title={title[:120]}")
     if "/login" in cur.lower():
-        raise EnzonicError("访问 Files 页面时被重定向到登录页")
+        raise EnzonicError("访问 Enzonic 页面时被重定向到登录页")
     return cur
 
 
@@ -248,6 +263,8 @@ def main() -> int:
         state["server_id"] = SERVER_ID
         state["last_status"] = "success"
         state["last_url"] = final_url
+        state["visit_urls_count"] = len(VISIT_URLS)
+        state["visit_urls"] = VISIT_URLS
         update_next_schedule(state)
         save_state(state)
         send_tg(f"✅ Enzonic 随机访问成功\n🕐 {now_cn()}\n📌 下次：{state['next_visit_time']}")
