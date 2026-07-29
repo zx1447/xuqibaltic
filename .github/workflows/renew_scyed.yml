@@ -1,7 +1,7 @@
 name: SCYED Random Renew
 
 on:
-  # 已暂停自动运行，仅保留手动 workflow_dispatch。
+  # 跑通后再恢复每日定时触发；当前先保留手动测试。
   workflow_dispatch:
     inputs:
       force:
@@ -32,22 +32,41 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Install stealth browser dependencies
+      - name: Install browser and Xray dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb
+          sudo apt-get install -y xvfb unzip
           npm install
           npx playwright install-deps chrome
+          mkdir -p /tmp/scyed-xray
+          XRAY_TAG=$(curl -fsSL -H "User-Agent: scyed-renew" https://api.github.com/repos/XTLS/Xray-core/releases/latest | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag_name"])')
+          curl -fsSL "https://github.com/XTLS/Xray-core/releases/download/${XRAY_TAG}/Xray-linux-64.zip" -o /tmp/scyed-xray/xray.zip
+          unzip -q /tmp/scyed-xray/xray.zip -d /tmp/scyed-xray
+          chmod +x /tmp/scyed-xray/xray
+          /tmp/scyed-xray/xray version | head -1
 
-      - name: Run SCYED Playwright stealth renew
+      - name: Run SCYED through supplied VLESS node
         env:
           SCYED_USER: ${{ secrets.SCYED_USER }}
           SCYED_PASS: ${{ secrets.SCYED_PASS }}
-          SCYED_PROXY: ${{ secrets.SCYED_PROXY }}
-          # 根域名经过 Cloudflare 会封锁 Actions，直接解析到 SCYED 源站。
-          SCYED_ORIGIN_IP: ${{ secrets.SCYED_ORIGIN_IP || '130.193.96.121' }}
+          SCYED_VLESS_URI: ${{ secrets.SCYED_VLESS_URI }}
+          SCYED_PROXY: "socks5://127.0.0.1:1080"
           FORCE_RUN: ${{ github.event.inputs.force }}
-        run: xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" node scyed_browser.js
+        run: |
+          python3 setup_scyed_vless.py
+          /tmp/scyed-xray/xray run -c /tmp/scyed-xray/config.json >/tmp/scyed-xray/xray.log 2>&1 &
+          XRAY_PID=$!
+          trap 'kill "$XRAY_PID" 2>/dev/null || true' EXIT
+          for i in $(seq 1 20); do
+            if curl -fsS --max-time 5 -x socks5h://127.0.0.1:1080 https://www.cloudflare.com/cdn-cgi/trace >/tmp/scyed-xray/trace; then
+              break
+            fi
+            sleep 1
+          done
+          grep -E '^(ip|loc|warp)=' /tmp/scyed-xray/trace
+          curl -fsS --max-time 20 -x socks5h://127.0.0.1:1080 https://scyed.com/en/login | grep -q 'id="identifier"'
+          echo "✅ VLESS 节点访问 SCYED 正常"
+          xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" node scyed_browser.js
 
       - name: Save SCYED state
         if: always()
