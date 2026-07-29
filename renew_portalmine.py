@@ -137,17 +137,34 @@ def get_server_state(s: requests.Session) -> dict:
     return data
 
 def coins_ad_begin(s: requests.Session) -> dict:
-    """Start an ad session. Returns {ok, ad_id, duration, ...} or {ok:false,error}."""
+    """Start an ad session. Returns {ok, token, seconds, reward, ...} or {ok:false,error}."""
     r = s.get(COINS_AD_BEGIN_URL, timeout=20, headers={"Referer": BASE + "/", "X-Requested-With": "XMLHttpRequest"})
     data = parse_json(r)
-    log(f"📡 GET coins ad_begin -> HTTP {r.status_code}; ok={data.get('ok')}; data={str(data)[:200]}")
+    log(f"📡 GET coins ad_begin -> HTTP {r.status_code}; ok={data.get('ok')}; full={json.dumps(data, ensure_ascii=False)[:400]}")
     return data
 
-def coins_ad_claim(s: requests.Session) -> dict:
-    """Claim the ad reward. Returns {ok, coins, total, ...} or {ok:false,error}."""
-    r = s.get(COINS_AD_CLAIM_URL, timeout=20, headers={"Referer": BASE + "/", "X-Requested-With": "XMLHttpRequest"})
+def coins_ad_claim(s: requests.Session, token: str | None = None) -> dict:
+    """Claim the ad reward. token from ad_begin response.
+    Tries multiple ways to pass token: query param, POST body, header.
+    Returns {ok, coins, total, ...} or {ok:false,error}.
+    """
+    # Try 1: GET with token as query param
+    if token:
+        url = f"{COINS_AD_CLAIM_URL}&token={token}"
+        r = s.get(url, timeout=20, headers={"Referer": BASE + "/", "X-Requested-With": "XMLHttpRequest", "X-Ad-Token": token})
+    else:
+        r = s.get(COINS_AD_CLAIM_URL, timeout=20, headers={"Referer": BASE + "/", "X-Requested-With": "XMLHttpRequest"})
     data = parse_json(r)
-    log(f"📡 GET coins ad_claim -> HTTP {r.status_code}; ok={data.get('ok')}; data={str(data)[:200]}")
+    log(f"📡 GET coins ad_claim (token={'yes' if token else 'no'}) -> HTTP {r.status_code}; data={json.dumps(data, ensure_ascii=False)[:300]}")
+    if r.status_code == 200 and data.get("ok"):
+        return data
+    # Try 2: POST with token in body
+    if token:
+        r2 = s.post(COINS_AD_CLAIM_URL, data={"token": token}, timeout=20, headers={"Referer": BASE + "/", "X-Requested-With": "XMLHttpRequest", "X-Ad-Token": token})
+        data2 = parse_json(r2)
+        log(f"📡 POST coins ad_claim (token in body) -> HTTP {r2.status_code}; data={json.dumps(data2, ensure_ascii=False)[:300]}")
+        if r2.status_code == 200 and data2.get("ok"):
+            return data2
     return data
 
 def run_auto_coins(s: requests.Session, state: dict) -> dict:
@@ -170,16 +187,18 @@ def run_auto_coins(s: requests.Session, state: dict) -> dict:
             time.sleep(5)
             continue
         # duration from response or fallback to AD_SECONDS
-        duration = begin.get("duration") or begin.get("ad_duration") or begin.get("wait_seconds") or AD_SECONDS
+        duration = begin.get("duration") or begin.get("seconds") or begin.get("ad_duration") or begin.get("wait_seconds") or begin.get("step_seconds") or AD_SECONDS
         try:
             duration = int(duration)
         except (TypeError, ValueError):
             duration = AD_SECONDS
         duration = max(5, min(duration, 300))  # clamp 5-300s
-        log(f"⏳ Ad session started (ad_id={begin.get('ad_id') or begin.get('id')}), waiting {duration}s...")
+        # token from ad_begin response (needed for ad_claim)
+        token = begin.get("token") or begin.get("ad_token") or begin.get("session_token")
+        log(f"⏳ Ad session started (token={str(token)[:16] if token else 'None'}...), waiting {duration}s...")
         time.sleep(duration)
         log(f"💰 Auto coins round {i+1}: ad_claim")
-        claim = coins_ad_claim(s)
+        claim = coins_ad_claim(s, token=token)
         if not claim.get("ok"):
             err = claim.get("error") or claim.get("msg") or str(claim)[:200]
             summary["errors"].append(f"ad_claim: {err}")
