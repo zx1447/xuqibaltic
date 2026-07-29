@@ -88,6 +88,16 @@ async function sessionValid(page) {
 }
 async function waitTurnstile(page) {
   for (let i=0;i<25;i++) {
+    if (i === 0 || i === 10) {
+      const diag = await page.evaluate(() => ({
+        readyState: document.readyState,
+        turnstileType: typeof window.turnstile,
+        containerHtml: (document.querySelector('#cf-turnstile')?.innerHTML || '').slice(0, 300),
+        cloudflareScripts: [...document.scripts].map(x => x.src).filter(x => x.includes('cloudflare')).slice(0, 5),
+        iframeCount: document.querySelectorAll('#cf-turnstile iframe,iframe[src*="challenges.cloudflare.com"]').length,
+      }));
+      log(`🔎 Turnstile 状态：${JSON.stringify(diag)}`);
+    }
     const token = await page.evaluate(() => {
       const el = document.querySelector('input[name="cf-turnstile-response"]');
       if (el && el.value) return el.value;
@@ -140,6 +150,13 @@ async function main() {
   const browser=await chromium.connectOverCDP(`http://127.0.0.1:${PORT}`);
   const context=browser.contexts()[0] || await browser.newContext();
   const page=context.pages()[0] || await context.newPage();
+  page.on('pageerror', e => log(`⚠️ 页面 JS 错误：${e.message}`));
+  page.on('requestfailed', r => {
+    if (/cloudflare|_next/i.test(r.url())) log(`⚠️ 资源加载失败：${r.url()} | ${r.failure()?.errorText || 'unknown'}`);
+  });
+  page.on('console', m => {
+    if (m.type() === 'error') log(`⚠️ 浏览器控制台：${m.text()}`);
+  });
   try {
     await login(page); await renew(page);
     const days=Math.floor(Math.random()*10)+5; const nextTs=Math.floor(Date.now()/1000)+days*86400;
