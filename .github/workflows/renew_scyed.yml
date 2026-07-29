@@ -1,7 +1,9 @@
 name: SCYED Random Renew
 
 on:
-  # 已暂停自动运行，仅保留手动 workflow_dispatch。
+  schedule:
+    # 每天 UTC 04:00 检查；脚本按状态文件中的随机日期决定是否真正续期。
+    - cron: "0 4 * * *"
   workflow_dispatch:
     inputs:
       force:
@@ -27,25 +29,50 @@ jobs:
           ref: scyed
           fetch-depth: 0
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v5
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
-          node-version: "20"
+          python-version: "3.12"
 
-      - name: Install stealth browser dependencies
+      - name: Install SeleniumBase and Xray
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb
-          npm install
-          npx playwright install-deps chrome
+          sudo apt-get install -y xvfb unzip
+          google-chrome --version
+          pip install --upgrade pip seleniumbase cryptography requests
+          python -m seleniumbase install chromedriver
+          mkdir -p /tmp/scyed-xray
+          XRAY_TAG=$(curl -fsSL -H "User-Agent: scyed-renew" https://api.github.com/repos/XTLS/Xray-core/releases/latest | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag_name"])')
+          curl -fsSL "https://github.com/XTLS/Xray-core/releases/download/${XRAY_TAG}/Xray-linux-64.zip" -o /tmp/scyed-xray/xray.zip
+          unzip -q /tmp/scyed-xray/xray.zip -d /tmp/scyed-xray
+          chmod +x /tmp/scyed-xray/xray
+          /tmp/scyed-xray/xray version | head -1
 
-      - name: Run SCYED Playwright stealth renew
+      - name: Run SCYED SeleniumBase UC through supplied VLESS node
         env:
           SCYED_USER: ${{ secrets.SCYED_USER }}
           SCYED_PASS: ${{ secrets.SCYED_PASS }}
-          SCYED_PROXY: ${{ secrets.SCYED_PROXY }}
+          SCYED_SESSION_KEY: ${{ secrets.SCYED_SESSION_KEY }}
+          SCYED_VLESS_URI: ${{ secrets.SCYED_VLESS_URI }}
+          SCYED_PROXY: "socks5://127.0.0.1:1080"
           FORCE_RUN: ${{ github.event.inputs.force }}
-        run: xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" node scyed_browser.js
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: |
+          python3 setup_scyed_vless.py
+          /tmp/scyed-xray/xray run -c /tmp/scyed-xray/config.json >/tmp/scyed-xray/xray.log 2>&1 &
+          XRAY_PID=$!
+          trap 'kill "$XRAY_PID" 2>/dev/null || true' EXIT
+          for i in $(seq 1 20); do
+            if curl -fsS --max-time 5 -x socks5h://127.0.0.1:1080 https://www.cloudflare.com/cdn-cgi/trace >/tmp/scyed-xray/trace; then
+              break
+            fi
+            sleep 1
+          done
+          grep -E '^(ip|loc|warp)=' /tmp/scyed-xray/trace
+          curl -fsS --max-time 20 -x socks5h://127.0.0.1:1080 https://scyed.com/en/login | grep -q 'id="identifier"'
+          echo "✅ VLESS 节点访问 SCYED 正常"
+          python renew_scyed.py
 
       - name: Save SCYED state
         if: always()
