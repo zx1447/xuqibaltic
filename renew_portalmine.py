@@ -231,7 +231,7 @@ def run_auto_coins(s: requests.Session, state: dict) -> dict:
             summary["errors"].append(f"ad_claim: {err}")
             log(f"⚠️ ad_claim failed: {err}")
             continue
-        earned = claim.get("coins") or claim.get("reward") or claim.get("amount") or 0
+        earned = claim.get("reward") or claim.get("coins_earned") or claim.get("amount") or 0
         try:
             earned = int(earned)
         except (TypeError, ValueError):
@@ -239,7 +239,7 @@ def run_auto_coins(s: requests.Session, state: dict) -> dict:
         summary["rounds_ok"] += 1
         summary["coins_earned"] += earned
         summary["last_claim"] = claim
-        log(f"✅ ad_claim ok: +{earned} coins (total={claim.get('total') or claim.get('coins_total') or '?'})")
+        log(f"✅ ad_claim ok: +{earned} coins (total={claim.get('coins') or claim.get('coins_total') or '?'})")
         # small gap between rounds
         if i + 1 < max_rounds:
             time.sleep(3)
