@@ -90,7 +90,8 @@ def browser_session_valid(sb):
     fetch(arguments[0],{credentials:'include',headers:{'Accept':'application/json'}})
       .then(async r=>done({status:r.status,text:await r.text()})).catch(e=>done({error:String(e)}));
     """
-    result=sb.execute_async_script(script,SESSION_URL)
+    # SeleniumBase 的第二个位置参数是 timeout；脚本参数要走原生 WebDriver。
+    result=sb.driver.execute_async_script(script,SESSION_URL)
     if result.get('status') != 200:
         return False
     try:
@@ -170,7 +171,7 @@ def renew_in_browser(sb):
     fetch(arguments[0],{method:'POST',credentials:'include',headers:{'Accept':'application/json, text/plain, */*','X-Requested-With':'XMLHttpRequest'}})
       .then(async r=>done({status:r.status,text:await r.text(),url:r.url})).catch(e=>done({error:String(e)}));
     """
-    result=sb.execute_async_script(script,RENEW_URL)
+    result=sb.driver.execute_async_script(script,RENEW_URL)
     log(f"📡 POST {RENEW_URL} -> HTTP {result.get('status')}")
     log("📦 返回摘要："+result.get('text','')[:500])
     if result.get('status')==401:raise ScyedError("SCYED 登录会话失效")
