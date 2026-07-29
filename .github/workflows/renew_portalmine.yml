@@ -11,6 +11,18 @@ on:
         description: "多次检查时的间隔秒数（默认 60）"
         required: false
         default: "60"
+      auto_coins:
+        description: "自动领取金币（ad_begin/ad_claim，默认 false）"
+        required: false
+        type: boolean
+        default: false
+      ad_max_rounds:
+        description: "金币最大轮数（默认 1；最多 20）"
+        required: false
+        default: "1"
+  schedule:
+    # 每 6 小时跑一次 (UTC 00,06,12,18)
+    - cron: "0 0,6,12,18 * * *"
 
 permissions:
   contents: write
@@ -22,7 +34,7 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - name: Checkout PortalMine branch
         uses: actions/checkout@v4
@@ -44,6 +56,8 @@ jobs:
           PORTALMINE_COOKIE: ${{ secrets.PORTALMINE_COOKIE }}
           PORTALMINE_POLL_COUNT: ${{ github.event.inputs.poll_count || '1' }}
           PORTALMINE_POLL_SECONDS: ${{ github.event.inputs.poll_seconds || '60' }}
+          PORTALMINE_AUTO_COINS: ${{ github.event.inputs.auto_coins == 'true' && '1' || '' }}
+          PORTALMINE_AD_MAX_ROUNDS: ${{ github.event.inputs.ad_max_rounds || '1' }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
         run: python renew_portalmine.py
