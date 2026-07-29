@@ -1,6 +1,6 @@
 {
-  "last_check_timestamp": 1785288792,
-  "last_check_time": "2026-07-29 09:33:12",
+  "last_check_timestamp": 1785289221,
+  "last_check_time": "2026-07-29 09:40:21",
   "last_status": "success",
   "server_state": {
     "state": "offline",
@@ -21,23 +21,26 @@
     "uptime": 0,
     "cpu": 0,
     "memory": 0,
-    "disk": 0,
+    "disk": 52811883,
     "players_online": null
   },
   "poll_count": 1,
   "auto_coins": {
     "rounds_attempted": 2,
     "rounds_ok": 2,
-    "coins_earned": 260,
+    "coins_earned": 40,
     "errors": [],
     "last_claim": {
       "ok": true,
-      "coins": 140,
+      "coins": 170,
       "reward": 20,
-      "request_id": "78f4953acd5f",
+      "request_id": "b937bfd4d39d",
       "version": 16083,
       "msg": "20 coins added."
-    }
+    },
+    "started_at": 1785289092,
+    "stopped_reason": "only 51s left, not enough for another round",
+    "duration_seconds": 128
   },
-  "last_auto_coins_time": "2026-07-29 09:33:12"
+  "last_auto_coins_time": "2026-07-29 09:40:21"
 }
