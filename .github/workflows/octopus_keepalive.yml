@@ -1,0 +1,40 @@
+name: Octopus Keepalive
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 每 5 分钟跑一次 (24/7 保活)
+    - cron: "*/5 * * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: octopus-keepalive
+  cancel-in-progress: false
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: portalmine
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run Octopus keepalive
+        env:
+          OCTOPUS_URL: ${{ secrets.OCTOPUS_URL }}
+          OCTOPUS_API_KEY: ${{ secrets.OCTOPUS_API_KEY }}
+          OCTOPUS_SPACE: ${{ secrets.OCTOPUS_SPACE }}
+          OCTOPUS_PROJECT: ${{ secrets.OCTOPUS_PROJECT }}
+          OCTOPUS_ENV: ${{ secrets.OCTOPUS_ENV }}
+          OCTOPUS_RUNBOOK: ${{ secrets.OCTOPUS_RUNBOOK }}
+          OCTOPUS_SNAPSHOT: ${{ secrets.OCTOPUS_SNAPSHOT }}
+          OCTOPUS_MAX_MIN: "30"
+        run: python octopus_keepalive.py
