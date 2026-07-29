@@ -153,6 +153,66 @@ def save_browser_session(sb, state):
         print(f"⚠️ 保存 BalticHost 会话失败：{type(exc).__name__}")
 
 
+def page_diagnostics(sb, label):
+    """输出不含账号密码的页面摘要，并保存失败诊断文件。"""
+    try:
+        url = sb.get_current_url()
+        title = sb.get_title()
+        page = sb.get_page_source()
+    except Exception as exc:
+        print(f"⚠️ {label} 页面诊断失败：{type(exc).__name__}")
+        return ""
+
+    visible_text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", page)).strip()
+    print(f"🔎 {label}: URL={url} | title={title!r} | HTML={len(page)} bytes")
+    print(f"🔎 页面摘要: {visible_text[:500]}")
+    try:
+        with open("diagnostic_login.html", "w", encoding="utf-8") as handle:
+            handle.write(page)
+        sb.save_screenshot("diagnostic_login.png")
+    except Exception as exc:
+        print(f"⚠️ 保存页面诊断文件失败：{type(exc).__name__}")
+    return page
+
+
+def wait_for_login_form(sb):
+    """等待反爬页放行；必要时点击验证并重新打开登录页。"""
+    challenge_hints = (
+        "cf-turnstile", "challenge-platform", "challenges.cloudflare.com",
+        "just a moment", "verify you are human", "m.e.o.w", "hiding",
+        "checking your browser", "security verification",
+    )
+
+    for attempt in range(1, 4):
+        if attempt > 1:
+            print(f"🔁 登录页第 {attempt} 次重试")
+            sb.open(LOGIN_URL)
+            sb.wait_for_ready_state_complete()
+        time.sleep(2)
+
+        for tick in range(25):
+            try:
+                if sb.is_element_visible("#username") and sb.is_element_visible("#password"):
+                    print("✅ 登录表单已加载")
+                    return True
+            except Exception:
+                pass
+
+            # 只有页面没有表单、且疑似验证页时才尝试 GUI 点击。
+            if tick in (0, 8, 16):
+                try:
+                    page = sb.get_page_source().lower()
+                    if any(hint in page for hint in challenge_hints):
+                        print("🛡️ 检测到反爬验证页，尝试点击验证")
+                        sb.uc_gui_click_captcha()
+                except Exception as exc:
+                    print(f"⚠️ 点击反爬验证失败：{type(exc).__name__}")
+            time.sleep(1)
+
+    page_diagnostics(sb, "登录表单未出现")
+    return False
+
+
 def main():
     print("#" * 28)
     print("   BalticHost 自动登录续期")
@@ -180,25 +240,14 @@ def main():
             print(f"🌐 打开登录页 {LOGIN_URL}")
             sb.open(LOGIN_URL)
             sb.wait_for_ready_state_complete()
-            time.sleep(2)
-
-            # 处理可能的 Turnstile / 反爬挑战
-            try:
-                sb.uc_gui_click_captcha()
-                print("✅ 已尝试处理反爬/验证码挑战")
-            except Exception as e:
-                print(f"⚠️ 反爬挑战处理跳过: {e}")
-
-            title = sb.get_title()
-            if "M.E.O.W" in title or "hiding" in title:
-                msg = "❌ 仍被反爬盾拦截（M.E.O.W）。该面板对数据中心 IP 极严，" \
-                      "请改用家庭网络 IP（自托管 runner / 本机定时任务）。"
-                print(msg)
-                send_tg(TG_BOT_TOKEN, TG_CHAT_ID, msg)
-                sys.exit(1)
 
             # 2) 登录
             if EMAIL and PASSWORD:
+                if not wait_for_login_form(sb):
+                    msg = "❌ 登录表单始终未出现，反爬验证页没有放行；诊断文件已上传"
+                    print(msg)
+                    send_tg(TG_BOT_TOKEN, TG_CHAT_ID, msg)
+                    sys.exit(1)
                 print(f"🔑 填写账号 {mask(EMAIL)} ...")
                 sb.type("#username", EMAIL, timeout=10)
                 sb.type("#password", PASSWORD, timeout=10)
