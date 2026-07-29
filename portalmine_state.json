@@ -1,11 +1,11 @@
 {
-  "last_check_timestamp": 1785289221,
-  "last_check_time": "2026-07-29 09:40:21",
+  "last_check_timestamp": 1785307429,
+  "last_check_time": "2026-07-29 14:43:49",
   "last_status": "success",
   "server_state": {
-    "state": "offline",
-    "current_state": "offline",
-    "state_label": "Offline",
+    "state": "starting",
+    "current_state": "starting",
+    "state_label": "Starting",
     "install_status": "ready",
     "name": "nice",
     "version": "1.21.8",
@@ -17,30 +17,30 @@
     "limit_memory_mb": 4096,
     "limit_disk_mb": 20480,
     "limit_cpu": 100,
-    "cycle_left": null,
-    "uptime": 0,
-    "cpu": 0,
-    "memory": 0,
-    "disk": 52811883,
+    "cycle_left": 10465,
+    "uptime": 20874,
+    "cpu": 102.992,
+    "memory": 669884416,
+    "disk": 249570651,
     "players_online": null
   },
   "poll_count": 1,
   "auto_coins": {
-    "rounds_attempted": 2,
-    "rounds_ok": 2,
-    "coins_earned": 40,
+    "rounds_attempted": 279,
+    "rounds_ok": 279,
+    "coins_earned": 5580,
     "errors": [],
     "last_claim": {
       "ok": true,
-      "coins": 170,
+      "coins": 5660,
       "reward": 20,
-      "request_id": "b937bfd4d39d",
+      "request_id": "df23491195ff",
       "version": 16083,
       "msg": "20 coins added."
     },
-    "started_at": 1785289092,
-    "stopped_reason": "only 51s left, not enough for another round",
-    "duration_seconds": 128
+    "started_at": 1785289475,
+    "stopped_reason": "only 46s left, not enough for another round",
+    "duration_seconds": 17953
   },
-  "last_auto_coins_time": "2026-07-29 09:40:21"
+  "last_auto_coins_time": "2026-07-29 14:43:49"
 }
