@@ -24,13 +24,31 @@ function now() { return new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Sha
 function loadState() { try { return JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')); } catch { return {}; } }
 function saveState(s) { fs.writeFileSync(STATE_FILE, JSON.stringify(s, null, 2)); }
 function isCf(title, html) { const x = `${title} ${html}`.toLowerCase(); return x.includes('just a moment') || x.includes('attention required') || x.includes('cf-chl-'); }
+function isHardBlock(title, html) { const x = `${title} ${html}`.toLowerCase(); return x.includes('sorry, you have been blocked') || x.includes('unable to access scyed.com'); }
 function portOpen(port) { return new Promise(resolve => { const req=http.get(`http://127.0.0.1:${port}/json/version`,()=>resolve(true)); req.on('error',()=>resolve(false)); req.setTimeout(1500,()=>{req.destroy();resolve(false);}); }); }
 async function launchChrome() {
   if (await portOpen(PORT)) return;
   fs.rmSync(PROFILE, { recursive: true, force: true });
   const chrome = process.env.CHROME_PATH || '/usr/bin/google-chrome';
-  const args = [`--remote-debugging-port=${PORT}`, '--remote-debugging-address=127.0.0.1', '--no-first-run', '--no-default-browser-check', '--no-sandbox', '--disable-dev-shm-usage', `--window-size=1280,720`, `--user-data-dir=${PROFILE}`];
-  if (PROXY) { try { args.push(`--proxy-server=${new URL(PROXY).origin}`); log('🔗 使用代理出口'); } catch { log('⚠️ SCYED_PROXY 格式无法解析，忽略'); } }
+  const args = [
+    `--remote-debugging-port=${PORT}`,
+    '--remote-debugging-address=127.0.0.1',
+    '--no-first-run', '--no-default-browser-check', '--no-sandbox',
+    '--disable-dev-shm-usage', '--disable-blink-features=AutomationControlled',
+    '--lang=en-US', `--window-size=1280,720`, `--user-data-dir=${PROFILE}`,
+  ];
+  if (PROXY) {
+    try {
+      // URL.origin 对 socks5:// 会返回 "null"，必须把完整代理地址交给 Chrome。
+      const parsed = new URL(PROXY);
+      const proxy = PROXY.replace(/^socks5h:/i, 'socks5:');
+      if (!['http:', 'https:', 'socks4:', 'socks5:'].includes(parsed.protocol)) throw new Error('unsupported proxy scheme');
+      args.push(`--proxy-server=${proxy}`);
+      log(`🔗 使用 ${parsed.protocol.replace(':', '').toUpperCase()} 代理出口`);
+    } catch {
+      throw new Error('SCYED_PROXY 格式无法解析');
+    }
+  }
   const p = spawn(chrome, args, { detached: true, stdio: 'ignore' }); p.unref();
   for (let i=0;i<30;i++) { if (await portOpen(PORT)) return; await new Promise(r=>setTimeout(r,1000)); }
   throw new Error('Chrome CDP 启动失败');
@@ -39,10 +57,16 @@ async function waitCf(page) {
   for (let i=0;i<12;i++) {
     await page.waitForTimeout(5000);
     const title=await page.title(); const html=await page.content();
-    if (!isCf(title, html)) { log(`✅ Cloudflare 自动验证通过（等待约 ${(i+1)*5} 秒）`); return; }
-    log(`🛡️ 等待 SCYED Cloudflare 自动验证（${i+1}/12）`);
+    if (isHardBlock(title, html)) {
+      throw new Error(`SCYED Cloudflare 已封锁当前出口 IP（title=${title}）`);
+    }
+    if (!isCf(title, html)) {
+      log(`✅ Cloudflare 自动验证通过（等待约 ${(i+1)*5} 秒，title=${title}）`);
+      return;
+    }
+    log(`🛡️ 等待 SCYED Cloudflare 自动验证（${i+1}/12，title=${title}）`);
   }
-  throw new Error('SCYED Cloudflare 自动验证未通过');
+  throw new Error(`SCYED Cloudflare 自动验证未通过（最终 URL=${page.url()}）`);
 }
 async function sessionValid(page) {
   const r=await page.evaluate(async u=>{const x=await fetch(u,{credentials:'include'});return {status:x.status,text:await x.text()};}, SESSION_URL);
