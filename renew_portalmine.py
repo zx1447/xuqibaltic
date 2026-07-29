@@ -33,8 +33,7 @@ BASE = "https://portalmine.com"
 LOGIN_URL = f"{BASE}/api/auth.php?action=login"
 ME_URL = f"{BASE}/api/auth.php?action=me"
 STATE_URL = f"{BASE}/server-v16132.php?action=server_state"
-COINS_AD_BEGIN_URL = f"{BASE}/api/coins.php?action=ad_begin"
-COINS_AD_CLAIM_URL = f"{BASE}/api/coins.php?action=ad_claim"
+COINS_API = f"{BASE}/api/coins.php"
 STATE_FILE = "portalmine_state.json"
 USER = os.environ.get("PORTALMINE_USER", "").strip()
 PASSWORD = os.environ.get("PORTALMINE_PASS", "").strip()
@@ -45,6 +44,11 @@ POLL_SECONDS = int(os.environ.get("PORTALMINE_POLL_SECONDS", "60") or "60")
 AUTO_COINS = os.environ.get("PORTALMINE_AUTO_COINS", "").strip().lower() in {"1", "true", "yes", "on"}
 AD_SECONDS = int(os.environ.get("PORTALMINE_AD_SECONDS", "60") or "60")
 AD_MAX_ROUNDS = int(os.environ.get("PORTALMINE_AD_MAX_ROUNDS", "1") or "1")
+# PortalMine server id (from dashboard F12: x-portalmine-server-id header)
+SERVER_ID = os.environ.get("PORTALMINE_SERVER_ID", "").strip()
+# Reward zone (from dashboard-v16132.js: PM_REWARDED_ZONE_NAME)
+REWARD_ZONE = "portalmine_idle_reward_v10900"
+REWARD_PROVIDER = "internal"
 TG_TOKEN = os.environ.get("TG_BOT_TOKEN", "").strip()
 TG_CHAT_ID = os.environ.get("TG_CHAT_ID", "").strip()
 UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36"
@@ -136,60 +140,57 @@ def get_server_state(s: requests.Session) -> dict:
         raise PortalMineError(f"server_state 失败：{str(data)[:300]}")
     return data
 
-def coins_ad_begin(s: requests.Session) -> dict:
-    """Start an ad session. Returns {ok, token, seconds, reward, ...} or {ok:false,error}."""
-    r = s.get(COINS_AD_BEGIN_URL, timeout=20, headers={"Referer": BASE + "/", "X-Requested-With": "XMLHttpRequest"})
-    data = parse_json(r)
-    log(f"📡 GET coins ad_begin -> HTTP {r.status_code}; ok={data.get('ok')}; full={json.dumps(data, ensure_ascii=False)[:400]}")
-    return data
-
-def coins_ad_step(s: requests.Session, token: str) -> dict:
-    """Mark an ad step as complete. POST /api/coins.php?action=ad_step with token."""
-    url = f"{BASE}/api/coins.php?action=ad_step"
-    r = s.post(url, data={"token": token}, timeout=20, headers={"Referer": BASE + "/", "X-Requested-With": "XMLHttpRequest", "X-Ad-Token": token})
-    data = parse_json(r)
-    log(f"📡 POST coins ad_step -> HTTP {r.status_code}; data={json.dumps(data, ensure_ascii=False)[:300]}")
-    return data
-
-def coins_ad_complete(s: requests.Session, token: str) -> dict:
-    """Mark ad as complete. POST /api/coins.php?action=ad_complete with token."""
-    url = f"{BASE}/api/coins.php?action=ad_complete"
-    r = s.post(url, data={"token": token}, timeout=20, headers={"Referer": BASE + "/", "X-Requested-With": "XMLHttpRequest", "X-Ad-Token": token})
-    data = parse_json(r)
-    log(f"📡 POST coins ad_complete -> HTTP {r.status_code}; data={json.dumps(data, ensure_ascii=False)[:300]}")
-    return data
-
-def coins_ad_claim(s: requests.Session, token: str | None = None) -> dict:
-    """Claim the ad reward. token from ad_begin response.
-    Tries multiple ways to pass token: query param, POST body, header.
-    Returns {ok, coins, total, ...} or {ok:false,error}.
+def coins_api(s: requests.Session, action: str, body: dict | None = None, timeout: int = 20) -> dict:
+    """Call /api/coins.php?action=<action>.
+    If body is provided -> POST with JSON body; otherwise GET.
+    Adds x-portalmine-server-id header (required for ad_begin/ad_claim).
     """
-    # Try 1: GET with token as query param
-    if token:
-        url = f"{COINS_AD_CLAIM_URL}&token={token}"
-        r = s.get(url, timeout=20, headers={"Referer": BASE + "/", "X-Requested-With": "XMLHttpRequest", "X-Ad-Token": token})
+    ts = int(time.time() * 1000)
+    url = f"{COINS_API}?action={action}&_={ts}"
+    headers = {
+        "Referer": f"{BASE}/dashboard.html",
+        "Accept": "application/json",
+        "X-Requested-With": "XMLHttpRequest",
+    }
+    if SERVER_ID:
+        headers["x-portalmine-server-id"] = SERVER_ID
+    if body is not None:
+        headers["Content-Type"] = "application/json"
+        r = s.post(url, json=body, timeout=timeout, headers=headers)
     else:
-        r = s.get(COINS_AD_CLAIM_URL, timeout=20, headers={"Referer": BASE + "/", "X-Requested-With": "XMLHttpRequest"})
+        r = s.get(url, timeout=timeout, headers=headers)
     data = parse_json(r)
-    log(f"📡 GET coins ad_claim (token={'yes' if token else 'no'}) -> HTTP {r.status_code}; data={json.dumps(data, ensure_ascii=False)[:300]}")
-    if r.status_code == 200 and data.get("ok"):
-        return data
-    # Try 2: POST with token in body
-    if token:
-        r2 = s.post(COINS_AD_CLAIM_URL, data={"token": token}, timeout=20, headers={"Referer": BASE + "/", "X-Requested-With": "XMLHttpRequest", "X-Ad-Token": token})
-        data2 = parse_json(r2)
-        log(f"📡 POST coins ad_claim (token in body) -> HTTP {r2.status_code}; data={json.dumps(data2, ensure_ascii=False)[:300]}")
-        if r2.status_code == 200 and data2.get("ok"):
-            return data2
-        # Try 3: ad_complete then ad_claim
-        log("💡 Trying ad_complete + ad_claim...")
-        comp = coins_ad_complete(s, token)
-        if comp.get("ok"):
-            r3 = s.post(COINS_AD_CLAIM_URL, data={"token": token}, timeout=20, headers={"Referer": BASE + "/", "X-Requested-With": "XMLHttpRequest", "X-Ad-Token": token})
-            data3 = parse_json(r3)
-            log(f"📡 POST coins ad_claim (after complete) -> HTTP {r3.status_code}; data={json.dumps(data3, ensure_ascii=False)[:300]}")
-            if r3.status_code == 200 and data3.get("ok"):
-                return data3
+    return data
+
+def coins_ad_begin(s: requests.Session) -> dict:
+    """Start an ad session.
+    POST /api/coins.php?action=ad_begin
+    body: {zone, provider, required_steps}
+    Returns {ok, token, seconds, reward, step_seconds, required_steps, eligible_at, ...}
+    """
+    body = {
+        "zone": REWARD_ZONE,
+        "provider": REWARD_PROVIDER,
+        "required_steps": 1,
+    }
+    data = coins_api(s, "ad_begin", body=body)
+    log(f"📡 coins ad_begin -> ok={data.get('ok')}; token={str(data.get('token',''))[:16]}...; seconds={data.get('seconds')}; reward={data.get('reward')}; full={json.dumps(data, ensure_ascii=False)[:300]}")
+    return data
+
+def coins_ad_claim(s: requests.Session, token: str) -> dict:
+    """Claim the ad reward.
+    POST /api/coins.php?action=ad_claim
+    body: {token, completed_steps, required_steps, provider}
+    Returns {ok, coins, reward, ...} or {ok:false,error}
+    """
+    body = {
+        "token": token,
+        "completed_steps": 1,
+        "required_steps": 1,
+        "provider": REWARD_PROVIDER,
+    }
+    data = coins_api(s, "ad_claim", body=body)
+    log(f"📡 coins ad_claim -> ok={data.get('ok')}; coins={data.get('coins')}; reward={data.get('reward')}; error={data.get('error')}; full={json.dumps(data, ensure_ascii=False)[:300]}")
     return data
 
 def run_auto_coins(s: requests.Session, state: dict) -> dict:
@@ -212,7 +213,7 @@ def run_auto_coins(s: requests.Session, state: dict) -> dict:
             time.sleep(5)
             continue
         # duration from response or fallback to AD_SECONDS
-        duration = begin.get("duration") or begin.get("seconds") or begin.get("ad_duration") or begin.get("wait_seconds") or begin.get("step_seconds") or AD_SECONDS
+        duration = begin.get("seconds") or begin.get("step_seconds") or begin.get("duration") or AD_SECONDS
         try:
             duration = int(duration)
         except (TypeError, ValueError):
@@ -221,20 +222,8 @@ def run_auto_coins(s: requests.Session, state: dict) -> dict:
         # token from ad_begin response (needed for ad_claim)
         token = begin.get("token") or begin.get("ad_token") or begin.get("session_token")
         log(f"⏳ Ad session started (token={str(token)[:16] if token else 'None'}...), waiting {duration}s...")
-        # During waiting, send heartbeat (ad_step) every 10s to mark progress
-        # ad_begin returns step_seconds=60, required_steps=1 -> need 1 step of 60s
-        # Some platforms require periodic ad_step calls to keep session alive
-        elapsed = 0
-        while elapsed < duration:
-            chunk = min(10, duration - elapsed)
-            time.sleep(chunk)
-            elapsed += chunk
-            if elapsed < duration and token:
-                # send heartbeat ad_step
-                try:
-                    coins_ad_step(s, token)
-                except Exception as e:
-                    log(f"⚠️ ad_step heartbeat error: {e}")
+        # wait the full duration (server tracks eligible_at; no heartbeat needed)
+        time.sleep(duration + 2)  # +2s buffer to ensure eligible_at passed
         log(f"💰 Auto coins round {i+1}: ad_claim")
         claim = coins_ad_claim(s, token=token)
         if not claim.get("ok"):

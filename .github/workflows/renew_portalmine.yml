@@ -54,6 +54,7 @@ jobs:
           PORTALMINE_USER: ${{ secrets.PORTALMINE_USER }}
           PORTALMINE_PASS: ${{ secrets.PORTALMINE_PASS }}
           PORTALMINE_COOKIE: ${{ secrets.PORTALMINE_COOKIE }}
+          PORTALMINE_SERVER_ID: ${{ secrets.PORTALMINE_SERVER_ID }}
           PORTALMINE_POLL_COUNT: ${{ github.event.inputs.poll_count || '1' }}
           PORTALMINE_POLL_SECONDS: ${{ github.event.inputs.poll_seconds || '60' }}
           PORTALMINE_AUTO_COINS: ${{ github.event.inputs.auto_coins == 'true' && '1' || '' }}
