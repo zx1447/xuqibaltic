@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
 const http = require('http');
+const net = require('net');
 const { chromium } = require('playwright-extra');
 const stealth = require('puppeteer-extra-plugin-stealth')();
 chromium.use(stealth);
@@ -16,6 +17,7 @@ const USER = process.env.SCYED_USER || '';
 const PASSWORD = process.env.SCYED_PASS || '';
 const FORCE_RUN = String(process.env.FORCE_RUN || '').toLowerCase() === 'true';
 const PROXY = process.env.SCYED_PROXY || process.env.HTTP_PROXY || '';
+const ORIGIN_IP = String(process.env.SCYED_ORIGIN_IP || '').trim();
 const PORT = 9222;
 const PROFILE = '/tmp/scyed_chrome_profile';
 
@@ -37,6 +39,11 @@ async function launchChrome() {
     '--disable-dev-shm-usage', '--disable-blink-features=AutomationControlled',
     '--lang=en-US', `--window-size=1280,720`, `--user-data-dir=${PROFILE}`,
   ];
+  if (!PROXY && ORIGIN_IP) {
+    if (!net.isIP(ORIGIN_IP)) throw new Error('SCYED_ORIGIN_IP 不是有效 IP');
+    args.push(`--host-resolver-rules=MAP scyed.com ${ORIGIN_IP}, MAP *.scyed.com ${ORIGIN_IP}, EXCLUDE localhost`);
+    log(`🧭 SCYED 根域名直连源站 ${ORIGIN_IP}，绕过 Cloudflare 封锁`);
+  }
   if (PROXY) {
     try {
       // URL.origin 对 socks5:// 会返回 "null"，必须把完整代理地址交给 Chrome。

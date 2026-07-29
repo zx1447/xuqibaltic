@@ -27,23 +27,6 @@ jobs:
           ref: scyed
           fetch-depth: 0
 
-      - name: Install and start Cloudflare WARP SOCKS5 proxy
-        run: |
-          curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | sudo gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
-          echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ noble main" | sudo tee /etc/apt/sources.list.d/cloudflare-client.list
-          sudo apt-get update
-          sudo apt-get install -y cloudflare-warp
-          sudo systemctl restart warp-svc
-          sleep 3
-          warp-cli --accept-tos registration delete || true
-          warp-cli --accept-tos registration new
-          warp-cli --accept-tos mode proxy
-          warp-cli --accept-tos proxy port 40001
-          warp-cli --accept-tos connect
-          sleep 4
-          echo "=== WARP CHECK ==="
-          curl -fsS -x socks5h://127.0.0.1:40001 https://www.cloudflare.com/cdn-cgi/trace | grep -E '^(ip|loc|warp)='
-
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
@@ -60,8 +43,9 @@ jobs:
         env:
           SCYED_USER: ${{ secrets.SCYED_USER }}
           SCYED_PASS: ${{ secrets.SCYED_PASS }}
-          # 未设置住宅代理时自动使用本机 WARP SOCKS5 出口。
-          SCYED_PROXY: ${{ secrets.SCYED_PROXY || 'socks5://127.0.0.1:40001' }}
+          SCYED_PROXY: ${{ secrets.SCYED_PROXY }}
+          # 根域名经过 Cloudflare 会封锁 Actions，直接解析到 SCYED 源站。
+          SCYED_ORIGIN_IP: ${{ secrets.SCYED_ORIGIN_IP || '130.193.96.121' }}
           FORCE_RUN: ${{ github.event.inputs.force }}
         run: xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" node scyed_browser.js
 
