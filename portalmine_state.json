@@ -1,6 +1,6 @@
 {
-  "last_check_timestamp": 1785287203,
-  "last_check_time": "2026-07-29 09:06:43",
+  "last_check_timestamp": 1785287536,
+  "last_check_time": "2026-07-29 09:12:16",
   "last_status": "success",
   "server_state": {
     "state": "offline",
@@ -26,14 +26,13 @@
   },
   "poll_count": 1,
   "auto_coins": {
-    "rounds_attempted": 2,
+    "rounds_attempted": 1,
     "rounds_ok": 0,
     "coins_earned": 0,
     "errors": [
-      "ad_claim: BAD_TOKEN",
       "ad_claim: BAD_TOKEN"
     ],
     "last_claim": null
   },
-  "last_auto_coins_time": "2026-07-29 09:06:43"
+  "last_auto_coins_time": "2026-07-29 09:12:16"
 }
