@@ -1,7 +1,9 @@
 name: SCYED Random Renew
 
 on:
-  # 跑通后再恢复每日定时触发；当前先保留手动测试。
+  schedule:
+    # 每天 UTC 04:00 检查；脚本按状态文件中的随机日期决定是否真正续期。
+    - cron: "0 4 * * *"
   workflow_dispatch:
     inputs:
       force:
