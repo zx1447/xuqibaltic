@@ -44,6 +44,11 @@ POLL_SECONDS = int(os.environ.get("PORTALMINE_POLL_SECONDS", "60") or "60")
 AUTO_COINS = os.environ.get("PORTALMINE_AUTO_COINS", "").strip().lower() in {"1", "true", "yes", "on"}
 AD_SECONDS = int(os.environ.get("PORTALMINE_AD_SECONDS", "60") or "60")
 AD_MAX_ROUNDS = int(os.environ.get("PORTALMINE_AD_MAX_ROUNDS", "1") or "1")
+# Run forever (until workflow timeout). Set PORTALMINE_AD_FOREVER=1 to enable.
+# When enabled, ignores AD_MAX_ROUNDS and keeps claiming until the process is killed.
+AD_FOREVER = os.environ.get("PORTALMINE_AD_FOREVER", "").strip().lower() in {"1", "true", "yes", "on"}
+# Max runtime in seconds (safety cap, default 5h to fit GitHub Actions 6h timeout with buffer)
+AD_MAX_RUNTIME_SECONDS = int(os.environ.get("PORTALMINE_AD_MAX_RUNTIME", "18000") or "18000")
 # PortalMine server id (from dashboard F12: x-portalmine-server-id header)
 SERVER_ID = os.environ.get("PORTALMINE_SERVER_ID", "").strip()
 # Reward zone (from dashboard-v16132.js: PM_REWARDED_ZONE_NAME)
@@ -194,21 +199,57 @@ def coins_ad_claim(s: requests.Session, token: str) -> dict:
     return data
 
 def run_auto_coins(s: requests.Session, state: dict) -> dict:
-    """Run ad_begin -> wait -> ad_claim loop. Returns summary dict."""
-    summary = {"rounds_attempted": 0, "rounds_ok": 0, "coins_earned": 0, "errors": [], "last_claim": None}
-    max_rounds = max(1, min(AD_MAX_ROUNDS, 20))
-    for i in range(max_rounds):
+    """Run ad_begin -> wait -> ad_claim loop. Returns summary dict.
+    If AD_FOREVER is set, loops until AD_MAX_RUNTIME_SECONDS (default 5h) or killed.
+    Otherwise loops AD_MAX_ROUNDS times.
+    """
+    summary = {"rounds_attempted": 0, "rounds_ok": 0, "coins_earned": 0, "errors": [], "last_claim": None, "started_at": int(time.time()), "stopped_reason": None}
+    start_ts = time.time()
+    if AD_FOREVER:
+        max_rounds = 999999  # effectively unlimited
+        log(f"💰 AD_FOREVER 启用：将循环领取金币直到超时 (max_runtime={AD_MAX_RUNTIME_SECONDS}s)")
+    else:
+        max_rounds = max(1, min(AD_MAX_ROUNDS, 100))
+        log(f"💰 将跑 {max_rounds} 轮金币领取")
+    i = 0
+    while True:
+        # check runtime cap
+        if AD_FOREVER:
+            elapsed_total = time.time() - start_ts
+            if elapsed_total >= AD_MAX_RUNTIME_SECONDS:
+                summary["stopped_reason"] = f"max_runtime {AD_MAX_RUNTIME_SECONDS}s reached"
+                log(f"⏹️ 达到最大运行时间 {AD_MAX_RUNTIME_SECONDS}s，停止")
+                break
+            remaining = AD_MAX_RUNTIME_SECONDS - elapsed_total
+            # if less than 90s left (not enough for one more round), stop
+            if remaining < 90:
+                summary["stopped_reason"] = f"only {int(remaining)}s left, not enough for another round"
+                log(f"⏹️ 剩余 {int(remaining)}s 不足以再跑一轮，停止")
+                break
+        else:
+            if i >= max_rounds:
+                summary["stopped_reason"] = f"max_rounds {max_rounds} reached"
+                break
+        i += 1
         summary["rounds_attempted"] += 1
-        log(f"💰 Auto coins round {i+1}/{max_rounds}: ad_begin")
+        if AD_FOREVER:
+            log(f"💰 Auto coins round {i} (elapsed {int(time.time()-start_ts)}s): ad_begin")
+        else:
+            log(f"💰 Auto coins round {i}/{max_rounds}: ad_begin")
         begin = coins_ad_begin(s)
         if not begin.get("ok"):
             err = begin.get("error") or begin.get("msg") or str(begin)[:200]
             summary["errors"].append(f"ad_begin: {err}")
             log(f"⚠️ ad_begin failed: {err}")
-            # common errors: COOLDOWN, ALREADY_ACTIVE, RATE_LIMIT -> stop loop
+            # common errors: COOLDOWN, ALREADY_ACTIVE, RATE_LIMIT -> wait and retry
             err_up = str(err).upper()
             if any(k in err_up for k in ("COOLDOWN", "ALREADY", "RATE", "LIMIT", "NO_AD", "EXHAUSTED")):
-                break
+                if AD_FOREVER:
+                    log(f"⏳ cooldown/rate_limit, waiting 60s before retry...")
+                    time.sleep(60)
+                    continue
+                else:
+                    break
             # transient error: small backoff then retry
             time.sleep(5)
             continue
@@ -224,7 +265,7 @@ def run_auto_coins(s: requests.Session, state: dict) -> dict:
         log(f"⏳ Ad session started (token={str(token)[:16] if token else 'None'}...), waiting {duration}s...")
         # wait the full duration (server tracks eligible_at; no heartbeat needed)
         time.sleep(duration + 2)  # +2s buffer to ensure eligible_at passed
-        log(f"💰 Auto coins round {i+1}: ad_claim")
+        log(f"💰 Auto coins round {i}: ad_claim")
         claim = coins_ad_claim(s, token=token)
         if not claim.get("ok"):
             err = claim.get("error") or claim.get("msg") or str(claim)[:200]
@@ -239,12 +280,23 @@ def run_auto_coins(s: requests.Session, state: dict) -> dict:
         summary["rounds_ok"] += 1
         summary["coins_earned"] += earned
         summary["last_claim"] = claim
-        log(f"✅ ad_claim ok: +{earned} coins (total={claim.get('coins') or claim.get('coins_total') or '?'})")
+        total_coins = claim.get("coins") or claim.get("coins_total") or "?"
+        log(f"✅ ad_claim ok: +{earned} coins (total={total_coins}, rounds_ok={summary['rounds_ok']}, earned={summary['coins_earned']})")
+        # save state after each successful claim (so progress is preserved if killed)
+        state["auto_coins"] = summary
+        state["last_auto_coins_time"] = now_cn()
+        try:
+            save_state(state)
+        except Exception:
+            pass
         # small gap between rounds
-        if i + 1 < max_rounds:
+        if not AD_FOREVER and i < max_rounds:
             time.sleep(3)
+        elif AD_FOREVER:
+            time.sleep(2)  # smaller gap in forever mode
     state["auto_coins"] = summary
     state["last_auto_coins_time"] = now_cn()
+    summary["duration_seconds"] = int(time.time() - start_ts)
     return summary
 
 def summarize_state(data: dict) -> dict:
