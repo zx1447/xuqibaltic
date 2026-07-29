@@ -154,7 +154,7 @@ def save_browser_session(sb, state):
 
 
 def page_diagnostics(sb, label):
-    """输出不含账号密码的页面摘要，并保存失败诊断文件。"""
+    """仅在 Actions 日志中输出不含账号密码的页面摘要。"""
     try:
         url = sb.get_current_url()
         title = sb.get_title()
@@ -166,12 +166,6 @@ def page_diagnostics(sb, label):
     visible_text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", page)).strip()
     print(f"🔎 {label}: URL={url} | title={title!r} | HTML={len(page)} bytes")
     print(f"🔎 页面摘要: {visible_text[:500]}")
-    try:
-        with open("diagnostic_login.html", "w", encoding="utf-8") as handle:
-            handle.write(page)
-        sb.save_screenshot("diagnostic_login.png")
-    except Exception as exc:
-        print(f"⚠️ 保存页面诊断文件失败：{type(exc).__name__}")
     return page
 
 
@@ -294,12 +288,12 @@ def main():
             if EMAIL and PASSWORD:
                 login_state = wait_for_login_form(sb)
                 if not login_state:
-                    msg = "❌ 登录表单始终未出现，反爬验证页没有放行；诊断文件已上传"
+                    msg = "❌ 登录表单始终未出现，反爬验证页没有放行；请检查 Actions 日志"
                     print(msg)
                     send_tg(TG_BOT_TOKEN, TG_CHAT_ID, msg)
                     sys.exit(1)
                 if login_state == "form" and not submit_password_login(sb):
-                    msg = "❌ BalticHost 账号密码登录失败；诊断文件已上传"
+                    msg = "❌ BalticHost 账号密码登录失败；请检查 Actions 日志"
                     send_tg(TG_BOT_TOKEN, TG_CHAT_ID, msg)
                     sys.exit(1)
             elif SESSION_COOKIE:

@@ -77,17 +77,6 @@ jobs:
           HEADLESS: "false"
         run: python renew.py
 
-      - name: Upload login diagnostics on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: baltichost-login-diagnostics-${{ github.run_id }}
-          path: |
-            diagnostic_login.html
-            diagnostic_login.png
-          if-no-files-found: ignore
-          retention-days: 3
-
       - name: Save BalticHost session state
         if: always()
         run: |
