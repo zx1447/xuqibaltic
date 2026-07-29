@@ -143,6 +143,22 @@ def coins_ad_begin(s: requests.Session) -> dict:
     log(f"📡 GET coins ad_begin -> HTTP {r.status_code}; ok={data.get('ok')}; full={json.dumps(data, ensure_ascii=False)[:400]}")
     return data
 
+def coins_ad_step(s: requests.Session, token: str) -> dict:
+    """Mark an ad step as complete. POST /api/coins.php?action=ad_step with token."""
+    url = f"{BASE}/api/coins.php?action=ad_step"
+    r = s.post(url, data={"token": token}, timeout=20, headers={"Referer": BASE + "/", "X-Requested-With": "XMLHttpRequest", "X-Ad-Token": token})
+    data = parse_json(r)
+    log(f"📡 POST coins ad_step -> HTTP {r.status_code}; data={json.dumps(data, ensure_ascii=False)[:300]}")
+    return data
+
+def coins_ad_complete(s: requests.Session, token: str) -> dict:
+    """Mark ad as complete. POST /api/coins.php?action=ad_complete with token."""
+    url = f"{BASE}/api/coins.php?action=ad_complete"
+    r = s.post(url, data={"token": token}, timeout=20, headers={"Referer": BASE + "/", "X-Requested-With": "XMLHttpRequest", "X-Ad-Token": token})
+    data = parse_json(r)
+    log(f"📡 POST coins ad_complete -> HTTP {r.status_code}; data={json.dumps(data, ensure_ascii=False)[:300]}")
+    return data
+
 def coins_ad_claim(s: requests.Session, token: str | None = None) -> dict:
     """Claim the ad reward. token from ad_begin response.
     Tries multiple ways to pass token: query param, POST body, header.
@@ -165,6 +181,15 @@ def coins_ad_claim(s: requests.Session, token: str | None = None) -> dict:
         log(f"📡 POST coins ad_claim (token in body) -> HTTP {r2.status_code}; data={json.dumps(data2, ensure_ascii=False)[:300]}")
         if r2.status_code == 200 and data2.get("ok"):
             return data2
+        # Try 3: ad_complete then ad_claim
+        log("💡 Trying ad_complete + ad_claim...")
+        comp = coins_ad_complete(s, token)
+        if comp.get("ok"):
+            r3 = s.post(COINS_AD_CLAIM_URL, data={"token": token}, timeout=20, headers={"Referer": BASE + "/", "X-Requested-With": "XMLHttpRequest", "X-Ad-Token": token})
+            data3 = parse_json(r3)
+            log(f"📡 POST coins ad_claim (after complete) -> HTTP {r3.status_code}; data={json.dumps(data3, ensure_ascii=False)[:300]}")
+            if r3.status_code == 200 and data3.get("ok"):
+                return data3
     return data
 
 def run_auto_coins(s: requests.Session, state: dict) -> dict:
@@ -196,7 +221,20 @@ def run_auto_coins(s: requests.Session, state: dict) -> dict:
         # token from ad_begin response (needed for ad_claim)
         token = begin.get("token") or begin.get("ad_token") or begin.get("session_token")
         log(f"⏳ Ad session started (token={str(token)[:16] if token else 'None'}...), waiting {duration}s...")
-        time.sleep(duration)
+        # During waiting, send heartbeat (ad_step) every 10s to mark progress
+        # ad_begin returns step_seconds=60, required_steps=1 -> need 1 step of 60s
+        # Some platforms require periodic ad_step calls to keep session alive
+        elapsed = 0
+        while elapsed < duration:
+            chunk = min(10, duration - elapsed)
+            time.sleep(chunk)
+            elapsed += chunk
+            if elapsed < duration and token:
+                # send heartbeat ad_step
+                try:
+                    coins_ad_step(s, token)
+                except Exception as e:
+                    log(f"⚠️ ad_step heartbeat error: {e}")
         log(f"💰 Auto coins round {i+1}: ad_claim")
         claim = coins_ad_claim(s, token=token)
         if not claim.get("ok"):
