@@ -166,16 +166,46 @@ def login(sb):
 
 def renew_in_browser(sb):
     sb.open(RENEW_URL);sb.wait_for_ready_state_complete();time.sleep(3)
-    script="""
-    const done=arguments[arguments.length-1];
-    fetch(arguments[0],{method:'POST',credentials:'include',headers:{'Accept':'application/json, text/plain, */*','X-Requested-With':'XMLHttpRequest'}})
-      .then(async r=>done({status:r.status,text:await r.text(),url:r.url})).catch(e=>done({error:String(e)}));
-    """
-    result=sb.driver.execute_async_script(script,RENEW_URL)
-    log(f"📡 POST {RENEW_URL} -> HTTP {result.get('status')}")
-    log("📦 返回摘要："+result.get('text','')[:500])
-    if result.get('status')==401:raise ScyedError("SCYED 登录会话失效")
-    if result.get('status')!=200:raise ScyedError(f"SCYED 续期失败：HTTP {result.get('status')}")
+    if "login" in sb.get_current_url().lower():
+        raise ScyedError("SCYED 登录会话失效")
+
+    button = "//button[contains(normalize-space(.), 'Extend for Free')]"
+    expiry_value = "//*[normalize-space(text())='Expires on']/following-sibling::*[1]"
+    if not sb.is_element_visible(button, by="xpath"):
+        raise ScyedError("SCYED 续期页未找到 Extend for Free 按钮")
+
+    try:
+        before = sb.get_text(expiry_value, by="xpath", timeout=3).strip()
+    except Exception:
+        before = "未知"
+    log(f"📅 SCYED 续期前到期时间：{before}")
+    log("🖱️ 点击 Extend for Free")
+    sb.click(button, by="xpath")
+
+    success = False
+    after = before
+    for _ in range(20):
+        time.sleep(1)
+        page = sb.get_page_source().lower()
+        if "server extended!" in page or "extended successfully" in page:
+            success = True
+        try:
+            current = sb.get_text(expiry_value, by="xpath", timeout=0.5).strip()
+            if current:
+                after = current
+            if before != "未知" and after != before:
+                success = True
+        except Exception:
+            pass
+        if "extension failed" in page or "could not extend your server" in page:
+            raise ScyedError("SCYED 页面提示续期失败")
+        if success:
+            break
+
+    log(f"📅 SCYED 续期后到期时间：{after}")
+    if not success:
+        raise ScyedError("点击续期后未检测到成功提示或到期时间变化")
+    log("✅ SCYED 页面确认续期成功")
 
 def main():
     log("🚀 SCYED 真实浏览器随机续期启动");log(f"🕐 北京时间：{now_str()}")
