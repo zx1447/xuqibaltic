@@ -164,6 +164,16 @@ def login(sb):
     if not browser_session_valid(sb):raise ScyedError("SCYED 登录后 /api/auth/get-session 未确认会话")
     log("✅ SCYED 登录成功，会话接口验证通过")
 
+def parse_expiry_days(value):
+    """Parse the English date rendered by SCYED, e.g. '28. August 2026 um 23:31'."""
+    try:
+        normalized = value.replace(" um ", " ").strip()
+        expires = dt.datetime.strptime(normalized, "%d. %B %Y %H:%M").replace(tzinfo=dt.timezone.utc)
+        return (expires - dt.datetime.now(dt.timezone.utc)).total_seconds() / 86400
+    except (ValueError, TypeError):
+        return None
+
+
 def renew_in_browser(sb):
     sb.open(RENEW_URL);sb.wait_for_ready_state_complete();time.sleep(3)
     if "login" in sb.get_current_url().lower():
@@ -179,6 +189,11 @@ def renew_in_browser(sb):
     except Exception:
         before = "未知"
     log(f"📅 SCYED 续期前到期时间：{before}")
+    remaining_days = parse_expiry_days(before)
+    if remaining_days is not None and remaining_days > 14:
+        log(f"ℹ️ SCYED 还有约 {remaining_days:.1f} 天到期，已接近平台允许的最长时限，本轮正常跳过")
+        return False, remaining_days
+
     log("🖱️ 点击 Extend for Free")
     sb.click(button, by="xpath")
 
@@ -206,6 +221,7 @@ def renew_in_browser(sb):
     if not success:
         raise ScyedError("点击续期后未检测到成功提示或到期时间变化")
     log("✅ SCYED 页面确认续期成功")
+    return True, parse_expiry_days(after)
 
 def main():
     log("🚀 SCYED 真实浏览器随机续期启动");log(f"🕐 北京时间：{now_str()}")
@@ -229,15 +245,31 @@ def main():
             reused=restore_browser_cookies(st,sb)
             if reused:log("♻️ 复用 SCYED 浏览器登录会话")
             else:login(sb)
-            try:renew_in_browser(sb)
+            try:
+                renewed, remaining = renew_in_browser(sb)
             except ScyedError as e:
                 if "会话失效" not in str(e):raise
                 log("🔐 确认会话失效，重新登录后重试")
-                login(sb);renew_in_browser(sb)
-            days=random.randint(5,14);nxt=int(time.time()+days*86400)
-            st.update({"last_renew_timestamp":int(time.time()),"last_renew_time":now_str(),"next_interval_days":days,"next_renew_timestamp":nxt,"next_renew_time":dt.datetime.fromtimestamp(nxt,dt.timezone.utc).astimezone(dt.timezone(dt.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S")})
+                login(sb);renewed, remaining = renew_in_browser(sb)
+
+            if renewed:
+                days = random.randint(5,14)
+            elif remaining is not None:
+                # 保证下一轮最迟在到期前约 7 天执行。
+                max_wait = max(1, int(remaining - 7))
+                days = random.randint(5, min(14, max_wait)) if max_wait >= 5 else max_wait
+            else:
+                days = 5
+            nxt=int(time.time()+days*86400)
+            now_ts=int(time.time()); now_text=now_str()
+            st.update({"last_check_timestamp":now_ts,"last_check_time":now_text,"next_interval_days":days,"next_renew_timestamp":nxt,"next_renew_time":dt.datetime.fromtimestamp(nxt,dt.timezone.utc).astimezone(dt.timezone(dt.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S")})
+            if renewed:
+                st.update({"last_renew_timestamp":now_ts,"last_renew_time":now_text})
             save_browser_cookies(st,sb);save_state(st)
-            log(f"🎲 下次 SCYED 随机续期：{days} 天后");send_tg(f"✅ SCYED 续期成功\n🕐 {now_str()}\n🎲 下次：{days} 天后");return 0
+            result_text = "续期成功" if renewed else "当前时限充足，正常跳过"
+            log(f"🎲 下次 SCYED 检查：{days} 天后")
+            send_tg(f"✅ SCYED {result_text}\n🕐 {now_text}\n🎲 下次检查：{days} 天后")
+            return 0
     except Exception as e:
         log(f"❌ SCYED 续期失败：{type(e).__name__}: {e}");send_tg(f"❌ SCYED 续期失败\n{e}");return 1
 if __name__=="__main__":sys.exit(main())
