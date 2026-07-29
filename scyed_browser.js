@@ -86,6 +86,31 @@ async function sessionValid(page) {
   if (r.status!==200) return false;
   try { const d=JSON.parse(r.text); return Boolean(d.user||d.session); } catch { return false; }
 }
+async function waitTurnstile(page) {
+  for (let i=0;i<25;i++) {
+    const token = await page.evaluate(() => {
+      const el = document.querySelector('input[name="cf-turnstile-response"]');
+      if (el && el.value) return el.value;
+      try { return window.turnstile?.getResponse?.() || ''; } catch { return ''; }
+    });
+    if (token) {
+      log(`✅ SCYED Turnstile 验证通过（等待约 ${i*2} 秒）`);
+      return;
+    }
+
+    const frame = page.locator('#cf-turnstile iframe,iframe[src*="challenges.cloudflare.com"]').first();
+    if (await frame.count() && [1, 5, 10, 15, 20].includes(i)) {
+      const box = await frame.boundingBox();
+      if (box) {
+        log(`🖱️ 尝试点击 Turnstile 验证框（第 ${i} 轮）`);
+        await page.mouse.click(box.x + Math.min(30, box.width / 2), box.y + Math.min(30, box.height / 2));
+      }
+    }
+    if (i % 5 === 0) log(`🛡️ 等待 SCYED Turnstile token（${i+1}/25）`);
+    await page.waitForTimeout(2000);
+  }
+  throw new Error('SCYED Turnstile 验证未通过，登录按钮仍被禁用');
+}
 async function login(page) {
   await page.goto(LOGIN_URL,{waitUntil:'domcontentloaded',timeout:60000});
   await waitCf(page);
@@ -96,7 +121,8 @@ async function login(page) {
   await email.fill(USER); await pass.fill(PASSWORD);
   const btn=page.locator('button[type="submit"],input[type="submit"],button.btn-primary').first();
   if (!(await btn.count())) throw new Error('未找到 SCYED 登录按钮');
-  await btn.click(); await page.waitForTimeout(6000);
+  await waitTurnstile(page);
+  await btn.click({timeout:15000}); await page.waitForTimeout(6000);
   if (!(await sessionValid(page))) throw new Error('/api/auth/get-session 未确认登录');
   log('✅ SCYED 登录和 get-session 验证成功');
 }
