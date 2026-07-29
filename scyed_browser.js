@@ -62,13 +62,19 @@ async function launchChrome() {
 }
 async function waitCf(page) {
   for (let i=0;i<12;i++) {
-    await page.waitForTimeout(5000);
+    await page.waitForTimeout(3000);
     const title=await page.title(); const html=await page.content();
     if (isHardBlock(title, html)) {
       throw new Error(`SCYED Cloudflare 已封锁当前出口 IP（title=${title}）`);
     }
+    // SCYED 正常登录页本身也会包含 cf-chl 字符串，不能只靠源码关键字判断。
+    const loginInput = page.locator('#identifier,input[autocomplete*="username"],input[type="email"]').first();
+    if (await loginInput.count() && await loginInput.isVisible()) {
+      log(`✅ SCYED 登录页面已加载（等待约 ${(i+1)*3} 秒，title=${title}）`);
+      return;
+    }
     if (!isCf(title, html)) {
-      log(`✅ Cloudflare 自动验证通过（等待约 ${(i+1)*5} 秒，title=${title}）`);
+      log(`✅ Cloudflare 自动验证通过（等待约 ${(i+1)*3} 秒，title=${title}）`);
       return;
     }
     log(`🛡️ 等待 SCYED Cloudflare 自动验证（${i+1}/12，title=${title}）`);
@@ -83,7 +89,7 @@ async function sessionValid(page) {
 async function login(page) {
   await page.goto(LOGIN_URL,{waitUntil:'domcontentloaded',timeout:60000});
   await waitCf(page);
-  const email=page.locator('input[type="email"],input[name="email"],#email,input[name="username"],#username,input[name="user"]').first();
+  const email=page.locator('#identifier,input[autocomplete*="username"],input[type="email"],input[name="email"],#email,input[name="username"],#username,input[name="user"]').first();
   const pass=page.locator('input[type="password"],input[name="password"],#password').first();
   if (!(await email.count()) || !(await pass.count())) throw new Error('Cloudflare 后仍未找到登录输入框');
   log('🔑 Cloudflare 通过，填写 SCYED 账号密码');
