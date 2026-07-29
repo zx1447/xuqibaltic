@@ -192,16 +192,23 @@ def wait_for_login_form(sb):
 
         for tick in range(25):
             try:
+                page = sb.get_page_source().lower()
+                # 持久化 Cookie 可能在验证页放行后才生效，此时会直接跳到仪表盘，
+                # 不再出现登录表单。出现退出链接即可确认已登录。
+                if "/auth/logout/" in page:
+                    print(f"♻️ 验证页放行后已恢复登录会话，当前 URL: {sb.get_current_url()}")
+                    return "authenticated"
                 if sb.is_element_visible("#username") and sb.is_element_visible("#password"):
                     print("✅ 登录表单已加载")
-                    return True
+                    return "form"
             except Exception:
-                pass
+                page = ""
 
             # 只有页面没有表单、且疑似验证页时才尝试 GUI 点击。
             if tick in (0, 8, 16):
                 try:
-                    page = sb.get_page_source().lower()
+                    if not page:
+                        page = sb.get_page_source().lower()
                     if any(hint in page for hint in challenge_hints):
                         print("🛡️ 检测到反爬验证页，尝试点击验证")
                         sb.uc_gui_click_captcha()
@@ -210,7 +217,49 @@ def wait_for_login_form(sb):
             time.sleep(1)
 
     page_diagnostics(sb, "登录表单未出现")
-    return False
+    return None
+
+
+def submit_password_login(sb):
+    """在已显示的登录表单中提交账号密码。"""
+    print(f"🔑 填写账号 {mask(EMAIL)} ...")
+    sb.type("#username", EMAIL, timeout=10)
+    sb.type("#password", PASSWORD, timeout=10)
+    print("🖱️ 点击登录按钮 #loginBtn")
+    sb.uc_click("#loginBtn")
+
+    logged_in = False
+    err_text = ""
+    for _ in range(20):
+        cur = sb.get_current_url()
+        if "login" not in cur:
+            logged_in = True
+            break
+        try:
+            err = sb.get_text("#errorMessage", timeout=0.5)
+            if err and err.strip():
+                err_text = err.strip()
+        except Exception:
+            pass
+        time.sleep(1)
+
+    if not logged_in:
+        title = sb.get_title()
+        page = sb.get_page_source()
+        if "M.E.O.W" in title or "hiding" in title:
+            diag = "被反爬盾拦截（M.E.O.W）"
+        elif "ip_banned" in page or "Access denied from your location" in page:
+            diag = "IP 在登录端点被封 (ip_banned)"
+        elif "invalid_credentials" in page or "Invalid username or password" in page:
+            diag = "账号或密码错误 (invalid_credentials)"
+        else:
+            diag = f"登录失败，页面错误提示: {err_text or '无'}"
+        print(f"❌ 登录后未跳转：{diag}")
+        page_diagnostics(sb, "账号密码登录失败")
+        return False
+
+    print(f"✅ 登录成功，当前 URL: {sb.get_current_url()}")
+    return True
 
 
 def main():
@@ -243,49 +292,16 @@ def main():
 
             # 2) 登录
             if EMAIL and PASSWORD:
-                if not wait_for_login_form(sb):
+                login_state = wait_for_login_form(sb)
+                if not login_state:
                     msg = "❌ 登录表单始终未出现，反爬验证页没有放行；诊断文件已上传"
                     print(msg)
                     send_tg(TG_BOT_TOKEN, TG_CHAT_ID, msg)
                     sys.exit(1)
-                print(f"🔑 填写账号 {mask(EMAIL)} ...")
-                sb.type("#username", EMAIL, timeout=10)
-                sb.type("#password", PASSWORD, timeout=10)
-                print("🖱️ 点击登录按钮 #loginBtn")
-                sb.uc_click("#loginBtn")
-                # 等待跳离登录页（成功会跳到 / 或 next）
-                logged_in = False
-                err_text = ""
-                for _ in range(20):
-                    cur = sb.get_current_url()
-                    if "login" not in cur:
-                        logged_in = True
-                        break
-                    # 读取页面内错误提示
-                    try:
-                        err = sb.get_text("#errorMessage", timeout=0.5)
-                        if err and err.strip():
-                            err_text = err.strip()
-                    except Exception:
-                        pass
-                    time.sleep(1)
-                if not logged_in:
-                    # 抓取更多诊断信息
-                    title = sb.get_title()
-                    page = sb.get_page_source()
-                    if "M.E.O.W" in title or "hiding" in title:
-                        diag = "被反爬盾拦截（M.E.O.W）"
-                    elif "ip_banned" in page or "Access denied from your location" in page:
-                        diag = "IP 在登录端点被封 (ip_banned)"
-                    elif "invalid_credentials" in page or "Invalid username or password" in page:
-                        diag = "账号或密码错误 (invalid_credentials)"
-                    else:
-                        diag = f"登录失败，页面错误提示: {err_text or '无'}"
-                    msg = f"❌ 登录后未跳转：{diag}"
-                    print(msg)
+                if login_state == "form" and not submit_password_login(sb):
+                    msg = "❌ BalticHost 账号密码登录失败；诊断文件已上传"
                     send_tg(TG_BOT_TOKEN, TG_CHAT_ID, msg)
                     sys.exit(1)
-                print(f"✅ 登录成功，当前 URL: {sb.get_current_url()}")
             elif SESSION_COOKIE:
                 print("🍪 注入静态 session cookie")
                 cookie_val = SESSION_COOKIE.split("session=", 1)[-1].split(";")[0].strip()
