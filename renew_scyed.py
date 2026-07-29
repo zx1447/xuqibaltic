@@ -186,8 +186,8 @@ def renew_in_browser(sb):
     after = before
     for _ in range(20):
         time.sleep(1)
-        page = sb.get_page_source().lower()
-        if "server extended!" in page or "extended successfully" in page:
+        # Next.js 源码内始终包含全部翻译文案，只能检查当前可见 Toast。
+        if sb.is_text_visible("Server Extended!") or sb.is_text_visible("Your free server has been extended successfully."):
             success = True
         try:
             current = sb.get_text(expiry_value, by="xpath", timeout=0.5).strip()
@@ -197,7 +197,7 @@ def renew_in_browser(sb):
                 success = True
         except Exception:
             pass
-        if "extension failed" in page or "could not extend your server" in page:
+        if sb.is_text_visible("Extension Failed") or sb.is_text_visible("Could not extend your server. Please try again later."):
             raise ScyedError("SCYED 页面提示续期失败")
         if success:
             break
