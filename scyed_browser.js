@@ -97,6 +97,8 @@ async function waitTurnstile(page) {
         containerHtml: (document.querySelector('#cf-turnstile')?.innerHTML || '').slice(0, 300),
         cloudflareScripts: [...document.scripts].map(x => x.src).filter(x => x.includes('cloudflare')).slice(0, 5),
         iframeCount: document.querySelectorAll('#cf-turnstile iframe,iframe[src*="challenges.cloudflare.com"]').length,
+        containerRect: (() => { const r=document.querySelector('#cf-turnstile')?.getBoundingClientRect(); return r ? {x:r.x,y:r.y,width:r.width,height:r.height} : null; })(),
+        childRect: (() => { const r=document.querySelector('#cf-turnstile > div')?.getBoundingClientRect(); return r ? {x:r.x,y:r.y,width:r.width,height:r.height} : null; })(),
       }));
       log(`🔎 Turnstile 状态：${JSON.stringify(diag)}`);
     }
@@ -110,12 +112,20 @@ async function waitTurnstile(page) {
       return;
     }
 
-    const frame = page.locator('#cf-turnstile iframe,iframe[src*="challenges.cloudflare.com"]').first();
-    if (await frame.count() && [1, 5, 10, 15, 20].includes(i)) {
-      const box = await frame.boundingBox();
-      if (box) {
-        log(`🖱️ 尝试点击 Turnstile 验证框（第 ${i} 轮）`);
-        await page.mouse.click(box.x + Math.min(30, box.width / 2), box.y + Math.min(30, box.height / 2));
+    if ([1, 5, 10, 15, 20].includes(i)) {
+      const targets = [
+        page.locator('#cf-turnstile iframe,iframe[src*="challenges.cloudflare.com"]').first(),
+        page.locator('#cf-turnstile > div').first(),
+        page.locator('#cf-turnstile').first(),
+      ];
+      for (const target of targets) {
+        if (!(await target.count())) continue;
+        const box = await target.boundingBox();
+        if (box && box.width > 5 && box.height > 5) {
+          log(`🖱️ 尝试点击 Turnstile 验证区域（第 ${i} 轮，${Math.round(box.width)}x${Math.round(box.height)}）`);
+          await page.mouse.click(box.x + Math.min(30, box.width / 2), box.y + Math.min(30, box.height / 2));
+          break;
+        }
       }
     }
     if (i % 5 === 0) log(`🛡️ 等待 SCYED Turnstile token（${i+1}/25）`);
