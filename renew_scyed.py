@@ -62,18 +62,27 @@ def should_run(st):
     return True
 
 def wait_cf_auto(sb):
-    try:sb.uc_open_with_reconnect(LOGIN_URL,reconnect_time=6)
-    except:sb.open(LOGIN_URL)
+    try:
+        sb.uc_open_with_reconnect(LOGIN_URL, reconnect_time=6)
+    except Exception:
+        sb.open(LOGIN_URL)
     sb.wait_for_ready_state_complete()
-    # SCYED 的 CF 盾会自动完成，不主动点击，只等待 JS 跳转。
-    for i in range(4):
-        time.sleep(6)
-        title=sb.get_title().lower();source=sb.get_page_source().lower()
-        if "just a moment" not in title and "attention required" not in title and "cf-chl-" not in source:
-            log(f"✅ SCYED Cloudflare 自动验证通过（等待 {6*(i+1)} 秒）")
+    time.sleep(2)
+
+    for i in range(12):
+        title = sb.get_title().lower()
+        source = sb.get_page_source().lower()
+        if "sorry, you have been blocked" in source or "unable to access scyed.com" in source:
+            raise ScyedError("SCYED Cloudflare 已封锁当前代理出口")
+        if first_selector(sb, ["#identifier", "input[autocomplete*='username']", "input[type='email']"]):
+            log(f"✅ SCYED 登录页已加载（等待约 {2*(i+1)} 秒）")
             return
-        log(f"🛡️ 等待 SCYED Cloudflare 自动验证（第 {i+1}/4 次）")
-    raise ScyedError("SCYED Cloudflare 自动验证未通过")
+        if "just a moment" not in title and "attention required" not in title:
+            log(f"⏳ SCYED 页面已返回，等待登录表单渲染（第 {i+1}/12 次）")
+        else:
+            log(f"🛡️ 等待 SCYED Cloudflare 验证（第 {i+1}/12 次）")
+        time.sleep(2)
+    raise ScyedError("SCYED 登录表单未加载")
 
 def browser_session_valid(sb):
     script = """
@@ -98,16 +107,55 @@ def first_selector(sb, selectors):
         except: pass
     return None
 
+def turnstile_token(sb):
+    try:
+        return sb.execute_script("""
+            const el = document.querySelector('input[name="cf-turnstile-response"]');
+            if (el && el.value) return el.value;
+            try { return window.turnstile?.getResponse?.() || ''; } catch (e) { return ''; }
+        """) or ""
+    except Exception:
+        return ""
+
+
+def solve_turnstile(sb):
+    if turnstile_token(sb):
+        return
+    log("🛡️ 使用 SeleniumBase UC 模式处理 SCYED Turnstile")
+    attempts = (
+        lambda: sb.uc_gui_click_cf(frame="#cf-turnstile", retry=True),
+        lambda: sb.uc_gui_click_captcha(),
+        lambda: sb.uc_gui_handle_cf(frame="#cf-turnstile"),
+    )
+    for index, action in enumerate(attempts, 1):
+        try:
+            action()
+        except Exception as exc:
+            log(f"⚠️ Turnstile 第 {index} 种点击方式跳过：{type(exc).__name__}")
+        for _ in range(12):
+            if turnstile_token(sb):
+                log("✅ SCYED Turnstile token 已生成")
+                return
+            time.sleep(1)
+    raise ScyedError("SCYED Turnstile 验证未通过")
+
+
 def login(sb):
     wait_cf_auto(sb)
-    email=first_selector(sb,["input[type='email']","input[name='email']","#email","input[name='username']","#username","input[name='user']"])
+    # 在执行其它 WebDriver 操作前先使用 PyAutoGUI 点击闭合 Shadow DOM 内的验证框。
+    solve_turnstile(sb)
+    email=first_selector(sb,["#identifier","input[autocomplete*='username']","input[type='email']","input[name='email']","#email","input[name='username']","#username","input[name='user']"])
     password=first_selector(sb,["input[type='password']","input[name='password']","#password"])
     if not email or not password:
-        raise ScyedError("Cloudflare 已返回但未找到账号/密码输入框")
-    log("🔑 Cloudflare 自动通过，开始填写 SCYED 登录表单")
+        raise ScyedError("未找到 SCYED 账号/密码输入框")
+    log("🔑 Turnstile 通过，开始填写 SCYED 登录表单")
     sb.type(email,USER,timeout=10);sb.type(password,PASSWORD,timeout=10)
-    button=first_selector(sb,["button[type='submit']","input[type='submit']","button.btn-primary","button"])
+    button=first_selector(sb,["button[type='submit']","input[type='submit']","button.btn-primary"])
     if not button:raise ScyedError("未找到 SCYED 登录按钮")
+    try:
+        sb.wait_for_element_clickable(button, timeout=10)
+    except Exception:
+        raise ScyedError("SCYED 登录按钮仍被禁用（Turnstile 回调未完成）")
     log("🖱️ 点击 SCYED 登录按钮")
     sb.uc_click(button)
     time.sleep(6)
@@ -135,7 +183,16 @@ def main():
     if not should_run(st):return 0
     try:
         from seleniumbase import SB
-        kw={"uc":True,"xvfb":True,"headless":False}
+        kw={
+            "uc": True,
+            "xvfb": True,
+            "headless": False,
+            "incognito": True,
+            "locale": "en",
+            "window_size": "1280,720",
+            # Turnstile 动态子域只返回 AAAA，强制通过 IPv4 Anycast 访问。
+            "host_resolver_rules": "MAP *.challenges.cloudflare.com 104.18.94.41, EXCLUDE localhost",
+        }
         if PROXY:kw["proxy"]=PROXY
         with SB(**kw) as sb:
             reused=restore_browser_cookies(st,sb)
