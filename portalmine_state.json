@@ -1,6 +1,6 @@
 {
-  "last_check_timestamp": 1785287536,
-  "last_check_time": "2026-07-29 09:12:16",
+  "last_check_timestamp": 1785288792,
+  "last_check_time": "2026-07-29 09:33:12",
   "last_status": "success",
   "server_state": {
     "state": "offline",
@@ -26,13 +26,18 @@
   },
   "poll_count": 1,
   "auto_coins": {
-    "rounds_attempted": 1,
-    "rounds_ok": 0,
-    "coins_earned": 0,
-    "errors": [
-      "ad_claim: BAD_TOKEN"
-    ],
-    "last_claim": null
+    "rounds_attempted": 2,
+    "rounds_ok": 2,
+    "coins_earned": 260,
+    "errors": [],
+    "last_claim": {
+      "ok": true,
+      "coins": 140,
+      "reward": 20,
+      "request_id": "78f4953acd5f",
+      "version": 16083,
+      "msg": "20 coins added."
+    }
   },
-  "last_auto_coins_time": "2026-07-29 09:12:16"
+  "last_auto_coins_time": "2026-07-29 09:33:12"
 }
