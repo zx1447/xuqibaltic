@@ -41,8 +41,10 @@ async function launchChrome() {
   ];
   if (!PROXY && ORIGIN_IP) {
     if (!net.isIP(ORIGIN_IP)) throw new Error('SCYED_ORIGIN_IP 不是有效 IP');
-    args.push(`--host-resolver-rules=MAP scyed.com ${ORIGIN_IP}, MAP *.scyed.com ${ORIGIN_IP}, EXCLUDE localhost`);
-    log(`🧭 SCYED 根域名直连源站 ${ORIGIN_IP}，绕过 Cloudflare 封锁`);
+    // Turnstile 的动态 challenges 子域偶尔只返回 AAAA，而 Actions Runner 没有 IPv6；
+    // 将它映射到 Cloudflare 的 IPv4 Anycast，避免 net::ERR_NAME_NOT_RESOLVED。
+    args.push(`--host-resolver-rules=MAP scyed.com ${ORIGIN_IP}, MAP *.scyed.com ${ORIGIN_IP}, MAP *.challenges.cloudflare.com 104.18.94.41, EXCLUDE localhost`);
+    log(`🧭 SCYED 根域名直连源站 ${ORIGIN_IP}，Turnstile 强制使用 IPv4`);
   }
   if (PROXY) {
     try {
