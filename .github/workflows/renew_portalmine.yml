@@ -26,25 +26,25 @@ on:
         required: false
         default: "1"
       ad_max_runtime:
-        description: "forever 模式最大运行秒数（默认 18000=5h，留 1h buffer 给 GitHub 6h timeout）"
+        description: "forever 模式最大运行秒数（默认 18000=5h）"
         required: false
         default: "18000"
   schedule:
-    # 每 6 小时跑一次 (UTC 00,06,12,18) - 配合 forever 模式实现 24/7 领金币
-    # 默认 schedule 不开 auto_coins, 手动触发才开
-    - cron: "0 0,6,12,18 * * *"
+    # 每 5 小时自动跑 forever 模式 (24/7 领金币)
+    # 5h runtime + buffer, 6h 间隔保证不重叠
+    - cron: "0 0,5,10,15,20 * * *"
 
 permissions:
   contents: write
 
 concurrency:
   group: portalmine-state-check
-  cancel-in-progress: true
+  cancel-in-progress: false  # 不取消正在跑的, 避免打断 forever 模式
 
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 360  # 6 hours (GitHub Actions max for free)
+    timeout-minutes: 360  # 6 hours (GitHub Actions max)
     steps:
       - name: Checkout PortalMine branch
         uses: actions/checkout@v4
@@ -67,8 +67,10 @@ jobs:
           PORTALMINE_SERVER_ID: ${{ secrets.PORTALMINE_SERVER_ID }}
           PORTALMINE_POLL_COUNT: ${{ github.event.inputs.poll_count || '1' }}
           PORTALMINE_POLL_SECONDS: ${{ github.event.inputs.poll_seconds || '60' }}
-          PORTALMINE_AUTO_COINS: ${{ (github.event.inputs.auto_coins == 'true' || github.event.inputs.ad_forever == 'true') && '1' || '' }}
-          PORTALMINE_AD_FOREVER: ${{ github.event.inputs.ad_forever == 'true' && '1' || '' }}
+          # schedule 触发时 github.event.inputs 为空, 用 schedule 自动开 forever
+          # workflow_dispatch 时按用户选择
+          PORTALMINE_AUTO_COINS: ${{ (github.event_name == 'schedule' || github.event.inputs.auto_coins == 'true' || github.event.inputs.ad_forever == 'true') && '1' || '' }}
+          PORTALMINE_AD_FOREVER: ${{ (github.event_name == 'schedule' || github.event.inputs.ad_forever == 'true') && '1' || '' }}
           PORTALMINE_AD_MAX_ROUNDS: ${{ github.event.inputs.ad_max_rounds || '1' }}
           PORTALMINE_AD_MAX_RUNTIME: ${{ github.event.inputs.ad_max_runtime || '18000' }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
@@ -87,25 +89,3 @@ jobs:
           fi
           git commit -m "Update PortalMine state [skip ci]"
           git push origin HEAD:portalmine
-
-      - name: Re-trigger next run (forever mode only)
-        if: ${{ github.event.inputs.ad_forever == 'true' && success() }}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          # Wait a moment then dispatch the same workflow again to keep claiming coins
-          sleep 5
-          curl -s -X POST \
-            -H "Authorization: token $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/renew_portalmine.yml/dispatches" \
-            -d '{
-              "ref": "portalmine",
-              "inputs": {
-                "poll_count": "1",
-                "auto_coins": "true",
-                "ad_forever": "true",
-                "ad_max_runtime": "18000"
-              }
-            }'
-          echo "Re-triggered next forever run"
