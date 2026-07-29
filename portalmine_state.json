@@ -1,7 +1,28 @@
 {
-  "last_check_timestamp": 0,
-  "last_check_time": null,
-  "last_status": null,
-  "server_state": null,
-  "poll_count": 0
+  "last_check_timestamp": 1785284128,
+  "last_check_time": "2026-07-29 08:15:28",
+  "last_status": "success",
+  "server_state": {
+    "state": "offline",
+    "current_state": "offline",
+    "state_label": "Offline",
+    "install_status": "ready",
+    "name": "nice",
+    "version": "1.21.8",
+    "type": "paper",
+    "platform": "java",
+    "display_address": "play.portalmine.com:26203",
+    "account_level": 1,
+    "slots": 5,
+    "limit_memory_mb": 4096,
+    "limit_disk_mb": 20480,
+    "limit_cpu": 100,
+    "cycle_left": null,
+    "uptime": 0,
+    "cpu": 0,
+    "memory": 0,
+    "disk": 0,
+    "players_online": null
+  },
+  "poll_count": 2
 }
