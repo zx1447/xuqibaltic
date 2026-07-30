@@ -1,0 +1,80 @@
+name: BoxMineWorld AFK Earn
+
+on:
+  # 兜底触发；正常情况下每轮结束后会自动启动下一轮。
+  schedule:
+    - cron: "41 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      run_minutes:
+        description: "本轮运行分钟数"
+        required: false
+        default: "340"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: boxmineworld-afk-earn
+  cancel-in-progress: false
+
+jobs:
+  earn:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    steps:
+      - name: Checkout clean boxmineworld branch
+        uses: actions/checkout@v4
+        with:
+          ref: boxmineworld
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install --upgrade requests websocket-client cryptography
+
+      - name: Run BoxMineWorld AFK earn
+        env:
+          BOXMINEWORLD_DISCORD_TOKEN: ${{ secrets.BOXMINEWORLD_DISCORD_TOKEN }}
+          BOXMINEWORLD_SESSION_KEY: ${{ secrets.BOXMINEWORLD_SESSION_KEY }}
+          RUN_MINUTES: ${{ github.event.inputs.run_minutes || '340' }}
+          NO_PROXY: "afkapi.boxmineworld.com,discord.com"
+          no_proxy: "afkapi.boxmineworld.com,discord.com"
+        run: python earn_boxmineworld.py
+
+      - name: Save BoxMineWorld state
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add boxmineworld_state.json || true
+          if git diff --cached --quiet; then
+            echo "No BoxMineWorld state change."
+            exit 0
+          fi
+          git commit -m "Update BoxMineWorld AFK state [skip ci]"
+          git push origin HEAD:boxmineworld
+
+      - name: Re-trigger next round
+        if: success()
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+        run: |
+          sleep 45
+          code=$(curl -sS -o /tmp/boxmineworld-dispatch.json -w '%{http_code}' \
+            -X POST \
+            -H "Authorization: token ${GH_PAT}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "Content-Type: application/json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/earn_boxmineworld.yml/dispatches" \
+            -d '{"ref":"boxmineworld","inputs":{"run_minutes":"340"}}')
+          if [ "$code" != "204" ]; then
+            echo "Re-dispatch failed: HTTP $code"
+            cat /tmp/boxmineworld-dispatch.json
+            exit 1
+          fi
+          echo "Next BoxMineWorld round dispatched."
