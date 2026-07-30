@@ -249,8 +249,14 @@ def run_afk(session: requests.Session, state: dict) -> int:
                     interval = data.get("interval")
                     cooldown = bool(data.get("cooldown"))
                     reset_at = data.get("reset_at", 0)
+                    limit_reached = cooldown or (
+                        isinstance(earned, (int, float))
+                        and isinstance(maximum, (int, float))
+                        and maximum > 0
+                        and earned >= maximum
+                    )
                     state.update({
-                        "last_status": "cooldown" if cooldown else "earning",
+                        "last_status": "daily_limit_reached" if limit_reached else "earning",
                         "last_message_time": now_text(),
                         "session_earned": earned,
                         "max_earn": maximum,
@@ -258,8 +264,12 @@ def run_afk(session: requests.Session, state: dict) -> int:
                         "cooldown": cooldown,
                         "reset_at": reset_at,
                     })
+                    state.pop("last_error", None)
                     save_state(state)
                     log(f"🪙 AFK 状态：{earned}/{maximum}｜间隔 {interval}ms｜cooldown={cooldown}")
+                    if limit_reached:
+                        log(f"✅ 今日已获取 {earned}/{maximum} 个积分，立即结束本轮 Workflow")
+                        return 0
 
         except BoxMineWorldError:
             raise
@@ -302,6 +312,18 @@ def main() -> int:
     log(f"⏳ 本轮运行：{RUN_MINUTES} 分钟")
     log("=" * 60)
     state = load_state()
+    reset_at = int(state.get("reset_at", 0) or 0)
+    if state.get("cooldown") and reset_at > int(time.time() * 1000):
+        reset_text = datetime.fromtimestamp(reset_at / 1000, CN_TZ).strftime("%Y-%m-%d %H:%M:%S")
+        earned = state.get("session_earned", 0)
+        maximum = state.get("max_earn", 8)
+        state["last_status"] = "daily_limit_reached"
+        state.pop("last_error", None)
+        save_state(state)
+        log(f"✅ 今日已获取 {earned}/{maximum} 个积分，不再启动 AFK 流")
+        log(f"⏳ 每日额度预计重置时间：{reset_text}")
+        return 0
+
     state.update({"last_start_time": now_text(), "last_status": "starting"})
     save_state(state)
 

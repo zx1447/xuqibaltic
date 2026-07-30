@@ -5,7 +5,9 @@
 - 使用 Discord OAuth 登录 `afk.boxmineworld.com`
 - 连接官方 WebSocket：`wss://afkapi.boxmineworld.com/earn`
 - 按官方协议发送订阅、Ping，并回应 `activity_check`
-- 登录 Cookie 使用 Fernet 加密后保存在状态文件
-- 每轮运行约 340 分钟，成功结束后自动启动下一轮
-- 每 6 小时有一次兜底触发
+- 每天最多获取 8 个积分
+- 收到 `8/8` 或 `cooldown=true` 后立即关闭连接并结束 Workflow
+- 冷却期内不会重新连接，等待每日额度重置
+- Workflow 每 6 小时检查一次，重置后再开始赚取
+- 登录 Cookie 使用 Fernet 加密保存
 - Discord Token 仅保存在 GitHub Secret

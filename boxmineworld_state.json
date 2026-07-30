@@ -1,5 +1,5 @@
 {
-  "last_status": "cooldown",
+  "last_status": "daily_limit_reached",
   "session_earned": 8,
   "max_earn": 8,
   "last_start_time": "2026-07-30 13:14:36",
@@ -16,7 +16,6 @@
   "last_run_messages": 4,
   "last_run_activity_responses": 3,
   "last_run_reconnects": 0,
-  "last_error": "WebSocketTimeoutException: Connection timed out",
   "last_error_time": "2026-07-30 13:22:45",
   "reconnects": 2
 }
