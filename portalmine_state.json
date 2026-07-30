@@ -1,7 +1,7 @@
 {
   "last_check_timestamp": 1785351207,
-  "last_check_time": "2026-07-30 16:05:12",
-  "last_status": "ERROR: 登录失败：{'ok': False, 'error': 'MAINTENANCE_MODE', 'msg': 'We are applying improvements to the website and game-server system. Please check again shortly.', 'title': 'PortalMine is being updated', 'maintenance': True, 'redirect': '/maintenance.php'}",
+  "last_check_time": "2026-07-30 21:23:37",
+  "last_status": "ERROR: server_state 失败：{'raw': '<!DOCTYPE html>\\n\\n<html dir=\"ltr\" lang=\"en\">\\n<head>\\n<meta content=\"#020617\" name=\"theme-color\"/>\\n<meta content=\"https://portalmine.com/favicon.png\" property=\"og:image\"/>\\n<meta content=\"https://portalmine.com/favicon.png\" name=\"twitter:image\"/>\\n<title>Page Not Found | PortalMine</title",
   "server_state": {
     "state": "offline",
     "current_state": "offline",
