@@ -1,0 +1,60 @@
+name: DragonHost Last-Day Renew
+
+on:
+  # 每 6 小时检查一次，只有进入最后 24 小时才提交续期。
+  schedule:
+    - cron: "37 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      force_attempt:
+        description: "忽略时间判断并测试续期接口（true/false）"
+        required: false
+        default: "false"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dragonhost-last-day-renew
+  cancel-in-progress: true
+
+jobs:
+  renew:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout clean dragonhost branch
+        uses: actions/checkout@v4
+        with:
+          ref: dragonhost
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install --upgrade requests cryptography
+
+      - name: Check and renew DragonHost server
+        env:
+          DRAGONHOST_EMAIL: ${{ secrets.DRAGONHOST_EMAIL }}
+          DRAGONHOST_PASSWORD: ${{ secrets.DRAGONHOST_PASSWORD }}
+          DRAGONHOST_SESSION_KEY: ${{ secrets.DRAGONHOST_SESSION_KEY }}
+          DRAGONHOST_GAME_ID: "328"
+          FORCE_ATTEMPT: ${{ github.event.inputs.force_attempt || 'false' }}
+        run: python renew_dragonhost.py
+
+      - name: Save DragonHost state
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add dragonhost_state.json || true
+          if git diff --cached --quiet; then
+            echo "No DragonHost state change."
+            exit 0
+          fi
+          git commit -m "Update DragonHost renewal state [skip ci]"
+          git push origin HEAD:dragonhost
