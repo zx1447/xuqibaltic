@@ -1,15 +1,19 @@
 {
-  "last_status": "earning",
-  "total_success": 10,
-  "last_start_time": "2026-07-30 08:05:43",
+  "last_status": "completed",
+  "total_success": 11,
+  "last_start_time": "2026-07-30 08:13:55",
   "last_http_status": 204,
-  "last_request_time": "2026-07-30 08:11:57",
-  "last_success_time": "2026-07-30 08:11:57",
-  "current_run_success": 7,
+  "last_request_time": "2026-07-30 08:13:55",
+  "last_success_time": "2026-07-30 08:13:55",
+  "current_run_success": 1,
   "current_run_throttled": 0,
   "current_run_failures": 0,
-  "last_end_time": "2026-07-30 08:04:42",
+  "last_end_time": "2026-07-30 08:14:55",
   "last_run_success": 1,
   "last_run_throttled": 0,
-  "last_run_failures": 0
+  "last_run_failures": 0,
+  "last_renew_time": "2026-07-30 08:13:55",
+  "last_renew_source": "manual_before_automation",
+  "next_renew_timestamp": 1785975235,
+  "next_renew_time": "2026-08-06 08:13:55"
 }
