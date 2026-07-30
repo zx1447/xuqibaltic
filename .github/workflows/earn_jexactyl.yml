@@ -1,7 +1,7 @@
-name: CyraHost Earn + 7-Day Renew
+name: Jexactyl Two-Account Earn + Primary Renew
 
 on:
-  # 每 6 小时检查一次；只有四天等待期结束后才会运行 340 分钟积分轮次。
+  # 每 6 小时检查一次；四天等待期结束后运行 340 分钟双账号积分任务。
   schedule:
     - cron: "17 */6 * * *"
   workflow_dispatch:
@@ -19,7 +19,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: cyrahost-earn-heartbeat
+  group: jexactyl-two-account-earn
   cancel-in-progress: false
 
 jobs:
@@ -27,10 +27,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 355
     steps:
-      - name: Checkout clean cyrahost branch
+      - name: Checkout Jexactyl branch
         uses: actions/checkout@v4
         with:
-          ref: cyrahost
+          ref: Jexactyl
           fetch-depth: 0
 
       - name: Setup Python
@@ -39,29 +39,32 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install --upgrade requests
+        run: pip install --upgrade requests cryptography
 
-      - name: Use CyraHost direct panel address
+      - name: Use direct panel address
         run: echo "13.140.147.61 panel.cyrahost.xyz" | sudo tee -a /etc/hosts
 
-      - name: Run CyraHost earn and renew
+      - name: Run Jexactyl two-account earn
         env:
-          CYRAHOST_API_KEY: ${{ secrets.CYRAHOST_API_KEY }}
-          CYRAHOST_SERVER_UUID: "1c8f44f1-a8b2-4abb-b5ad-3950ab451b30"
+          JEXACTYL_API_KEY: ${{ secrets.JEXACTYL_API_KEY }}
+          JEXACTYL_EMAIL: ${{ secrets.JEXACTYL_EMAIL }}
+          JEXACTYL_PASSWORD: ${{ secrets.JEXACTYL_PASSWORD }}
+          JEXACTYL_SESSION_KEY: ${{ secrets.JEXACTYL_SESSION_KEY }}
+          JEXACTYL_SERVER_UUID: "1c8f44f1-a8b2-4abb-b5ad-3950ab451b30"
           RUN_MINUTES: ${{ github.event.inputs.run_minutes || '340' }}
           INTERVAL_SECONDS: "61"
           FORCE_RUN: ${{ github.event.inputs.force || 'false' }}
-        run: python earn_cyrahost.py
+        run: python earn_jexactyl.py
 
-      - name: Save heartbeat and renewal state
+      - name: Save Jexactyl state
         if: always()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add cyrahost_state.json || true
+          git add jexactyl_state.json || true
           if git diff --cached --quiet; then
-            echo "No CyraHost state change."
+            echo "No Jexactyl state change."
             exit 0
           fi
-          git commit -m "Update CyraHost earn/renew state [skip ci]"
-          git push origin HEAD:cyrahost
+          git commit -m "Update Jexactyl two-account state [skip ci]"
+          git push origin HEAD:Jexactyl
