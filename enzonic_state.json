@@ -1,4 +1,11 @@
 {
-  "last_status": "not_started",
-  "interval_days": 2
+  "last_status": "success",
+  "last_login_timestamp": 1785392846,
+  "last_login_time": "2026-07-30 14:27:26",
+  "next_login_timestamp": 1785565646,
+  "next_login_time": "2026-08-01 14:27:26",
+  "interval_days": 2,
+  "server_count": 1,
+  "server_identifier": "f4e28bcb",
+  "server_name": "nice"
 }
