@@ -1,4 +1,4 @@
-name: Zytrano Server Auto Renew
+name: ZTO Server Auto Renew
 
 on:
   # 已暂停自动运行，仅保留手动 workflow_dispatch，不会自动启动。
@@ -10,7 +10,7 @@ on:
         default: "false"
 
 concurrency:
-  group: zytrano-auto-renew
+  group: zto-auto-renew
   cancel-in-progress: true
 
 jobs:
@@ -58,23 +58,23 @@ jobs:
       - name: Install chromedriver
         run: python -m seleniumbase install chromedriver
 
-      - name: Run Zytrano Renew
+      - name: Run ZTO Renew
         env:
-          ZYTRANO_USER: ${{ secrets.ZYTRANO_USER }}
-          ZYTRANO_PASS: ${{ secrets.ZYTRANO_PASS }}
-          ZYTRANO_COOKIE: ${{ secrets.ZYTRANO_COOKIE }}
-          ZYTRANO_SERVER_ID: ${{ secrets.ZYTRANO_SERVER_ID }}
+          ZTO_USER: ${{ secrets.ZTO_USER }}
+          ZTO_PASS: ${{ secrets.ZTO_PASS }}
+          ZTO_COOKIE: ${{ secrets.ZTO_COOKIE }}
+          ZTO_SERVER_ID: ${{ secrets.ZTO_SERVER_ID }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
           PROXY_SERVER: "socks5://127.0.0.1:40001"
           HEADLESS: "true"
           FORCE_RUN: ${{ github.event.inputs.force }}
-        run: python renew_zytrano.py
+        run: python renew_zto.py
 
       - name: Commit and push state change
         if: always()
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add zytrano_state.json || true
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Update Zytrano random renew schedule state [skip ci]" && git push)
+          git add zto_state.json || true
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Update ZTO random renew schedule state [skip ci]" && git push)

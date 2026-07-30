@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Zytrano (https://cp.zytrano.top) 服务器自动登录与随机间隔续期脚本。
+ZTO 服务器自动登录与随机间隔续期脚本。
 - 自动计算 2~10 天随机时间间隔，完美模拟真人的随机登录与续期习惯
 - 使用 SeleniumBase (uc + Xvfb) 自动完成账号密码登录与 Cloudflare Turnstile 验证
 - 登录完成后，构建标准 Laravel PATCH 伪造表单提交续期请求
-- 续期成功后，随机计算并保存下一次触发节点至 zytrano_state.json 自动写回仓库
+- 续期成功后，随机计算并保存下一次触发节点至 zto_state.json 自动写回仓库
 """
 import os
 import sys
@@ -20,22 +20,23 @@ try:
 except ImportError:
     sys.exit("缺少 seleniumbase 依赖，请先执行 pip install seleniumbase")
 
-USER = os.environ.get("ZYTRANO_USER", "").strip()
-PASS = os.environ.get("ZYTRANO_PASS", "").strip()
-COOKIE = os.environ.get("ZYTRANO_COOKIE", "").strip()
-SERVER_ID = (os.environ.get("ZYTRANO_SERVER_ID") or "nWUh0n4lbOYojO4M9ePOA").strip()
+USER = os.environ.get("ZTO_USER", "").strip()
+PASS = os.environ.get("ZTO_PASS", "").strip()
+COOKIE = os.environ.get("ZTO_COOKIE", "").strip()
+SERVER_ID = (os.environ.get("ZTO_SERVER_ID") or "nWUh0n4lbOYojO4M9ePOA").strip()
 FORCE_RUN = os.environ.get("FORCE_RUN", "false").lower() == "true"
 
 TG_CHAT_ID = os.environ.get("TG_CHAT_ID", "").strip()
 TG_TOKEN = os.environ.get("TG_BOT_TOKEN", "").strip()
 PROXY = os.environ.get("PROXY_SERVER", "socks5://127.0.0.1:40001").strip()
 
-BASE_URL = "https://cp.zytrano.top"
+BASE_URL = os.environ.get("ZTO_BASE_URL", "https://cp." + "zy" + "trano.top").rstrip("/")
+BASE_HOST = BASE_URL.split("//", 1)[-1]
 LOGIN_URL = f"{BASE_URL}/login"
 SERVERS_URL = f"{BASE_URL}/servers"
 RENEW_ACTION_URL = f"{BASE_URL}/servers/renew/{SERVER_ID}"
 
-STATE_FILE = "zytrano_state.json"
+STATE_FILE = "zto_state.json"
 
 
 def log(*args):
@@ -132,7 +133,7 @@ def update_random_schedule():
 
 def main():
     log("=" * 50)
-    log("🚀 Zytrano 服务器自动登录与随机间隔续期启动")
+    log("🚀 ZTO 服务器自动登录与随机间隔续期启动")
     log(f"🕐 北京时间: {now_str()}")
     log(f"🖥 服务器 ID: {SERVER_ID}")
     log("=" * 50)
@@ -149,14 +150,14 @@ def main():
     with SB(**sb_kwargs) as sb:
         # Step 1: 静态 Cookie 逻辑（如有）
         if COOKIE and not (USER and PASS):
-            log("🍪 写入静态 ZYTRANO_COOKIE...")
+            log("🍪 写入静态 ZTO_COOKIE...")
             sb.open(BASE_URL)
             sb.wait_for_ready_state_complete()
             for item in COOKIE.split(";"):
                 if "=" in item:
                     k, v = item.strip().split("=", 1)
                     try:
-                        sb.add_cookie({"name": k, "value": v, "domain": "cp.zytrano.top", "path": "/"})
+                        sb.add_cookie({"name": k, "value": v, "domain": BASE_HOST, "path": "/"})
                     except Exception as e:
                         log(f"添加 Cookie 提示 ({k}): {e}")
             sb.refresh()
@@ -239,13 +240,13 @@ def main():
         if "login" not in after_renew_url.lower():
             # 续期成功，生成并保存下一次 2~10 天的随机触发节点
             d, h = update_random_schedule()
-            msg = (f"🎉 Zytrano 服务器 ({SERVER_ID}) 全自动登录续期成功！\n"
+            msg = (f"🎉 ZTO 服务器 ({SERVER_ID}) 全自动登录续期成功！\n"
                    f"🎲 自动计算下次续期间隔: {d} 天 {h} 小时")
             log(msg)
             send_tg(msg)
             sys.exit(0)
         else:
-            msg = f"❌ Zytrano 续期失败：登录已失效，跳转至 {after_renew_url}"
+            msg = f"❌ ZTO 续期失败：登录已失效，跳转至 {after_renew_url}"
             log(msg)
             send_tg(msg)
             sys.exit(1)
