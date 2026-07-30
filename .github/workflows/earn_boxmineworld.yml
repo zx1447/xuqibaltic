@@ -43,7 +43,6 @@ jobs:
           BOXMINEWORLD_SESSION_KEY: ${{ secrets.BOXMINEWORLD_SESSION_KEY }}
           RUN_MINUTES: ${{ github.event.inputs.run_minutes || '340' }}
           NO_PROXY: "afkapi.boxmineworld.com,discord.com"
-          no_proxy: "afkapi.boxmineworld.com,discord.com"
         run: python earn_boxmineworld.py
 
       - name: Save BoxMineWorld state
