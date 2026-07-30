@@ -1,13 +1,13 @@
-name: Enzonic API Login Every 2 Days
+name: Enzonic Two Accounts Every 2 Days
 
 on:
-  # 每天检查一次；脚本内部严格按 2 天间隔决定是否登录。
+  # 每天检查一次；两个账号分别按 2 天间隔执行。
   schedule:
     - cron: "20 2 * * *"
   workflow_dispatch:
     inputs:
       force:
-        description: "是否忽略 2 天间隔并立即登录（true/false）"
+        description: "是否忽略 2 天间隔并立即执行两个账号（true/false）"
         required: false
         default: "false"
 
@@ -15,13 +15,13 @@ permissions:
   contents: write
 
 concurrency:
-  group: enzonic-api-login
+  group: enzonic-two-accounts
   cancel-in-progress: true
 
 jobs:
-  login:
+  visit:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 12
     steps:
       - name: Checkout Enzonic branch
         uses: actions/checkout@v4
@@ -33,18 +33,32 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install dependencies
-        run: pip install --upgrade requests
+      - name: Install browser dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb x11-utils xdotool scrot fonts-noto-cjk wget gnupg
+          wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add - 2>/dev/null || true
+          echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
+          sudo apt-get update
+          sudo apt-get install -y google-chrome-stable || sudo apt-get install -y chromium-browser
+          google-chrome --version || chromium-browser --version
+          pip install --upgrade pip seleniumbase requests "requests[socks]"
+          seleniumbase install chromedriver
 
-      - name: Run Enzonic API login
+      - name: Run Enzonic two-account task
         env:
+          ENZONIC_USER: ${{ secrets.ENZONIC_USER }}
+          ENZONIC_PASS: ${{ secrets.ENZONIC_PASS }}
+          ENZONIC_COOKIE: ${{ secrets.ENZONIC_COOKIE }}
+          ENZONIC_SERVER_ID: ${{ secrets.ENZONIC_SERVER_ID || '2d24e7a5' }}
+          ENZONIC_PROXY: ${{ secrets.ENZONIC_PROXY }}
           ENZONIC_API_KEY: ${{ secrets.ENZONIC_API_KEY }}
           FORCE_RUN: ${{ github.event.inputs.force || 'false' }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-        run: python renew_enzonic.py
+        run: xvfb-run --auto-servernum python3 renew_enzonic.py
 
-      - name: Save Enzonic login state
+      - name: Save Enzonic two-account state
         if: always()
         run: |
           git config user.name "github-actions[bot]"
@@ -54,5 +68,5 @@ jobs:
             echo "No Enzonic state change."
             exit 0
           fi
-          git commit -m "Update Enzonic API login state [skip ci]"
+          git commit -m "Update Enzonic two-account state [skip ci]"
           git push origin HEAD:enzonic
