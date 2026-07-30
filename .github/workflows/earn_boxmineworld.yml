@@ -1,7 +1,7 @@
 name: BoxMineWorld AFK Earn
 
 on:
-  # 兜底触发；正常情况下每轮结束后会自动启动下一轮。
+  # 每 6 小时检查一次；达到每日 8 个后立即结束，等待额度重置。
   schedule:
     - cron: "41 */6 * * *"
   workflow_dispatch:
@@ -57,23 +57,3 @@ jobs:
           fi
           git commit -m "Update BoxMineWorld AFK state [skip ci]"
           git push origin HEAD:boxmineworld
-
-      - name: Re-trigger next round
-        if: success()
-        env:
-          GH_PAT: ${{ secrets.GH_PAT }}
-        run: |
-          sleep 45
-          code=$(curl -sS -o /tmp/boxmineworld-dispatch.json -w '%{http_code}' \
-            -X POST \
-            -H "Authorization: token ${GH_PAT}" \
-            -H "Accept: application/vnd.github+json" \
-            -H "Content-Type: application/json" \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/earn_boxmineworld.yml/dispatches" \
-            -d '{"ref":"boxmineworld","inputs":{"run_minutes":"340"}}')
-          if [ "$code" != "204" ]; then
-            echo "Re-dispatch failed: HTTP $code"
-            cat /tmp/boxmineworld-dispatch.json
-            exit 1
-          fi
-          echo "Next BoxMineWorld round dispatched."
