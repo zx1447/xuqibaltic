@@ -1,4 +1,4 @@
-name: CyraHost Earn Heartbeat
+name: CyraHost Earn + 7-Day Renew
 
 on:
   # 兜底触发；正常情况下每轮结束后会自行启动下一轮。
@@ -34,38 +34,18 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install dependencies and Xray
-        run: |
-          pip install --upgrade 'requests[socks]'
-          mkdir -p /tmp/cyrahost-xray
-          XRAY_TAG=$(curl -fsSL -H "User-Agent: cyrahost-heartbeat" https://api.github.com/repos/XTLS/Xray-core/releases/latest | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag_name"])')
-          curl -fsSL "https://github.com/XTLS/Xray-core/releases/download/${XRAY_TAG}/Xray-linux-64.zip" -o /tmp/cyrahost-xray/xray.zip
-          unzip -q /tmp/cyrahost-xray/xray.zip -d /tmp/cyrahost-xray
-          chmod +x /tmp/cyrahost-xray/xray
-          /tmp/cyrahost-xray/xray version | head -1
+      - name: Install dependencies
+        run: pip install --upgrade requests
 
-      - name: Run CyraHost earn heartbeat
+      - name: Run CyraHost earn and renew
         env:
           CYRAHOST_API_KEY: ${{ secrets.CYRAHOST_API_KEY }}
-          CYRAHOST_PROXY_VLESS_URI: ${{ secrets.CYRAHOST_PROXY_VLESS_URI }}
-          CYRAHOST_PROXY: "socks5h://127.0.0.1:1080"
+          CYRAHOST_SERVER_UUID: "1c8f44f1-a8b2-4abb-b5ad-3950ab451b30"
           RUN_MINUTES: ${{ github.event.inputs.run_minutes || '340' }}
-          INTERVAL_SECONDS: "62"
-        run: |
-          python3 setup_vless_proxy.py
-          /tmp/cyrahost-xray/xray run -c /tmp/cyrahost-xray/config.json >/tmp/cyrahost-xray/xray.log 2>&1 &
-          XRAY_PID=$!
-          trap 'kill "$XRAY_PID" 2>/dev/null || true' EXIT
-          for i in $(seq 1 20); do
-            if curl -fsS --max-time 5 -x socks5h://127.0.0.1:1080 https://www.cloudflare.com/cdn-cgi/trace >/tmp/cyrahost-xray/trace; then
-              break
-            fi
-            sleep 1
-          done
-          grep -E '^(ip|loc|warp)=' /tmp/cyrahost-xray/trace
-          python earn_cyrahost.py
+          INTERVAL_SECONDS: "61"
+        run: python earn_cyrahost.py
 
-      - name: Save heartbeat state
+      - name: Save heartbeat and renewal state
         if: always()
         run: |
           git config user.name "github-actions[bot]"
@@ -75,7 +55,7 @@ jobs:
             echo "No CyraHost state change."
             exit 0
           fi
-          git commit -m "Update CyraHost earn state [skip ci]"
+          git commit -m "Update CyraHost earn/renew state [skip ci]"
           git push origin HEAD:cyrahost
 
       - name: Re-trigger next round
