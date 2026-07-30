@@ -1,9 +1,9 @@
 {
-  "last_status": "completed",
+  "last_status": "unauthorized",
   "total_success": 11,
-  "last_start_time": "2026-07-30 08:13:55",
-  "last_http_status": 204,
-  "last_request_time": "2026-07-30 08:13:55",
+  "last_start_time": "2026-07-30 08:21:07",
+  "last_http_status": 403,
+  "last_request_time": "2026-07-30 08:21:07",
   "last_success_time": "2026-07-30 08:13:55",
   "current_run_success": 1,
   "current_run_throttled": 0,
