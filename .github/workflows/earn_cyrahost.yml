@@ -34,15 +34,36 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install dependencies
-        run: pip install --upgrade requests
+      - name: Install dependencies and Xray
+        run: |
+          pip install --upgrade 'requests[socks]'
+          mkdir -p /tmp/cyrahost-xray
+          XRAY_TAG=$(curl -fsSL -H "User-Agent: cyrahost-heartbeat" https://api.github.com/repos/XTLS/Xray-core/releases/latest | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag_name"])')
+          curl -fsSL "https://github.com/XTLS/Xray-core/releases/download/${XRAY_TAG}/Xray-linux-64.zip" -o /tmp/cyrahost-xray/xray.zip
+          unzip -q /tmp/cyrahost-xray/xray.zip -d /tmp/cyrahost-xray
+          chmod +x /tmp/cyrahost-xray/xray
+          /tmp/cyrahost-xray/xray version | head -1
 
       - name: Run CyraHost earn heartbeat
         env:
           CYRAHOST_API_KEY: ${{ secrets.CYRAHOST_API_KEY }}
+          CYRAHOST_PROXY_VLESS_URI: ${{ secrets.CYRAHOST_PROXY_VLESS_URI }}
+          CYRAHOST_PROXY: "socks5h://127.0.0.1:1080"
           RUN_MINUTES: ${{ github.event.inputs.run_minutes || '340' }}
           INTERVAL_SECONDS: "62"
-        run: python earn_cyrahost.py
+        run: |
+          python3 setup_vless_proxy.py
+          /tmp/cyrahost-xray/xray run -c /tmp/cyrahost-xray/config.json >/tmp/cyrahost-xray/xray.log 2>&1 &
+          XRAY_PID=$!
+          trap 'kill "$XRAY_PID" 2>/dev/null || true' EXIT
+          for i in $(seq 1 20); do
+            if curl -fsS --max-time 5 -x socks5h://127.0.0.1:1080 https://www.cloudflare.com/cdn-cgi/trace >/tmp/cyrahost-xray/trace; then
+              break
+            fi
+            sleep 1
+          done
+          grep -E '^(ip|loc|warp)=' /tmp/cyrahost-xray/trace
+          python earn_cyrahost.py
 
       - name: Save heartbeat state
         if: always()
@@ -58,7 +79,7 @@ jobs:
           git push origin HEAD:cyrahost
 
       - name: Re-trigger next round
-        if: always()
+        if: success()
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
         run: |

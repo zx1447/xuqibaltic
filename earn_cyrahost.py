@@ -15,6 +15,7 @@ BASE_URL = os.environ.get("CYRAHOST_BASE_URL", "https://panel.cyrahost.xyz").rst
 EARN_URL = f"{BASE_URL}/api/client/store/earn"
 ACCOUNT_URL = f"{BASE_URL}/api/client/account"
 API_KEY = os.environ.get("CYRAHOST_API_KEY", "").strip()
+PROXY_URL = os.environ.get("CYRAHOST_PROXY", "").strip()
 RUN_MINUTES = max(1, min(345, int(os.environ.get("RUN_MINUTES", "340"))))
 INTERVAL_SECONDS = max(61, int(os.environ.get("INTERVAL_SECONDS", "62")))
 STATE_FILE = Path("cyrahost_state.json")
@@ -60,10 +61,14 @@ def main() -> int:
         "Accept": "application/json",
         "User-Agent": "CyraHost-Earn-Heartbeat/1.0",
     })
+    if PROXY_URL:
+        session.proxies.update({"http": PROXY_URL, "https": PROXY_URL})
+        print("🔗 使用 VLESS 转换的 SOCKS5 代理出口", flush=True)
 
     try:
         response = session.get(ACCOUNT_URL, timeout=20)
-        response.raise_for_status()
+        if response.status_code != 200:
+            raise RuntimeError(f"HTTP {response.status_code}: {response.text[:200]}")
         account = response.json().get("attributes", {})
         identity = account.get("email") or account.get("username") or "unknown"
         print(f"✅ API Key 有效，账户：{mask_account(str(identity))}", flush=True)
