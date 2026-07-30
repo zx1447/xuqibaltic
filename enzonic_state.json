@@ -2,10 +2,32 @@
   "last_status": "success",
   "last_login_timestamp": 1785392846,
   "last_login_time": "2026-07-30 14:27:26",
-  "next_login_timestamp": 1785565646,
-  "next_login_time": "2026-08-01 14:27:26",
   "interval_days": 2,
   "server_count": 1,
   "server_identifier": "f4e28bcb",
-  "server_name": "nice"
+  "server_name": "nice",
+  "last_browser_visit_timestamp": 1785393214,
+  "last_browser_visit_time": "2026-07-30 14:33:34",
+  "last_browser_url": "https://cloud.panel.enzonic.com/server/2d24e7a5/files/edit/server.properties/",
+  "browser_server_id": "2d24e7a5",
+  "browser_visit_urls_count": 3,
+  "browser_visit_urls": [
+    "https://cloud.panel.enzonic.com/server/2d24e7a5/files/edit/server.properties/",
+    "https://cloud.panel.enzonic.com/server/2d24e7a5/files/versions",
+    "https://cloud.panel.enzonic.com/server/2d24e7a5/files/edit/eula.txt/"
+  ],
+  "browser_status": "success",
+  "next_browser_visit_timestamp": 1785566014,
+  "next_browser_visit_time": "2026-08-01 14:33:34",
+  "last_api_login_timestamp": 1785393214,
+  "last_api_login_time": "2026-07-30 14:33:34",
+  "last_api_login_result": {
+    "server_count": 1,
+    "server_identifier": "f4e28bcb",
+    "server_name": "nice"
+  },
+  "api_status": "success",
+  "next_api_login_timestamp": 1785566014,
+  "next_api_login_time": "2026-08-01 14:33:34",
+  "last_check_time": "2026-07-30 14:33:34"
 }
