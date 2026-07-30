@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""CoredLab Hosting 每日访问保活脚本。"""
+"""CoredLab Hosting 每 4 小时访问保活脚本。"""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ VISIT_URLS = [
 ]
 DISCORD_API = "https://discord.com/api/v10"
 STATE_FILE = "coredlab_state.json"
-VISIT_INTERVAL_SECONDS = 20 * 60 * 60
+VISIT_INTERVAL_SECONDS = 4 * 60 * 60
 
 DISCORD_TOKEN = os.environ.get("COREDLAB_DISCORD_TOKEN", "").strip()
 SESSION_KEY = os.environ.get("COREDLAB_SESSION_KEY", "").strip()
@@ -130,12 +130,12 @@ def session_is_valid(session: requests.Session) -> bool:
 
 def should_visit() -> bool:
     if FORCE_RUN:
-        log("⚡ FORCE_RUN=true，立即执行 CoredLab 每日访问")
+        log("⚡ FORCE_RUN=true，立即执行 CoredLab 4 小时访问")
         return True
     last = int(load_state().get("last_visit_timestamp", 0) or 0)
     if last and time.time() - last < VISIT_INTERVAL_SECONDS:
         remaining = (VISIT_INTERVAL_SECONDS - (time.time() - last)) / 3600
-        log(f"⏳ 距离上次 CoredLab 访问不足 20 小时，跳过（约剩 {remaining:.1f} 小时）")
+        log(f"⏳ 距离上次 CoredLab 访问不足 4 小时，跳过（约剩 {remaining:.1f} 小时）")
         return False
     return True
 
@@ -218,7 +218,7 @@ def visit_dashboard(session: requests.Session) -> None:
 
 def main() -> int:
     log("=" * 58)
-    log("🚀 CoredLab Hosting 每日访问启动")
+    log("🚀 CoredLab Hosting 每 4 小时访问启动")
     log(f"🕐 北京时间：{now_str()}")
     log("=" * 58)
     if not should_visit():
@@ -251,8 +251,8 @@ def main() -> int:
         state["last_visit_time"] = now_str()
         save_encrypted_session(state, session)
         save_state(state)
-        log("🎉 CoredLab 每日访问完成")
-        send_telegram(f"✅ CoredLab 每日访问成功\n🕐 {now_str()}")
+        log("🎉 CoredLab 4 小时访问完成")
+        send_telegram(f"✅ CoredLab 4 小时访问成功\n🕐 {now_str()}")
         return 0
     except Exception as exc:
         log(f"❌ CoredLab 自动访问失败：{type(exc).__name__}: {exc}")
