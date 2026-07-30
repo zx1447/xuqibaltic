@@ -1,25 +1,4 @@
 {
-  "last_visit_timestamp": 1785388878,
-  "last_visit_time": "2026-07-30 13:21:18",
-  "next_visit_timestamp": 1785385605,
-  "next_visit_time": "2026-07-30 12:26:45",
-  "next_interval_days": 2,
-  "server_id": "2d24e7a5",
-  "last_status": "ERROR: API 请求失败 HTTP 404: {'errors': [{'code': 'NotFoundHttpException', 'status': '404', 'detail': 'The requested resource could not be found on the server.'}]}",
-  "last_url": "https://cloud.panel.enzonic.com/server/2d24e7a5/files/versions",
-  "next_interval_hours": 0,
-  "next_interval_minutes": 24,
-  "visit_urls_count": 3,
-  "visit_urls": [
-    "https://cloud.panel.enzonic.com/server/2d24e7a5/files/edit/server.properties/",
-    "https://cloud.panel.enzonic.com/server/2d24e7a5/files/versions",
-    "https://cloud.panel.enzonic.com/server/2d24e7a5/files/edit/eula.txt/"
-  ],
-  "last_api_result": {
-    "enabled": true,
-    "target": "server",
-    "server_identifier": "8ede0df4",
-    "name": "vip01",
-    "status": null
-  }
+  "last_status": "not_started",
+  "interval_days": 2
 }
