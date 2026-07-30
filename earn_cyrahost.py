@@ -20,6 +20,8 @@ RENEW_URL = f"{BASE_URL}/api/client/servers/{SERVER_UUID}/renew"
 API_KEY = os.environ.get("CYRAHOST_API_KEY", "").strip()
 RUN_MINUTES = max(1, min(345, int(os.environ.get("RUN_MINUTES", "340"))))
 INTERVAL_SECONDS = max(60, int(os.environ.get("INTERVAL_SECONDS", "61")))
+FORCE_RUN = os.environ.get("FORCE_RUN", "false").lower() == "true"
+WAIT_AFTER_RUN_SECONDS = 4 * 24 * 60 * 60
 RENEW_INTERVAL_SECONDS = 7 * 24 * 60 * 60
 STATE_FILE = Path("cyrahost_state.json")
 CN_TZ = timezone(timedelta(hours=8))
@@ -125,9 +127,22 @@ def main() -> int:
     })
 
     state = load_state()
+    initialize_renew_schedule(state)
+
+    # 即使积分轮次处于 4 天等待期，也继续按计划检查七天续期。
+    if not maybe_renew(session, state):
+        state["last_status"] = "renew_unauthorized"
+        save_state(state)
+        return 1
+
+    next_earn = int(state.get("next_earn_timestamp", 0) or 0)
+    if not FORCE_RUN and next_earn and int(time.time()) < next_earn:
+        print(f"⏳ 当前处于 4 天等待期；下次积分轮次：{state.get('next_earn_time', now_text(next_earn))}", flush=True)
+        save_state(state)
+        return 0
+
     state["last_start_time"] = now_text()
     state["last_status"] = "running"
-    initialize_renew_schedule(state)
     save_state(state)
 
     deadline = time.monotonic() + RUN_MINUTES * 60
@@ -197,15 +212,20 @@ def main() -> int:
             break
         time.sleep(min(wait_seconds, remaining))
 
+    end_timestamp = int(time.time())
+    next_earn_timestamp = end_timestamp + WAIT_AFTER_RUN_SECONDS
     state.update({
-        "last_end_time": now_text(),
-        "last_status": "completed",
+        "last_end_time": now_text(end_timestamp),
+        "last_status": "waiting_4_days",
         "last_run_success": run_success,
         "last_run_throttled": run_throttled,
         "last_run_failures": run_failures,
+        "next_earn_timestamp": next_earn_timestamp,
+        "next_earn_time": now_text(next_earn_timestamp),
     })
     save_state(state)
     print(f"🏁 本轮结束：积分成功 {run_success}，限流 {run_throttled}，失败 {run_failures}", flush=True)
+    print(f"🛌 等待 4 天；下次积分轮次：{state['next_earn_time']}", flush=True)
     return 0 if run_success > 0 else 1
 
 

@@ -1,7 +1,7 @@
 name: CyraHost Earn + 7-Day Renew
 
 on:
-  # 兜底触发；正常情况下每轮结束后会自行启动下一轮。
+  # 每 6 小时检查一次；只有四天等待期结束后才会运行 340 分钟积分轮次。
   schedule:
     - cron: "17 */6 * * *"
   workflow_dispatch:
@@ -10,6 +10,10 @@ on:
         description: "本轮运行分钟数"
         required: false
         default: "340"
+      force:
+        description: "忽略四天等待期立即运行（true/false）"
+        required: false
+        default: "false"
 
 permissions:
   contents: write
@@ -46,6 +50,7 @@ jobs:
           CYRAHOST_SERVER_UUID: "1c8f44f1-a8b2-4abb-b5ad-3950ab451b30"
           RUN_MINUTES: ${{ github.event.inputs.run_minutes || '340' }}
           INTERVAL_SECONDS: "61"
+          FORCE_RUN: ${{ github.event.inputs.force || 'false' }}
         run: python earn_cyrahost.py
 
       - name: Save heartbeat and renewal state
@@ -60,23 +65,3 @@ jobs:
           fi
           git commit -m "Update CyraHost earn/renew state [skip ci]"
           git push origin HEAD:cyrahost
-
-      - name: Re-trigger next round
-        if: success()
-        env:
-          GH_PAT: ${{ secrets.GH_PAT }}
-        run: |
-          sleep 45
-          code=$(curl -sS -o /tmp/cyrahost-dispatch.json -w '%{http_code}' \
-            -X POST \
-            -H "Authorization: token ${GH_PAT}" \
-            -H "Accept: application/vnd.github+json" \
-            -H "Content-Type: application/json" \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/earn_cyrahost.yml/dispatches" \
-            -d '{"ref":"cyrahost","inputs":{"run_minutes":"340"}}')
-          if [ "$code" != "204" ]; then
-            echo "Re-dispatch failed: HTTP $code"
-            cat /tmp/cyrahost-dispatch.json
-            exit 1
-          fi
-          echo "Next CyraHost round dispatched."
