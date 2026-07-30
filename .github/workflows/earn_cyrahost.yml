@@ -37,6 +37,9 @@ jobs:
       - name: Install dependencies
         run: pip install --upgrade requests
 
+      - name: Use CyraHost direct panel address
+        run: echo "13.140.147.61 panel.cyrahost.xyz" | sudo tee -a /etc/hosts
+
       - name: Run CyraHost earn and renew
         env:
           CYRAHOST_API_KEY: ${{ secrets.CYRAHOST_API_KEY }}
