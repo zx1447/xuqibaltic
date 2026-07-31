@@ -1,27 +1,22 @@
 name: PidginHost Server Auto Renew
 
 on:
-  schedule:
-    # 每 4 天自动续期一次（UTC 02:30，北京时间 10:30）
-    - cron: "30 2 */4 * *"
   workflow_dispatch:
-    inputs:
-      force:
-        description: "是否忽略 4 天间隔并立即续期（true/false）"
-        required: false
-        default: "false"
+  schedule:
+    # 每 25 天跑一次 (延期 30 天, 留 5 天 buffer)
+    - cron: "0 0 25 * *"
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
-  group: pidginhost-auto-renew
-  cancel-in-progress: true
+  group: pidginhost-renew
+  cancel-in-progress: false
 
 jobs:
   renew:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 10
     steps:
       - name: Checkout PidginHost branch
         uses: actions/checkout@v4
@@ -29,38 +24,19 @@ jobs:
           ref: pidginhost
           fetch-depth: 0
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-node@v4
         with:
-          python-version: "3.12"
+          node-version: "20"
 
-      - name: Install dependencies
-        run: pip install --upgrade pip requests "requests[socks]"
+      - name: Install Playwright
+        run: |
+          npm init -y
+          npm install playwright
+          npx playwright install chromium --with-deps
 
       - name: Run PidginHost renew
         env:
-          # 建议填完整 Cookie：session/csrftoken 等，不要把明文写入仓库。
-          PIDGINHOST_COOKIE: ${{ secrets.PIDGINHOST_COOKIE }}
-          # 如果只有一个令牌值，则配合 PIDGINHOST_COOKIE_NAME 使用。
-          PIDGINHOST_TOKEN: ${{ secrets.PIDGINHOST_TOKEN }}
-          PIDGINHOST_COOKIE_NAME: ${{ secrets.PIDGINHOST_COOKIE_NAME }}
-          PIDGINHOST_SERVER_ID: ${{ secrets.PIDGINHOST_SERVER_ID || '3853' }}
-          PIDGINHOST_INTERVAL_DAYS: "4"
-          PIDGINHOST_PROXY: ${{ secrets.PIDGINHOST_PROXY }}
-          FORCE_RUN: ${{ github.event.inputs.force }}
-          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
-          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-        run: python renew_pidginhost.py
-
-      - name: Save PidginHost state
-        if: always()
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add pidginhost_state.json || true
-          if git diff --cached --quiet; then
-            echo "No PidginHost state change."
-            exit 0
-          fi
-          git commit -m "Update PidginHost state [skip ci]"
-          git push origin HEAD:pidginhost
+          PIDGINHOST_GH_USER: ${{ secrets.PIDGINHOST_GH_USER }}
+          PIDGINHOST_GH_PASS: ${{ secrets.PIDGINHOST_GH_PASS }}
+          PIDGINHOST_SERVER_ID: ${{ secrets.PIDGINHOST_SERVER_ID }}
+        run: node renew_pidginhost.js
