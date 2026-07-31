@@ -148,6 +148,14 @@ def oauth_login() -> requests.Session:
     if cb.status_code >= 400:
         raise SiamError(f"Siam callback 失败: HTTP {cb.status_code}")
     log(f"✅ Siam callback 完成, final URL: {cb.url}")
+    # 访问 topup 页面强化 session (有些平台需要访问页面才激活 cookie)
+    try:
+        topup = s.get(f"{BASE}/?p=topup", allow_redirects=True, timeout=15)
+        log(f"✅ Topup 页面: HTTP {topup.status_code}, URL: {topup.url}")
+    except Exception:
+        pass
+    # 打印 cookies
+    log(f"🍪 Cookies: {list(s.cookies.keys())}")
     return s
 
 
