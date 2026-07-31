@@ -30,8 +30,21 @@ function log(msg) { console.log(`[fenix] ${msg}`); }
     await page.waitForTimeout(3000);
     const discordUrl = page.url();
     log(`current URL: ${discordUrl}`);
-    const stateMatch = discordUrl.match(/state=([^&]+)/);
-    if (!stateMatch) {
+    // state 可能在 URL 里, 或在 redirect_to 参数里 (URL encoded)
+    let state = '';
+    const directMatch = discordUrl.match(/state=([^&]+)/);
+    if (directMatch) {
+      state = directMatch[1];
+    } else {
+      // 从 redirect_to 参数提取 (URL encoded)
+      const redirectMatch = discordUrl.match(/redirect_to=([^&]+)/);
+      if (redirectMatch) {
+        const decoded = decodeURIComponent(redirectMatch[1]);
+        const stateInRedirect = decoded.match(/state=([^&]+)/);
+        if (stateInRedirect) state = stateInRedirect[1];
+      }
+    }
+    if (!state) {
       log('failed to get OAuth state, trying manual redirect...');
       // 可能 CF 拦了, 试直接访问 discord OAuth URL
       // 先从 fenixhost 拿 state (通过 API)
@@ -55,9 +68,7 @@ function log(msg) { console.log(`[fenix] ${msg}`); }
         log(`still no state, URL: ${url2}`);
         process.exit(1);
       }
-      var state = m2[1];
-    } else {
-      var state = stateMatch[1];
+      var state = '';
     }
     log(`state: ${state.slice(0, 20)}...`);
 
