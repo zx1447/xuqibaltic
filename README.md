@@ -5,11 +5,11 @@ PortalMine 自动检测 + 自动金币 (ad_begin / ad_claim)
 ## 功能
 
 - 登录 PortalMine (账号密码 或 cookie)
-- **每小时检查一次服务器是否正在运行**（独立工作流，不影响金币任务）
+- **领取金币期间每 44 分钟检查服务器状态**
 - 检测到离线时自动调用 `POST /api/server.php?action=start_server` 启动服务器，并持续确认上线
 - 检查最新 `GET /api/server.php?action=server_state` 接口并明确输出 🟢运行 / 🔴未运行
 - **自动领取金币**：ad_begin → 等 60s → ad_claim，每轮 +20 coins
-- **持续模式 (ad_forever)**：循环领金币直到 GitHub Actions 6h 超时，自动重启下一轮 → 24/7 领金币
+- **持续模式 (ad_forever)**：领取约 5 小时，结束后等待 44 分钟，再自动启动下一轮
 - 状态保存到 `portalmine_state.json`，每次成功领取后立即 commit
 - Telegram 通知 (可选)
 
@@ -44,12 +44,13 @@ Workflow: `.github/workflows/renew_portalmine.yml`
 | `ad_max_rounds` | 固定轮数模式的轮数（默认 1） |
 | `ad_max_runtime` | forever 模式最大运行秒数（默认 18000=5h） |
 
-**24/7 领金币**：勾选 `ad_forever=true`，workflow 会：
-1. 跑 5 小时（每轮 60s + 2s = 62s，约 290 轮 = 5800 coins）
-2. 5 小时后自动 re-trigger 下一轮
-3. 循环不停（除非 GitHub 限制或 secrets 失效）
+**持续领金币**：勾选 `ad_forever=true`，workflow 会：
+1. 运行约 5 小时（每轮约 62 秒）
+2. 领取期间每 44 分钟检查服务器；离线就自动启动
+3. 本轮结束后等待 44 分钟
+4. 自动 dispatch 下一轮，继续循环
 
-**服务器状态定时检测与自动启动**：`.github/workflows/check_portalmine_hourly.yml` 每小时运行一次；在线时只记录状态，离线时自动启动并确认上线。它不领取金币，也不会干扰现有持续金币任务。
+`.github/workflows/check_portalmine_hourly.yml` 现在仅保留手动服务器检查；自动监控已合并到积分 workflow。
 
 ### Secrets 配置
 
@@ -57,6 +58,7 @@ Workflow: `.github/workflows/renew_portalmine.yml`
 - `PORTALMINE_USER` - 登录用户名
 - `PORTALMINE_PASS` - 登录密码
 - `PORTALMINE_SERVER_ID` - 服务器 ID（从 F12 `x-portalmine-server-id` header 获取）
+- `GH_PAT` - 本轮结束等待 44 分钟后 dispatch 下一轮
 - `TG_BOT_TOKEN` / `TG_CHAT_ID` - (可选) Telegram 通知
 
 ### 本地运行

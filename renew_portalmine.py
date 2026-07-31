@@ -53,6 +53,10 @@ AUTO_START_POLL_SECONDS = max(
 AUTO_START_MAX_POLLS = max(
     1, min(30, int(os.environ.get("PORTALMINE_AUTO_START_MAX_POLLS", "20") or "20"))
 )
+SERVER_MONITOR_INTERVAL_SECONDS = max(
+    60,
+    int(os.environ.get("PORTALMINE_SERVER_MONITOR_SECONDS", "2640") or "2640"),
+)
 # Auto coins config
 AUTO_COINS = os.environ.get("PORTALMINE_AUTO_COINS", "").strip().lower() in {"1", "true", "yes", "on"}
 AD_SECONDS = int(os.environ.get("PORTALMINE_AD_SECONDS", "60") or "60")
@@ -252,8 +256,21 @@ def run_auto_coins(s: requests.Session, state: dict) -> dict:
     If AD_FOREVER is set, loops until AD_MAX_RUNTIME_SECONDS (default 5h) or killed.
     Otherwise loops AD_MAX_ROUNDS times.
     """
-    summary = {"rounds_attempted": 0, "rounds_ok": 0, "coins_earned": 0, "errors": [], "last_claim": None, "started_at": int(time.time()), "stopped_reason": None}
+    summary = {
+        "rounds_attempted": 0,
+        "rounds_ok": 0,
+        "coins_earned": 0,
+        "errors": [],
+        "last_claim": None,
+        "started_at": int(time.time()),
+        "stopped_reason": None,
+        "server_monitor_interval_seconds": SERVER_MONITOR_INTERVAL_SECONDS,
+        "server_monitor_checks": 0,
+        "server_auto_start_attempts": 0,
+        "server_auto_start_success": 0,
+    }
     start_ts = time.time()
+    next_server_monitor = start_ts + SERVER_MONITOR_INTERVAL_SECONDS
     if AD_FOREVER:
         max_rounds = 999999  # effectively unlimited
         log(f"💰 AD_FOREVER 启用：将循环领取金币直到超时 (max_runtime={AD_MAX_RUNTIME_SECONDS}s)")
@@ -279,6 +296,44 @@ def run_auto_coins(s: requests.Session, state: dict) -> dict:
             if i >= max_rounds:
                 summary["stopped_reason"] = f"max_rounds {max_rounds} reached"
                 break
+
+        # While coins are being earned, check the game server every 44 minutes.
+        # If it is offline, use the same Start Server action as the dashboard.
+        monitor_now = time.time()
+        if AUTO_START and monitor_now >= next_server_monitor:
+            summary["server_monitor_checks"] += 1
+            monitor_number = summary["server_monitor_checks"]
+            log(
+                f"🖥️ 44 分钟服务器监控 #{monitor_number}：检查运行状态…"
+            )
+            try:
+                monitored_state = get_server_state(s)
+                monitored_state, monitor_start = maybe_auto_start(s, monitored_state)
+                monitored_summary = summarize_state(monitored_state)
+                running, normalized, status_line = classify_server_state(monitored_summary)
+                summary["last_server_state"] = monitored_state
+                summary["last_server_monitor_time"] = now_cn()
+                summary["last_server_state_normalized"] = normalized
+                summary["last_server_running"] = running
+                summary["last_server_auto_start"] = monitor_start
+                if monitor_start.get("attempted"):
+                    summary["server_auto_start_attempts"] += 1
+                if monitor_start.get("started"):
+                    summary["server_auto_start_success"] += 1
+                log(status_line)
+            except Exception as exc:
+                error = f"server monitor: {type(exc).__name__}: {exc}"
+                summary["errors"].append(error)
+                log(f"⚠️ 服务器监控异常：{type(exc).__name__}: {exc}")
+            state["auto_coins"] = summary
+            state["last_server_monitor_time"] = now_cn()
+            try:
+                save_state(state)
+            except Exception:
+                pass
+            while next_server_monitor <= monitor_now:
+                next_server_monitor += SERVER_MONITOR_INTERVAL_SECONDS
+
         i += 1
         summary["rounds_attempted"] += 1
         if AD_FOREVER:
@@ -467,6 +522,12 @@ def main() -> int:
                 state["auto_coins_error"] = f"{type(e).__name__}: {e}"
         else:
             log("💡 提示：设置 PORTALMINE_AUTO_COINS=1 可自动领取金币 (ad_begin/ad_claim)")
+
+        if coins_summary:
+            if coins_summary.get("last_server_state"):
+                last = coins_summary["last_server_state"]
+            if coins_summary.get("last_server_auto_start"):
+                auto_start_result = coins_summary["last_server_auto_start"]
 
         summary = summarize_state(last or {})
         is_running, normalized_state, status_line = classify_server_state(summary)

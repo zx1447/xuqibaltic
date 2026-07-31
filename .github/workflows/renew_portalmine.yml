@@ -29,10 +29,18 @@ on:
         description: "forever 模式最大运行秒数（默认 18000=5h）"
         required: false
         default: "18000"
+      monitor_seconds:
+        description: "领取金币期间的服务器监控间隔（默认 2640=44分钟）"
+        required: false
+        default: "2640"
+      restart_after_run:
+        description: "本轮结束等待44分钟后启动下一轮（true/false）"
+        required: false
+        type: boolean
+        default: true
   schedule:
-    # 每 5 小时自动跑 forever 模式 (24/7 领金币)
-    # 5h runtime + buffer, 6h 间隔保证不重叠
-    - cron: "0 0,5,10,15,20 * * *"
+    # 每天一次兜底启动；正常情况下由上一轮等待 44 分钟后自动启动下一轮。
+    - cron: "17 2 * * *"
 
 permissions:
   contents: write
@@ -67,6 +75,10 @@ jobs:
           PORTALMINE_SERVER_ID: ${{ secrets.PORTALMINE_SERVER_ID }}
           PORTALMINE_POLL_COUNT: ${{ github.event.inputs.poll_count || '1' }}
           PORTALMINE_POLL_SECONDS: ${{ github.event.inputs.poll_seconds || '60' }}
+          PORTALMINE_AUTO_START: "1"
+          PORTALMINE_AUTO_START_POLL_SECONDS: "15"
+          PORTALMINE_AUTO_START_MAX_POLLS: "20"
+          PORTALMINE_SERVER_MONITOR_SECONDS: ${{ github.event.inputs.monitor_seconds || '2640' }}
           # schedule 触发时 github.event.inputs 为空, 用 schedule 自动开 forever
           # workflow_dispatch 时按用户选择
           PORTALMINE_AUTO_COINS: ${{ (github.event_name == 'schedule' || github.event.inputs.auto_coins == 'true' || github.event.inputs.ad_forever == 'true') && '1' || '' }}
@@ -89,3 +101,46 @@ jobs:
           fi
           git commit -m "Update PortalMine state [skip ci]"
           git push origin HEAD:portalmine
+
+      - name: Wait 44 minutes and start next PortalMine workflow
+        if: ${{ success() && (github.event_name == 'schedule' || (github.event.inputs.ad_forever == 'true' && github.event.inputs.restart_after_run != 'false')) }}
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+        run: |
+          echo "⏳ 本轮积分任务已结束，等待 44 分钟后启动下一轮…"
+          sleep 2640
+          python - <<'PY'
+          import os
+          import requests
+
+          repository = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ.get("GH_PAT", "").strip()
+          if not token:
+              raise SystemExit("GH_PAT is missing")
+          response = requests.post(
+              f"https://api.github.com/repos/{repository}/actions/workflows/renew_portalmine.yml/dispatches",
+              headers={
+                  "Authorization": f"Bearer {token}",
+                  "Accept": "application/vnd.github+json",
+                  "X-GitHub-Api-Version": "2022-11-28",
+              },
+              json={
+                  "ref": "portalmine",
+                  "inputs": {
+                      "poll_count": "1",
+                      "poll_seconds": "60",
+                      "auto_coins": "true",
+                      "ad_forever": "true",
+                      "ad_max_rounds": "1",
+                      "ad_max_runtime": "18000",
+                      "monitor_seconds": "2640",
+                      "restart_after_run": "true",
+                  },
+              },
+              timeout=30,
+          )
+          print(f"dispatch HTTP {response.status_code}")
+          if response.status_code != 204:
+              raise SystemExit(response.text[:500])
+          print("✅ 下一轮 PortalMine workflow 已启动")
+          PY
