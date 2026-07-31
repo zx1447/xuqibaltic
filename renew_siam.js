@@ -50,13 +50,13 @@ function saveState(s) { fs.writeFileSync(STATE_FILE, JSON.stringify(s, null, 2))
       log('🎫 Discord OAuth 登录...');
       // 用 Discord API 获取 code
       const authResp = await page.evaluate(async ({ token, clientId }) => {
-        const r = await fetch(`https://discord.com/api/v9/oauth2/authorize?client_id=${clientId}&response_type=code&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&scope=identify+email&prompt=none`, {
+        const r = await fetch(`https://discord.com/api/v9/oauth2/authorize?client_id=${clientId}&response_type=code&redirect_uri=${encodeURIComponent(redirectUri)}&scope=identify+email&prompt=none`, {
           method: 'POST',
           headers: { 'Authorization': token, 'Content-Type': 'application/json' },
           body: JSON.stringify({ authorize: true, integration_type: 0 }),
         });
         return await r.json();
-      }, { token: DISCORD_TOKEN, clientId: CLIENT_ID });
+      }, { token: DISCORD_TOKEN, clientId: CLIENT_ID, redirectUri: REDIRECT_URI });
 
       const location = authResp.location || '';
       const codeMatch = location.match(/code=([^&]+)/);
