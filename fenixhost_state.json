@@ -7,7 +7,6 @@
   "last_login_source": "encrypted_session",
   "service_id": "512",
   "renew_method": "renewFree",
-  "renew_threshold_seconds": 172800,
   "services": [
     {
       "service_id": "512",
@@ -17,9 +16,21 @@
       "expiry_time": "2026-08-07 13:12:58",
       "renew_available": true,
       "remaining_seconds": 604719,
-      "action": "waiting"
+      "action": "waiting_2_days",
+      "last_renew_timestamp": 1785474781,
+      "last_renew_time": "2026-07-31 13:13:01",
+      "next_renew_timestamp": 1785647581,
+      "next_renew_time": "2026-08-02 13:13:01"
     }
   ],
   "total_renew_success": 1,
-  "last_renew_time": "2026-07-31 13:13:01"
+  "last_renew_time": "2026-07-31 13:13:01",
+  "renew_interval_seconds": 172800,
+  "renew_policy": "every_2_days",
+  "last_renew_timestamp": 1785474781,
+  "next_renew_timestamp": 1785647581,
+  "next_renew_time": "2026-08-02 13:13:01",
+  "service_renew_timestamps": {
+    "512": 1785474781
+  }
 }

@@ -28,9 +28,9 @@ PROXY = os.environ.get("FENIXHOST_PROXY", "").strip()
 FORCE_RENEW = os.environ.get("FENIXHOST_FORCE_RENEW", "").strip().lower() in {
     "1", "true", "yes", "on"
 }
-RENEW_THRESHOLD_SECONDS = max(
+RENEW_INTERVAL_SECONDS = max(
     3600,
-    int(os.environ.get("FENIXHOST_RENEW_THRESHOLD_SECONDS", str(2 * 86400)) or 2 * 86400),
+    int(os.environ.get("FENIXHOST_RENEW_INTERVAL_SECONDS", str(2 * 86400)) or 2 * 86400),
 )
 CN_TZ = timezone(timedelta(hours=8))
 UA = (
@@ -317,43 +317,91 @@ def renew_service(session: requests.Session, info: dict) -> dict:
     }
 
 
+def stored_last_renew_timestamp(state: dict, service_id: str, expiry: int) -> int:
+    per_service = state.get("service_renew_timestamps") or {}
+    saved = int(per_service.get(service_id, 0) or 0)
+    if saved:
+        return saved
+    saved = int(state.get("last_renew_timestamp", 0) or 0)
+    if saved:
+        return saved
+    text = state.get("last_renew_time")
+    if text:
+        try:
+            return int(datetime.strptime(text, "%Y-%m-%d %H:%M:%S").replace(tzinfo=CN_TZ).timestamp())
+        except (TypeError, ValueError):
+            pass
+    # renewFree resets a free service to roughly seven days from the action time.
+    if expiry:
+        return max(0, expiry - 7 * 86400)
+    return 0
+
+
 def check_and_renew_services(session: requests.Session, state: dict) -> list[dict]:
     urls = service_urls(session)
     if not urls:
         raise RuntimeError("no FenixHost services found")
     results: list[dict] = []
     current = int(time.time())
+    renew_timestamps = dict(state.get("service_renew_timestamps") or {})
     for url in urls:
         response = session.get(url, timeout=30)
         info = parse_service_page(response.text, url)
-        remaining = max(0, int(info.get("expiry_timestamp", 0)) - current)
+        service_id = str(info.get("service_id") or "unknown")
+        expiry = int(info.get("expiry_timestamp", 0) or 0)
+        remaining = max(0, expiry - current)
+        last_renew = stored_last_renew_timestamp(state, service_id, expiry)
+        next_renew = last_renew + RENEW_INTERVAL_SECONDS if last_renew else 0
         result = {
             k: info.get(k)
             for k in ("service_id", "name", "url", "expiry_timestamp", "expiry_time", "renew_available")
         }
-        result["remaining_seconds"] = remaining
+        result.update(
+            {
+                "remaining_seconds": remaining,
+                "last_renew_timestamp": last_renew,
+                "last_renew_time": timestamp_text(last_renew),
+                "next_renew_timestamp": next_renew,
+                "next_renew_time": timestamp_text(next_renew),
+            }
+        )
         if not info.get("renew_available"):
             result["action"] = "no_free_renew_button"
             print(f"ℹ️ {info['name']} 没有免费续期按钮", flush=True)
-        elif not FORCE_RENEW and remaining > RENEW_THRESHOLD_SECONDS:
-            result["action"] = "waiting"
+        elif not FORCE_RENEW and next_renew and current < next_renew:
+            result["action"] = "waiting_2_days"
             print(
-                f"⏳ {info['name']} 尚未进入续期窗口；到期：{info['expiry_time']}，"
-                f"剩余约 {remaining / 86400:.1f} 天",
+                f"⏳ {info['name']} 等待满 2 天；下次续期：{timestamp_text(next_renew)}",
                 flush=True,
             )
         else:
-            print(f"🔄 调用 Paymenter renewFree：{info['name']}", flush=True)
+            print(f"🔄 已满 2 天，调用 Paymenter renewFree：{info['name']}", flush=True)
             renewal = renew_service(session, info)
             result.update(renewal)
             result["action"] = "renewed"
+            renewed_at = int(time.time())
+            next_timestamp = renewed_at + RENEW_INTERVAL_SECONDS
+            renew_timestamps[service_id] = renewed_at
+            result.update(
+                {
+                    "last_renew_timestamp": renewed_at,
+                    "last_renew_time": timestamp_text(renewed_at),
+                    "next_renew_timestamp": next_timestamp,
+                    "next_renew_time": timestamp_text(next_timestamp),
+                }
+            )
             state["total_renew_success"] = int(state.get("total_renew_success", 0)) + 1
-            state["last_renew_time"] = now_cn()
+            state["last_renew_timestamp"] = renewed_at
+            state["last_renew_time"] = timestamp_text(renewed_at)
+            state["next_renew_timestamp"] = next_timestamp
+            state["next_renew_time"] = timestamp_text(next_timestamp)
             print(
-                f"✅ 免费服务续期成功；新到期时间：{renewal.get('after_expiry_time')}",
+                f"✅ 免费服务续期成功；下次两天后：{timestamp_text(next_timestamp)}；"
+                f"服务到期：{renewal.get('after_expiry_time')}",
                 flush=True,
             )
         results.append(result)
+    state["service_renew_timestamps"] = renew_timestamps
     return results
 
 
@@ -387,7 +435,8 @@ def main() -> int:
                 "last_status": "success",
                 "last_login_source": login_source,
                 "paymenter_update_endpoint": UPDATE_URL,
-                "renew_threshold_seconds": RENEW_THRESHOLD_SECONDS,
+                "renew_interval_seconds": RENEW_INTERVAL_SECONDS,
+                "renew_policy": "every_2_days",
                 "services": results,
             }
         )
