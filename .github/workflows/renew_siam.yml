@@ -3,8 +3,7 @@ name: Siam Auto Check-in
 on:
   workflow_dispatch:
   schedule:
-    # 每 2 小时跑一次 (每天 12 次, 每次签到 1-6 次直到 cooldown)
-    # siam 规则: 每天 3 次, 每小时间隔, 首次 +35
+    # 每 2 小时跑一次
     - cron: "0 */2 * * *"
 
 permissions:
@@ -25,20 +24,20 @@ jobs:
           ref: siam
           fetch-depth: 0
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-node@v4
         with:
-          python-version: "3.12"
+          node-version: "20"
 
-      - name: Install dependencies
-        run: pip install --upgrade pip requests
+      - name: Install Playwright
+        run: |
+          npm init -y
+          npm install playwright
+          npx playwright install chromium --with-deps
 
       - name: Run Siam check-in
         env:
           SIAM_DISCORD_TOKEN: ${{ secrets.SIAM_DISCORD_TOKEN }}
-          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
-          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-        run: python renew_siam.py
+        run: node renew_siam.js
 
       - name: Save Siam state
         if: always()
