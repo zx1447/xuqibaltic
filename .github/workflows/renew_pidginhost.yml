@@ -3,7 +3,7 @@ name: PidginHost Server Auto Renew
 on:
   workflow_dispatch:
   schedule:
-    # 每 25 天跑一次
+    # 每 7 天跑一次 (UTC 00:00)
     - cron: "0 0 */7 * *"
 
 permissions:
@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Checkout
+      - name: Checkout PidginHost branch
         uses: actions/checkout@v4
         with:
           ref: pidginhost
