@@ -25,14 +25,40 @@ function log(msg) { console.log(`[fenix] ${msg}`); }
 
     // 1. 访问 fenixhost OAuth 入口, 拿 state
     log('getting OAuth state...');
-    await page.goto('https://fenixhost.net/oauth/discord', { waitUntil: 'networkidle', timeout: 30000 });
+    await page.goto('https://fenixhost.net/oauth/discord', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    // 等 redirect 完成
+    await page.waitForTimeout(3000);
     const discordUrl = page.url();
+    log(`current URL: ${discordUrl}`);
     const stateMatch = discordUrl.match(/state=([^&]+)/);
     if (!stateMatch) {
-      log('failed to get OAuth state');
-      process.exit(1);
+      log('failed to get OAuth state, trying manual redirect...');
+      // 可能 CF 拦了, 试直接访问 discord OAuth URL
+      // 先从 fenixhost 拿 state (通过 API)
+      const stateResp = await page.evaluate(async () => {
+        const r = await fetch('https://fenixhost.net/oauth/discord', { redirect: 'manual' });
+        return { status: r.status, location: r.headers.get('location') };
+      });
+      log(`manual fetch: ${JSON.stringify(stateResp)}`);
+      if (stateResp.location) {
+        const m = stateResp.location.match(/state=([^&]+)/);
+        if (m) {
+          log(`got state from manual: ${m[1].slice(0, 20)}...`);
+          // 用这个 state + location
+          await page.goto(stateResp.location, { waitUntil: 'domcontentloaded' });
+        }
+      }
+      // 再检查
+      const url2 = page.url();
+      const m2 = url2.match(/state=([^&]+)/);
+      if (!m2) {
+        log(`still no state, URL: ${url2}`);
+        process.exit(1);
+      }
+      var state = m2[1];
+    } else {
+      var state = stateMatch[1];
     }
-    const state = stateMatch[1];
     log(`state: ${state.slice(0, 20)}...`);
 
     // 2. 用 Discord token 获取 OAuth code
