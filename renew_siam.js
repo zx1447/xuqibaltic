@@ -49,7 +49,7 @@ function saveState(s) { fs.writeFileSync(STATE_FILE, JSON.stringify(s, null, 2))
     if (!loggedIn) {
       log('🎫 Discord OAuth 登录...');
       // 用 Discord API 获取 code
-      const authResp = await page.evaluate(async ({ token, clientId }) => {
+      const authResp = await page.evaluate(async ({ token, clientId, redirectUri }) => {
         const r = await fetch(`https://discord.com/api/v9/oauth2/authorize?client_id=${clientId}&response_type=code&redirect_uri=${encodeURIComponent(redirectUri)}&scope=identify+email&prompt=none`, {
           method: 'POST',
           headers: { 'Authorization': token, 'Content-Type': 'application/json' },
