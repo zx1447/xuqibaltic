@@ -16,8 +16,7 @@ concurrency:
 jobs:
   checkin:
     runs-on: ubuntu-latest
-    # 6 次签到之间等待约 1 小时，总运行时间约 5 小时。
-    timeout-minutes: 355
+    timeout-minutes: 10
     steps:
       - name: Checkout Siam branch
         uses: actions/checkout@v4
@@ -39,7 +38,6 @@ jobs:
         env:
           SIAM_DISCORD_TOKEN: ${{ secrets.SIAM_DISCORD_TOKEN }}
           SIAM_CHECKIN_TARGET: "6"
-          SIAM_CHECKIN_INTERVAL_SECONDS: "3610"
         run: node renew_siam.js
 
       - name: Save Siam state
