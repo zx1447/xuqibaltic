@@ -82,8 +82,8 @@ function saveState(s) { fs.writeFileSync(STATE_FILE, JSON.stringify(s, null, 2))
     // 3. 签到循环 (最多 6 次)
     let count = 0;
     let earned = 0;
-    for (let i = 0; i < 6; i++) {
-      log(`🖱️ 签到 #${i + 1}/6...`);
+    for (let i = 0; i < 1; i++) {
+      log(`🖱️ 签到 #${i + 1}/1 (每小时1次, 6次/天)...`);
       const result = await page.evaluate(async () => {
         const r = await fetch('/api/checkin.php', {
           method: 'POST',
