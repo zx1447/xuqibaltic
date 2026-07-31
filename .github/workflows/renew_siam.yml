@@ -3,8 +3,8 @@ name: Siam Auto Check-in
 on:
   workflow_dispatch:
   schedule:
-    # 每 2 小时跑一次
-    - cron: "0 * * * *"
+    # 每天 UTC 00:00（北京时间 08:00）运行一次
+    - cron: "0 0 * * *"
 
 permissions:
   contents: write

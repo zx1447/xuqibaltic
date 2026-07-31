@@ -79,11 +79,11 @@ function saveState(s) { fs.writeFileSync(STATE_FILE, JSON.stringify(s, null, 2))
       log('✅ 登录成功');
     }
 
-    // 3. 签到循环 (最多 6 次)
+    // 3. 每个每日 workflow 只签到 1 次
     let count = 0;
     let earned = 0;
     for (let i = 0; i < 1; i++) {
-      log(`🖱️ 签到 #${i + 1}/1 (每小时1次, 6次/天)...`);
+      log(`🖱️ 每日签到 #${i + 1}/1...`);
       const result = await page.evaluate(async () => {
         const r = await fetch('/api/checkin.php', {
           method: 'POST',
