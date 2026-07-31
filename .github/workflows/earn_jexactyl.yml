@@ -44,12 +44,14 @@ jobs:
       - name: Use direct panel address
         run: echo "13.140.147.61 panel.cyrahost.xyz" | sudo tee -a /etc/hosts
 
-      - name: Run Jexactyl two-account earn
+      - name: Run Jexactyl cross-site two-account earn
         env:
           JEXACTYL_API_KEY: ${{ secrets.JEXACTYL_API_KEY }}
           JEXACTYL_EMAIL: ${{ secrets.JEXACTYL_EMAIL }}
           JEXACTYL_PASSWORD: ${{ secrets.JEXACTYL_PASSWORD }}
           JEXACTYL_SESSION_KEY: ${{ secrets.JEXACTYL_SESSION_KEY }}
+          JEXACTYL_PRIMARY_BASE_URL: "https://panel.cyrahost.xyz"
+          JEXACTYL_SECONDARY_BASE_URL: "https://console.zraa.me"
           JEXACTYL_SERVER_UUID: "1c8f44f1-a8b2-4abb-b5ad-3950ab451b30"
           RUN_MINUTES: ${{ github.event.inputs.run_minutes || '340' }}
           INTERVAL_SECONDS: "61"
