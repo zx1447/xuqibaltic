@@ -8,6 +8,8 @@ const BASE = 'https://my.siam-node.cloud';
 const CLIENT_ID = '1415389053955739753';
 const REDIRECT_URI = `${BASE}/DISCORDOAUTH2/process-oauth.php`;
 const CHECKIN_URL = `${BASE}/api/checkin.php`;
+const CHECKIN_TARGET = Math.max(1, Math.min(6, parseInt(process.env.SIAM_CHECKIN_TARGET || '6', 10)));
+const CHECKIN_INTERVAL_SECONDS = Math.max(60, parseInt(process.env.SIAM_CHECKIN_INTERVAL_SECONDS || '3610', 10));
 
 if (!DISCORD_TOKEN) {
   console.error('[siam] ERROR: missing SIAM_DISCORD_TOKEN');
@@ -17,6 +19,20 @@ if (!DISCORD_TOKEN) {
 function log(msg) { console.log(`[siam] ${msg}`); }
 function loadState() { try { return JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')); } catch { return {}; } }
 function saveState(s) { fs.writeFileSync(STATE_FILE, JSON.stringify(s, null, 2)); }
+
+async function waitForNextCheckin(page, seconds) {
+  let remaining = seconds;
+  while (remaining > 0) {
+    const chunk = Math.min(300, remaining);
+    await page.waitForTimeout(chunk * 1000);
+    remaining -= chunk;
+    // 每 5 分钟访问一次站内页面，避免长达一小时的等待导致 PHP session 过期。
+    await page.evaluate(async () => {
+      await fetch('/?p=topup', { method: 'GET', credentials: 'include', cache: 'no-store' });
+    }).catch(() => null);
+    log(`⏳ 距离下一次签到约 ${Math.ceil(remaining / 60)} 分钟`);
+  }
+}
 
 (async () => {
   const browser = await chromium.launch({ headless: true });
@@ -79,11 +95,11 @@ function saveState(s) { fs.writeFileSync(STATE_FILE, JSON.stringify(s, null, 2))
       log('✅ 登录成功');
     }
 
-    // 3. 每个每日 workflow 只签到 1 次
+    // 3. 每个每日 workflow 连续签到 6 次；平台要求两次之间间隔约 1 小时。
     let count = 0;
     let earned = 0;
-    for (let i = 0; i < 1; i++) {
-      log(`🖱️ 每日签到 #${i + 1}/1...`);
+    for (let i = 0; i < CHECKIN_TARGET; i++) {
+      log(`🖱️ 每日签到 #${i + 1}/${CHECKIN_TARGET}...`);
       const result = await page.evaluate(async () => {
         const r = await fetch('/api/checkin.php', {
           method: 'POST',
@@ -102,13 +118,20 @@ function saveState(s) { fs.writeFileSync(STATE_FILE, JSON.stringify(s, null, 2))
       if (result.status === 'success') {
         count++;
         earned += result.amount || 0;
+        state.last_checkin_time = new Date().toISOString();
+        state.last_checkin_count = count;
+        state.current_workflow_target = CHECKIN_TARGET;
+        saveState(state);
         log(`✅ +${result.amount} ฿ (余额: ${result.balance} ฿)`);
         if (result.remaining === 0 || result.remaining === '0') {
-          log('ℹ️ 今日签到次数用完');
+          log('ℹ️ 今日签到 6 次额度已经用完');
           break;
         }
       }
-      await page.waitForTimeout(2000);
+      if (i + 1 < CHECKIN_TARGET) {
+        log(`🕐 等待 ${CHECKIN_INTERVAL_SECONDS} 秒后进行下一次签到`);
+        await waitForNextCheckin(page, CHECKIN_INTERVAL_SECONDS);
+      }
     }
 
     // 4. 保存 cookies
@@ -116,6 +139,8 @@ function saveState(s) { fs.writeFileSync(STATE_FILE, JSON.stringify(s, null, 2))
     state.cookies = cookies;
     state.last_checkin_time = new Date().toISOString();
     state.last_checkin_count = count;
+    state.current_workflow_target = CHECKIN_TARGET;
+    state.checkin_interval_seconds = CHECKIN_INTERVAL_SECONDS;
     saveState(state);
     log(`🎉 签到完成: ${count} 次, +${earned} ฿`);
     log(`💾 Session 已保存 (${cookies.length} cookies)`);
