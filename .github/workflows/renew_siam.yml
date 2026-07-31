@@ -1,20 +1,18 @@
-name: Siam Daily Browser Check-in
+name: Siam Auto Check-in
 
 on:
-  # 已暂停自动运行，仅保留手动 workflow_dispatch。
   workflow_dispatch:
-    inputs:
-      force:
-        description: "是否忽略每日间隔并立即签到（true/false）"
-        required: false
-        default: "false"
+  schedule:
+    # 每 2 小时跑一次 (每天 12 次, 每次签到 1-6 次直到 cooldown)
+    # siam 规则: 每天 3 次, 每小时间隔, 首次 +35
+    - cron: "0 */2 * * *"
 
 permissions:
   contents: write
 
 concurrency:
-  group: siam-daily-checkin
-  cancel-in-progress: true
+  group: siam-checkin
+  cancel-in-progress: false
 
 jobs:
   checkin:
@@ -32,28 +30,17 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install browser and dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y wget gnupg xvfb
-          wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add 2>/dev/null || true
-          echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
-          sudo apt-get update
-          sudo apt-get install -y google-chrome-stable || sudo apt-get install -y chromium-browser
-          pip install --upgrade pip seleniumbase requests cryptography
-          python -m seleniumbase install chromedriver
+      - name: Install dependencies
+        run: pip install --upgrade pip requests
 
-      - name: Run Siam browser check-in
+      - name: Run Siam check-in
         env:
           SIAM_DISCORD_TOKEN: ${{ secrets.SIAM_DISCORD_TOKEN }}
-          SIAM_SESSION_KEY: ${{ secrets.SIAM_SESSION_KEY }}
-          SIAM_PROXY: ${{ secrets.SIAM_PROXY }}
-          FORCE_RUN: ${{ github.event.inputs.force }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
         run: python renew_siam.py
 
-      - name: Save Siam browser state
+      - name: Save Siam state
         if: always()
         run: |
           git config user.name "github-actions[bot]"
@@ -63,5 +50,5 @@ jobs:
             echo "No Siam state change."
             exit 0
           fi
-          git commit -m "Update Siam browser check-in state [skip ci]"
+          git commit -m "Update Siam state [skip ci]"
           git push origin HEAD:siam
