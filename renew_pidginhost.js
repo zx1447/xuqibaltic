@@ -36,12 +36,19 @@ function log(msg) { console.log(`[pidgin] ${msg}`); }
 
     // 3. GitHub 登录
     const url = page.url();
+    log('current URL after GitHub click: ' + url);
     if (url.includes('github.com/login')) {
       log('filling GitHub credentials...');
+      // 等待登录表单加载
+      await page.waitForSelector('input[name="login"]', { timeout: 10000 });
       await page.fill('input[name="login"]', GH_USER);
       await page.fill('input[name="password"]', GH_PASS);
-      await page.click('button[type="submit"]');
+      // 点 Sign in 按钮 (不是 Continue with Google)
+      await page.click('input[type="submit"], button[type="submit"]');
       await page.waitForTimeout(5000);
+    } else if (url.includes('github.com/sessions/verified-device')) {
+      log('❌ GitHub device verification required');
+      process.exit(1);
     }
 
     // 4. 如果有 device verification, 报错
