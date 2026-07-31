@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Jexactyl two-account credit heartbeat; only the API account is renewed."""
+"""Cross-site Jexactyl credit heartbeat; only the primary API account is renewed."""
 from __future__ import annotations
 
 import json
@@ -13,12 +13,18 @@ from pathlib import Path
 import requests
 from cryptography.fernet import Fernet, InvalidToken
 
-BASE_URL = os.environ.get("JEXACTYL_BASE_URL", "https://panel.cyrahost.xyz").rstrip("/")
+PRIMARY_BASE_URL = os.environ.get(
+    "JEXACTYL_PRIMARY_BASE_URL", "https://panel.cyrahost.xyz"
+).rstrip("/")
+SECONDARY_BASE_URL = os.environ.get(
+    "JEXACTYL_SECONDARY_BASE_URL", "https://console.zraa.me"
+).rstrip("/")
 SERVER_UUID = os.environ.get(
     "JEXACTYL_SERVER_UUID", "1c8f44f1-a8b2-4abb-b5ad-3950ab451b30"
 ).strip()
-EARN_URL = f"{BASE_URL}/api/client/store/earn"
-RENEW_URL = f"{BASE_URL}/api/client/servers/{SERVER_UUID}/renew"
+PRIMARY_EARN_URL = f"{PRIMARY_BASE_URL}/api/client/store/earn"
+SECONDARY_EARN_URL = f"{SECONDARY_BASE_URL}/api/client/store/earn"
+RENEW_URL = f"{PRIMARY_BASE_URL}/api/client/servers/{SERVER_UUID}/renew"
 API_KEY = os.environ.get("JEXACTYL_API_KEY", "").strip()
 SECONDARY_EMAIL = os.environ.get("JEXACTYL_EMAIL", "").strip()
 SECONDARY_PASSWORD = os.environ.get("JEXACTYL_PASSWORD", "").strip()
@@ -74,9 +80,9 @@ def restore_secondary_session(state: dict) -> requests.Session | None:
     session.trust_env = False
     session.headers.update({
         "Accept": "application/json, text/plain, */*",
-        "User-Agent": "Jexactyl-Secondary-Heartbeat/1.0",
-        "Origin": BASE_URL,
-        "Referer": f"{BASE_URL}/",
+        "User-Agent": "Jexactyl-ZRAA-Secondary-Heartbeat/1.0",
+        "Origin": SECONDARY_BASE_URL,
+        "Referer": f"{SECONDARY_BASE_URL}/",
     })
     try:
         for cookie in cookies:
@@ -104,14 +110,16 @@ def save_secondary_session(session: requests.Session, state: dict) -> None:
 
 def refresh_secondary_session(session: requests.Session) -> bool:
     try:
-        response = session.get(f"{BASE_URL}/", allow_redirects=False, timeout=25)
+        response = session.get(f"{SECONDARY_BASE_URL}/", allow_redirects=False, timeout=25)
     except requests.RequestException:
         return False
     if response.status_code != 200 or "auth/login" in response.headers.get("Location", ""):
         return False
     if "window.JexactylUser" not in response.text and "Welcome," not in response.text:
         return False
-    xsrf = session.cookies.get("XSRF-TOKEN", domain=urllib.parse.urlparse(BASE_URL).hostname)
+    xsrf = session.cookies.get(
+        "XSRF-TOKEN", domain=urllib.parse.urlparse(SECONDARY_BASE_URL).hostname
+    )
     if not xsrf:
         # Requests may store the cookie for a parent domain; search by name as fallback.
         for cookie in session.cookies:
@@ -182,9 +190,9 @@ def maybe_renew_primary(session: requests.Session, state: dict) -> bool:
     return response.status_code not in (401, 403)
 
 
-def earn_once(session: requests.Session, label: str) -> tuple[str, int]:
+def earn_once(session: requests.Session, earn_url: str, label: str) -> tuple[str, int]:
     try:
-        response = session.post(EARN_URL, timeout=25)
+        response = session.post(earn_url, timeout=25)
     except requests.RequestException as exc:
         print(f"⚠️ {label}网络异常：{type(exc).__name__}", flush=True)
         return "failure", INTERVAL_SECONDS
@@ -195,7 +203,7 @@ def earn_once(session: requests.Session, label: str) -> tuple[str, int]:
         return "throttled", max(INTERVAL_SECONDS, retry_after + 2)
     if response.status_code == 419 and label.startswith("副账号"):
         if refresh_secondary_session(session):
-            retry = session.post(EARN_URL, timeout=25)
+            retry = session.post(earn_url, timeout=25)
             if retry.status_code == 204:
                 return "success", INTERVAL_SECONDS
             response = retry
@@ -204,10 +212,12 @@ def earn_once(session: requests.Session, label: str) -> tuple[str, int]:
 
 
 def main() -> int:
-    print("🚀 Jexactyl 双账号积分心跳启动", flush=True)
+    print("🚀 Jexactyl 跨站双账号积分心跳启动", flush=True)
     print(f"🕐 北京时间：{now_text()}", flush=True)
     print(f"⏳ 本轮 {RUN_MINUTES} 分钟；每 {INTERVAL_SECONDS} 秒请求积分接口", flush=True)
-    print("🔒 只有主 API 账号参与续期；副账号不续期", flush=True)
+    print(f"🏠 主账号网站：{PRIMARY_BASE_URL}", flush=True)
+    print(f"🏠 副账号网站：{SECONDARY_BASE_URL}", flush=True)
+    print("🔒 只有主 API 账号参与续期；ZRAA 副账号绝不续期", flush=True)
     if not API_KEY:
         print("❌ 缺少 JEXACTYL_API_KEY", flush=True)
         return 1
@@ -215,6 +225,8 @@ def main() -> int:
     state = load_state()
     state.setdefault("primary_total_success", int(state.get("total_success", 0) or 0))
     state.setdefault("secondary_total_success", 0)
+    state["primary_base_url"] = PRIMARY_BASE_URL
+    state["secondary_base_url"] = SECONDARY_BASE_URL
     state["secondary_renew_enabled"] = False
     primary = make_primary_session()
     secondary = restore_secondary_session(state)
@@ -223,9 +235,13 @@ def main() -> int:
     state["secondary_status"] = "ready" if secondary_valid else "session_invalid"
     if secondary_valid:
         save_secondary_session(secondary, state)
-        print(f"✅ 副账号登录会话有效：{state.get('secondary_account_email', 'password account')}", flush=True)
+        print(
+            f"✅ ZRAA 副账号登录会话有效："
+            f"{state.get('secondary_account_email', 'password account')}",
+            flush=True,
+        )
     else:
-        print("⚠️ 副账号登录会话无效；本轮仅运行主 API 账号", flush=True)
+        print("⚠️ ZRAA 副账号登录会话无效；本轮仅运行主 API 账号", flush=True)
 
     initialize_renew_schedule(state)
     if not maybe_renew_primary(primary, state):
@@ -249,7 +265,7 @@ def main() -> int:
             return 1
         wait_seconds = INTERVAL_SECONDS
 
-        result, wait = earn_once(primary, "主账号")
+        result, wait = earn_once(primary, PRIMARY_EARN_URL, "主账号")
         wait_seconds = max(wait_seconds, wait)
         if result == "success":
             primary_success += 1
@@ -261,7 +277,9 @@ def main() -> int:
             failures += 1
 
         if secondary_valid and secondary is not None:
-            result, wait = earn_once(secondary, "副账号（不续期）")
+            result, wait = earn_once(
+                secondary, SECONDARY_EARN_URL, "副账号（ZRAA，不续期）"
+            )
             wait_seconds = max(wait_seconds, wait)
             if result == "success":
                 secondary_success += 1
