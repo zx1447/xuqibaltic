@@ -1,18 +1,25 @@
-name: FenixHost Account Keepalive
+name: FenixHost Free Service Renew
 
 on:
+  schedule:
+    # 每天检查一次；到期时间不足 2 天时调用 renewFree。
+    - cron: "43 3 * * *"
   workflow_dispatch:
-  # 首次登录验证通过后再启用定时任务。
+    inputs:
+      force_renew:
+        description: "忽略两天续期窗口并立即调用 renewFree（true/false）"
+        required: false
+        default: "false"
 
 permissions:
   contents: write
 
 concurrency:
-  group: fenixhost-account-keepalive
-  cancel-in-progress: false
+  group: fenixhost-free-service-renew
+  cancel-in-progress: true
 
 jobs:
-  keepalive:
+  renew:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -27,17 +34,44 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install browser dependencies
+      - name: Install SeleniumBase and Xray
         run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb unzip
+          google-chrome --version
           pip install --upgrade seleniumbase cryptography requests beautifulsoup4
-          seleniumbase install chromedriver
+          python -m seleniumbase install chromedriver
+          mkdir -p /tmp/fenixhost-xray
+          XRAY_TAG=$(curl -fsSL -H "User-Agent: fenixhost-renew" https://api.github.com/repos/XTLS/Xray-core/releases/latest | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag_name"])')
+          curl -fsSL "https://github.com/XTLS/Xray-core/releases/download/${XRAY_TAG}/Xray-linux-64.zip" -o /tmp/fenixhost-xray/xray.zip
+          unzip -q /tmp/fenixhost-xray/xray.zip -d /tmp/fenixhost-xray
+          chmod +x /tmp/fenixhost-xray/xray
+          /tmp/fenixhost-xray/xray version | head -1
 
-      - name: Run FenixHost account keepalive
+      - name: Check and renew FenixHost free service
         env:
           FENIXHOST_EMAIL: ${{ secrets.FENIXHOST_EMAIL }}
           FENIXHOST_PASSWORD: ${{ secrets.FENIXHOST_PASSWORD }}
           FENIXHOST_SESSION_KEY: ${{ secrets.FENIXHOST_SESSION_KEY }}
-        run: python fenixhost.py
+          FENIXHOST_VLESS_URI: ${{ secrets.FENIXHOST_VLESS_URI }}
+          FENIXHOST_PROXY: "socks5://127.0.0.1:1080"
+          FENIXHOST_FORCE_RENEW: ${{ github.event.inputs.force_renew || 'false' }}
+          FENIXHOST_RENEW_THRESHOLD_SECONDS: "172800"
+        run: |
+          python setup_fenixhost_vless.py
+          /tmp/fenixhost-xray/xray run -c /tmp/fenixhost-xray/config.json >/tmp/fenixhost-xray/xray.log 2>&1 &
+          XRAY_PID=$!
+          trap 'kill "$XRAY_PID" 2>/dev/null || true' EXIT
+          for i in $(seq 1 20); do
+            if curl -fsS --max-time 6 -x socks5h://127.0.0.1:1080 https://www.cloudflare.com/cdn-cgi/trace >/tmp/fenixhost-xray/trace; then
+              break
+            fi
+            sleep 1
+          done
+          grep -E '^(ip|loc|warp)=' /tmp/fenixhost-xray/trace
+          curl -fsS --max-time 20 -x socks5h://127.0.0.1:1080 https://fenixhost.net/login | grep -q 'id="email"'
+          echo "✅ VLESS 节点访问 FenixHost 正常"
+          python fenixhost.py
 
       - name: Save FenixHost state
         if: always()
