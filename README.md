@@ -5,7 +5,8 @@ PortalMine 自动检测 + 自动金币 (ad_begin / ad_claim)
 ## 功能
 
 - 登录 PortalMine (账号密码 或 cookie)
-- 检查 server_state
+- **每小时检查一次服务器是否正在运行**（独立工作流，不影响金币任务）
+- 检查最新 `GET /api/server.php?action=server_state` 接口并明确输出 🟢运行 / 🔴未运行
 - **自动领取金币**：ad_begin → 等 60s → ad_claim，每轮 +20 coins
 - **持续模式 (ad_forever)**：循环领金币直到 GitHub Actions 6h 超时，自动重启下一轮 → 24/7 领金币
 - 状态保存到 `portalmine_state.json`，每次成功领取后立即 commit
@@ -47,7 +48,7 @@ Workflow: `.github/workflows/renew_portalmine.yml`
 2. 5 小时后自动 re-trigger 下一轮
 3. 循环不停（除非 GitHub 限制或 secrets 失效）
 
-**定时触发**：每 6 小时自动跑一次（不带金币，只检测 server_state）
+**服务器状态定时检测**：`.github/workflows/check_portalmine_hourly.yml` 每小时运行一次，只检测服务器状态，不领取金币，也不会干扰现有持续金币任务。
 
 ### Secrets 配置
 
@@ -79,8 +80,8 @@ python renew_portalmine.py
 
 1. 登录 https://portalmine.com/dashboard.html
 2. F12 → Network → 刷新页面
-3. 找请求 `server-v16132.php?action=server_state`
-4. Request Headers 里的 `x-portalmine-server-id: 1388`
+3. 找请求 `/api/server.php?action=server_state`
+4. Request Headers 里的 `X-PortalMine-Server-ID: 1388`
 
 ## 文件
 

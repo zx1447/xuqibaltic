@@ -1,0 +1,46 @@
+name: PortalMine Hourly Server Status
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 每小时检查一次服务器是否正在运行（UTC 第 17 分钟触发）。
+    - cron: "17 * * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portalmine-hourly-server-status
+  cancel-in-progress: true
+
+jobs:
+  check-status:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout PortalMine branch
+        uses: actions/checkout@v4
+        with:
+          ref: portalmine
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependency
+        run: pip install --upgrade requests
+
+      - name: Check whether PortalMine server is running
+        env:
+          PORTALMINE_USER: ${{ secrets.PORTALMINE_USER }}
+          PORTALMINE_PASS: ${{ secrets.PORTALMINE_PASS }}
+          PORTALMINE_COOKIE: ${{ secrets.PORTALMINE_COOKIE }}
+          PORTALMINE_SERVER_ID: ${{ secrets.PORTALMINE_SERVER_ID }}
+          PORTALMINE_POLL_COUNT: "1"
+          PORTALMINE_POLL_SECONDS: "60"
+          PORTALMINE_AUTO_COINS: ""
+          PORTALMINE_AD_FOREVER: ""
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: python renew_portalmine.py

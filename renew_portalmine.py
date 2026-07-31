@@ -5,7 +5,8 @@
 Confirmed from F12 / JS:
 - Login API: POST /api/auth.php?action=login
 - Session check: GET /api/auth.php?action=me
-- Server state: GET /server-v16132.php?action=server_state
+- Server state: GET /api/server.php?action=server_state
+  Header: X-PortalMine-Server-ID: <server id>
 - Coins (ad): GET /api/coins.php?action=ad_begin -> returns {ok, ad_id, duration, ...}
              GET /api/coins.php?action=ad_claim -> returns {ok, coins, total, ...}
 
@@ -32,7 +33,7 @@ import requests
 BASE = "https://portalmine.com"
 LOGIN_URL = f"{BASE}/api/auth.php?action=login"
 ME_URL = f"{BASE}/api/auth.php?action=me"
-STATE_URL = f"{BASE}/server-v16132.php?action=server_state"
+STATE_URL = f"{BASE}/api/server.php?action=server_state"
 COINS_API = f"{BASE}/api/coins.php"
 STATE_FILE = "portalmine_state.json"
 USER = os.environ.get("PORTALMINE_USER", "").strip()
@@ -138,9 +139,20 @@ def login(s: requests.Session) -> dict:
     return data
 
 def get_server_state(s: requests.Session) -> dict:
-    r = s.get(STATE_URL, timeout=25)
+    headers = {
+        "Referer": f"{BASE}/dashboard.html#server",
+        "X-Requested-With": "XMLHttpRequest",
+        "Cache-Control": "no-cache",
+    }
+    if SERVER_ID:
+        headers["X-PortalMine-Server-ID"] = SERVER_ID
+    r = s.get(STATE_URL, headers=headers, timeout=25)
     data = parse_json(r)
-    log(f"📡 GET server_state -> HTTP {r.status_code}; ok={data.get('ok')}; state={data.get('state') or data.get('current_state')}")
+    state_key = data.get("state_key") or data.get("state") or data.get("current_state")
+    log(
+        f"📡 GET server_state -> HTTP {r.status_code}; "
+        f"ok={data.get('ok')}; state={state_key}"
+    )
     if r.status_code != 200 or not data.get("ok"):
         raise PortalMineError(f"server_state 失败：{str(data)[:300]}")
     return data
@@ -301,11 +313,31 @@ def run_auto_coins(s: requests.Session, state: dict) -> dict:
 
 def summarize_state(data: dict) -> dict:
     keys = [
-        "state", "current_state", "state_label", "install_status", "name", "version", "type", "platform",
+        "state", "state_key", "current_state", "state_label", "install_status", "name", "version", "type", "platform",
         "display_address", "account_level", "slots", "limit_memory_mb", "limit_disk_mb", "limit_cpu",
         "cycle_left", "uptime", "cpu", "memory", "disk", "players_online", "coins",
     ]
     return {k: data.get(k) for k in keys if k in data}
+
+
+def classify_server_state(summary: dict) -> tuple[bool, str, str]:
+    """Return (is_running, normalized state, human-readable status line)."""
+    raw = (
+        summary.get("state_key")
+        or summary.get("state")
+        or summary.get("current_state")
+        or summary.get("state_label")
+        or "unknown"
+    )
+    normalized = str(raw).strip().lower().replace(" ", "_")
+    running_states = {"running", "online"}
+    transitional_states = {"starting", "restarting", "stopping", "installing", "provisioning"}
+    if normalized in running_states:
+        return True, normalized, f"🟢 PortalMine 服务器正在运行（{raw}）"
+    if normalized in transitional_states:
+        return False, normalized, f"🟡 PortalMine 服务器处于过渡状态（{raw}）"
+    return False, normalized, f"🔴 PortalMine 服务器未运行（{raw}）"
+
 
 def main() -> int:
     log("🚀 PortalMine server_state 检测启动")
@@ -341,15 +373,19 @@ def main() -> int:
             log("💡 提示：设置 PORTALMINE_AUTO_COINS=1 可自动领取金币 (ad_begin/ad_claim)")
 
         summary = summarize_state(last or {})
+        is_running, normalized_state, status_line = classify_server_state(summary)
+        log(status_line)
         state.update({
             "last_check_timestamp": int(time.time()),
             "last_check_time": now_cn(),
             "last_status": "success",
+            "server_running": is_running,
+            "server_state_normalized": normalized_state,
             "server_state": summary,
             "poll_count": poll_count,
         })
         save_state(state)
-        tg_msg = f"✅ PortalMine 检测成功\n🕐 {now_cn()}\n📌 {summary.get('state_label') or summary.get('state')}\n🖥️ {summary.get('display_address', '')}"
+        tg_msg = f"{status_line}\n🕐 {now_cn()}\n🖥️ {summary.get('display_address', '')}"
         if coins_summary:
             tg_msg += f"\n💰 金币: +{coins_summary['coins_earned']} ({coins_summary['rounds_ok']}/{coins_summary['rounds_attempted']} 轮)"
             if coins_summary.get("errors"):
