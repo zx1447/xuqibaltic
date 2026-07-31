@@ -4,7 +4,7 @@
   "phpsessid": "43miccquoruaai7ht9l94gmobk",
   "session_saved_time": "2026-07-31 14:13:53",
   "last_checkin_timestamp": 1785478433,
-  "last_checkin_time": "2026-07-31T07:14:55.614Z",
+  "last_checkin_time": "2026-07-31T07:23:10.950Z",
   "last_checkin_count": 0,
   "cookies": [
     {
@@ -19,10 +19,10 @@
     },
     {
       "name": "csu",
-      "value": "456315618618764@3@1785478931",
+      "value": "456315618618764@4@1785478931",
       "domain": "ukankingwithea.com",
       "path": "/",
-      "expires": 1816586092.883603,
+      "expires": 1816586587.216787,
       "httpOnly": false,
       "secure": true,
       "sameSite": "None"
