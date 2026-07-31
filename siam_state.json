@@ -29,5 +29,5 @@
     }
   ],
   "current_workflow_target": 6,
-  "checkin_interval_seconds": 3610
+  "checkin_mode": "six_immediate_no_hourly_cooldown"
 }
