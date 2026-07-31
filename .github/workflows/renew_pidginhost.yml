@@ -3,7 +3,7 @@ name: PidginHost Server Auto Renew
 on:
   workflow_dispatch:
   schedule:
-    # 每 25 天跑一次 (延期 30 天, 留 5 天 buffer)
+    # 每 25 天跑一次
     - cron: "0 0 25 * *"
 
 permissions:
@@ -18,11 +18,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Checkout PidginHost branch
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           ref: pidginhost
-          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -36,7 +35,7 @@ jobs:
 
       - name: Run PidginHost renew
         env:
-          PIDGINHOST_GH_USER: ${{ secrets.PIDGINHOST_GH_USER }}
-          PIDGINHOST_GH_PASS: ${{ secrets.PIDGINHOST_GH_PASS }}
+          PIDGINHOST_SESSION: ${{ secrets.PIDGINHOST_SESSION }}
+          PIDGINHOST_CSRF: ${{ secrets.PIDGINHOST_CSRF }}
           PIDGINHOST_SERVER_ID: ${{ secrets.PIDGINHOST_SERVER_ID }}
         run: node renew_pidginhost.js
