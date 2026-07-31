@@ -4,7 +4,28 @@
   "phpsessid": "43miccquoruaai7ht9l94gmobk",
   "session_saved_time": "2026-07-31 14:13:53",
   "last_checkin_timestamp": 1785478433,
-  "last_checkin_time": "2026-07-31 14:13:53",
-  "last_checkin_count": 0,
-  "cookies": null
+  "last_checkin_time": "2026-07-31T06:22:16.644Z",
+  "last_checkin_count": 2,
+  "cookies": [
+    {
+      "name": "PHPSESSID",
+      "value": "sk5kg5s47p4c7okq2e7alk20a7",
+      "domain": "my.siam-node.cloud",
+      "path": "/",
+      "expires": -1,
+      "httpOnly": false,
+      "secure": true,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "csu",
+      "value": "456315618618764@1@1785478931",
+      "domain": "ukankingwithea.com",
+      "path": "/",
+      "expires": 1816582931.680541,
+      "httpOnly": false,
+      "secure": true,
+      "sameSite": "None"
+    }
+  ]
 }
