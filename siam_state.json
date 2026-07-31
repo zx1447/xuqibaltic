@@ -29,5 +29,7 @@
     }
   ],
   "current_workflow_target": 6,
-  "checkin_mode": "six_immediate_no_hourly_cooldown"
+  "checkin_mode": "six_times_every_14_seconds_daily",
+  "checkin_interval_seconds": 14,
+  "next_scheduled_run_note": "GitHub Actions runs once daily at 00:00 UTC"
 }

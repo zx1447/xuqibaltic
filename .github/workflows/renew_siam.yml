@@ -3,7 +3,7 @@ name: Siam Auto Check-in
 on:
   workflow_dispatch:
   schedule:
-    # 每天 UTC 00:00（北京时间 08:00）运行一次
+    # 每轮 6 次签到完成后结束；下一天 UTC 00:00（北京时间 08:00）再启动。
     - cron: "0 0 * * *"
 
 permissions:
@@ -38,6 +38,7 @@ jobs:
         env:
           SIAM_DISCORD_TOKEN: ${{ secrets.SIAM_DISCORD_TOKEN }}
           SIAM_CHECKIN_TARGET: "6"
+          SIAM_CHECKIN_INTERVAL_SECONDS: "14"
         run: node renew_siam.js
 
       - name: Save Siam state

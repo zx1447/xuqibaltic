@@ -9,6 +9,7 @@ const CLIENT_ID = '1415389053955739753';
 const REDIRECT_URI = `${BASE}/DISCORDOAUTH2/process-oauth.php`;
 const CHECKIN_URL = `${BASE}/api/checkin.php`;
 const CHECKIN_TARGET = Math.max(1, Math.min(6, parseInt(process.env.SIAM_CHECKIN_TARGET || '6', 10)));
+const CHECKIN_INTERVAL_SECONDS = Math.max(1, parseInt(process.env.SIAM_CHECKIN_INTERVAL_SECONDS || '14', 10));
 
 if (!DISCORD_TOKEN) {
   console.error('[siam] ERROR: missing SIAM_DISCORD_TOKEN');
@@ -80,7 +81,7 @@ function saveState(s) { fs.writeFileSync(STATE_FILE, JSON.stringify(s, null, 2))
       log('✅ 登录成功');
     }
 
-    // 3. 每个每日 workflow 立即连续签到 6 次，无需一小时冷却。
+    // 3. 每个每日 workflow 签到 6 次，每次间隔 14 秒。
     let count = 0;
     let earned = 0;
     for (let i = 0; i < CHECKIN_TARGET; i++) {
@@ -114,8 +115,8 @@ function saveState(s) { fs.writeFileSync(STATE_FILE, JSON.stringify(s, null, 2))
         }
       }
       if (i + 1 < CHECKIN_TARGET) {
-        // 仅保留 1 秒网络缓冲，不进行一小时冷却。
-        await page.waitForTimeout(1000);
+        log(`⏳ 等待 ${CHECKIN_INTERVAL_SECONDS} 秒后进行下一次签到`);
+        await page.waitForTimeout(CHECKIN_INTERVAL_SECONDS * 1000);
       }
     }
 
@@ -125,8 +126,10 @@ function saveState(s) { fs.writeFileSync(STATE_FILE, JSON.stringify(s, null, 2))
     state.last_checkin_time = new Date().toISOString();
     state.last_checkin_count = count;
     state.current_workflow_target = CHECKIN_TARGET;
-    state.checkin_mode = 'six_immediate_no_hourly_cooldown';
-    delete state.checkin_interval_seconds;
+    state.checkin_mode = 'six_times_every_14_seconds_daily';
+    state.checkin_interval_seconds = CHECKIN_INTERVAL_SECONDS;
+    state.last_workflow_end_time = new Date().toISOString();
+    state.next_scheduled_run_note = 'GitHub Actions runs once daily at 00:00 UTC';
     saveState(state);
     log(`🎉 签到完成: ${count} 次, +${earned} ฿`);
     log(`💾 Session 已保存 (${cookies.length} cookies)`);
