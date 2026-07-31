@@ -24,7 +24,7 @@
   "secondary_renew_enabled": false,
   "primary_total_success": 644,
   "secondary_total_success": 323,
-  "secondary_status": "ready",
+  "secondary_status": "session_invalid",
   "current_primary_success": 287,
   "current_secondary_success": 320,
   "current_throttled": 45,
