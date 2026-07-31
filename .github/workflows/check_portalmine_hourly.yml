@@ -1,10 +1,8 @@
-name: PortalMine Hourly Monitor + Auto Start
+name: PortalMine Manual Server Monitor + Auto Start
 
 on:
+  # 自动监控已经合并到积分 workflow（每 44 分钟）；这里仅保留手动检查。
   workflow_dispatch:
-  schedule:
-    # 每小时检查一次；如果服务器离线则自动启动（UTC 第 17 分钟触发）。
-    - cron: "17 * * * *"
 
 permissions:
   contents: read
