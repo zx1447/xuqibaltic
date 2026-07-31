@@ -30,9 +30,9 @@ on:
         required: false
         default: "18000"
       monitor_seconds:
-        description: "领取金币期间的服务器监控间隔（默认 2640=44分钟）"
+        description: "领取金币期间的服务器监控间隔（默认 840=14分钟）"
         required: false
-        default: "2640"
+        default: "840"
       restart_after_run:
         description: "本轮结束等待44分钟后启动下一轮（true/false）"
         required: false
@@ -78,7 +78,7 @@ jobs:
           PORTALMINE_AUTO_START: "1"
           PORTALMINE_AUTO_START_POLL_SECONDS: "15"
           PORTALMINE_AUTO_START_MAX_POLLS: "20"
-          PORTALMINE_SERVER_MONITOR_SECONDS: ${{ github.event.inputs.monitor_seconds || '2640' }}
+          PORTALMINE_SERVER_MONITOR_SECONDS: ${{ github.event.inputs.monitor_seconds || '840' }}
           # schedule 触发时 github.event.inputs 为空, 用 schedule 自动开 forever
           # workflow_dispatch 时按用户选择
           PORTALMINE_AUTO_COINS: ${{ (github.event_name == 'schedule' || github.event.inputs.auto_coins == 'true' || github.event.inputs.ad_forever == 'true') && '1' || '' }}
@@ -133,7 +133,7 @@ jobs:
                       "ad_forever": "true",
                       "ad_max_rounds": "1",
                       "ad_max_runtime": "18000",
-                      "monitor_seconds": "2640",
+                      "monitor_seconds": "840",
                       "restart_after_run": "true",
                   },
               },

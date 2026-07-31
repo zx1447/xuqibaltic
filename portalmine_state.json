@@ -41,7 +41,7 @@
     },
     "started_at": 1785482732,
     "stopped_reason": null,
-    "server_monitor_interval_seconds": 2640,
+    "server_monitor_interval_seconds": 840,
     "server_monitor_checks": 4,
     "server_auto_start_attempts": 0,
     "server_auto_start_success": 0,
@@ -143,5 +143,7 @@
     "final_state": "online",
     "started": false
   },
-  "auto_coins_error": "ConnectionError: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))"
+  "auto_coins_error": "ConnectionError: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))",
+  "configured_server_monitor_interval_seconds": 840,
+  "server_monitor_policy": "every_14_minutes_during_coin_run"
 }

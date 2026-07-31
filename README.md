@@ -5,7 +5,7 @@ PortalMine 自动检测 + 自动金币 (ad_begin / ad_claim)
 ## 功能
 
 - 登录 PortalMine (账号密码 或 cookie)
-- **领取金币期间每 44 分钟检查服务器状态**
+- **领取金币期间每 14 分钟检查服务器状态**
 - 检测到离线时自动调用 `POST /api/server.php?action=start_server` 启动服务器，并持续确认上线
 - 检查最新 `GET /api/server.php?action=server_state` 接口并明确输出 🟢运行 / 🔴未运行
 - **自动领取金币**：ad_begin → 等 60s → ad_claim，每轮 +20 coins
@@ -46,7 +46,7 @@ Workflow: `.github/workflows/renew_portalmine.yml`
 
 **持续领金币**：勾选 `ad_forever=true`，workflow 会：
 1. 运行约 5 小时（每轮约 62 秒）
-2. 领取期间每 44 分钟检查服务器；离线就自动启动
+2. 领取期间每 14 分钟检查服务器；离线就自动启动
 3. 本轮结束后等待 44 分钟
 4. 自动 dispatch 下一轮，继续循环
 

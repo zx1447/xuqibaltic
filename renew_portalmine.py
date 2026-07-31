@@ -55,7 +55,7 @@ AUTO_START_MAX_POLLS = max(
 )
 SERVER_MONITOR_INTERVAL_SECONDS = max(
     60,
-    int(os.environ.get("PORTALMINE_SERVER_MONITOR_SECONDS", "2640") or "2640"),
+    int(os.environ.get("PORTALMINE_SERVER_MONITOR_SECONDS", "840") or "840"),
 )
 # Auto coins config
 AUTO_COINS = os.environ.get("PORTALMINE_AUTO_COINS", "").strip().lower() in {"1", "true", "yes", "on"}
@@ -304,7 +304,7 @@ def run_auto_coins(s: requests.Session, state: dict) -> dict:
             summary["server_monitor_checks"] += 1
             monitor_number = summary["server_monitor_checks"]
             log(
-                f"🖥️ 44 分钟服务器监控 #{monitor_number}：检查运行状态…"
+                f"🖥️ 14 分钟服务器监控 #{monitor_number}：检查运行状态…"
             )
             try:
                 monitored_state = get_server_state(s)
