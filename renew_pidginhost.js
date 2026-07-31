@@ -51,6 +51,10 @@ function log(msg) { console.log(`[pidgin] ${msg}`); }
     const bodyText = await page.evaluate(() => document.body.innerText);
     if (bodyText.toLowerCase().includes('extended for 30 days')) {
       log('✅ server extended for 30 days!');
+    
+    // 访问 dashboard 保持 session active
+    await page.goto(\`\${BASE}/panel/\`, { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
+    log('💾 session refreshed');
       process.exit(0);
     } else if (bodyText.toLowerCase().includes('expires in 30 days')) {
       log('✅ server expires in 30 days');
