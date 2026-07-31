@@ -1,6 +1,6 @@
 {
   "last_check_timestamp": 1785351207,
-  "last_check_time": "2026-07-31 03:07:14",
+  "last_check_time": "2026-07-31 09:44:22",
   "last_status": "ERROR: server_state 失败：{'raw': '<!DOCTYPE html>\\n\\n<html dir=\"ltr\" lang=\"en\">\\n<head>\\n<meta content=\"#020617\" name=\"theme-color\"/>\\n<meta content=\"https://portalmine.com/favicon.png\" property=\"og:image\"/>\\n<meta content=\"https://portalmine.com/favicon.png\" name=\"twitter:image\"/>\\n<title>Page Not Found | PortalMine</title",
   "server_state": {
     "state": "offline",
