@@ -1,9 +1,9 @@
-name: PortalMine Hourly Server Status
+name: PortalMine Hourly Monitor + Auto Start
 
 on:
   workflow_dispatch:
   schedule:
-    # 每小时检查一次服务器是否正在运行（UTC 第 17 分钟触发）。
+    # 每小时检查一次；如果服务器离线则自动启动（UTC 第 17 分钟触发）。
     - cron: "17 * * * *"
 
 permissions:
@@ -31,7 +31,7 @@ jobs:
       - name: Install dependency
         run: pip install --upgrade requests
 
-      - name: Check whether PortalMine server is running
+      - name: Check PortalMine server and auto-start if offline
         env:
           PORTALMINE_USER: ${{ secrets.PORTALMINE_USER }}
           PORTALMINE_PASS: ${{ secrets.PORTALMINE_PASS }}
@@ -39,6 +39,9 @@ jobs:
           PORTALMINE_SERVER_ID: ${{ secrets.PORTALMINE_SERVER_ID }}
           PORTALMINE_POLL_COUNT: "1"
           PORTALMINE_POLL_SECONDS: "60"
+          PORTALMINE_AUTO_START: "1"
+          PORTALMINE_AUTO_START_POLL_SECONDS: "15"
+          PORTALMINE_AUTO_START_MAX_POLLS: "20"
           PORTALMINE_AUTO_COINS: ""
           PORTALMINE_AD_FOREVER: ""
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}

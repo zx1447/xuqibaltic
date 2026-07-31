@@ -6,6 +6,7 @@ Confirmed from F12 / JS:
 - Login API: POST /api/auth.php?action=login
 - Session check: GET /api/auth.php?action=me
 - Server state: GET /api/server.php?action=server_state
+- Start server: POST /api/server.php?action=start_server
   Header: X-PortalMine-Server-ID: <server id>
 - Coins (ad): GET /api/coins.php?action=ad_begin -> returns {ok, ad_id, duration, ...}
              GET /api/coins.php?action=ad_claim -> returns {ok, coins, total, ...}
@@ -33,7 +34,9 @@ import requests
 BASE = "https://portalmine.com"
 LOGIN_URL = f"{BASE}/api/auth.php?action=login"
 ME_URL = f"{BASE}/api/auth.php?action=me"
-STATE_URL = f"{BASE}/api/server.php?action=server_state"
+SERVER_API = f"{BASE}/api/server.php"
+STATE_URL = f"{SERVER_API}?action=server_state"
+START_URL = f"{SERVER_API}?action=start_server"
 COINS_API = f"{BASE}/api/coins.php"
 STATE_FILE = "portalmine_state.json"
 USER = os.environ.get("PORTALMINE_USER", "").strip()
@@ -41,6 +44,15 @@ PASSWORD = os.environ.get("PORTALMINE_PASS", "").strip()
 COOKIE = os.environ.get("PORTALMINE_COOKIE", "").strip()
 POLL_COUNT = int(os.environ.get("PORTALMINE_POLL_COUNT", "1") or "1")
 POLL_SECONDS = int(os.environ.get("PORTALMINE_POLL_SECONDS", "60") or "60")
+AUTO_START = os.environ.get("PORTALMINE_AUTO_START", "").strip().lower() in {
+    "1", "true", "yes", "on"
+}
+AUTO_START_POLL_SECONDS = max(
+    5, min(60, int(os.environ.get("PORTALMINE_AUTO_START_POLL_SECONDS", "15") or "15"))
+)
+AUTO_START_MAX_POLLS = max(
+    1, min(30, int(os.environ.get("PORTALMINE_AUTO_START_MAX_POLLS", "20") or "20"))
+)
 # Auto coins config
 AUTO_COINS = os.environ.get("PORTALMINE_AUTO_COINS", "").strip().lower() in {"1", "true", "yes", "on"}
 AD_SECONDS = int(os.environ.get("PORTALMINE_AD_SECONDS", "60") or "60")
@@ -138,7 +150,7 @@ def login(s: requests.Session) -> dict:
     log(f"✅ PortalMine 登录成功：user={user.get('username')} coins={user.get('coins')}")
     return data
 
-def get_server_state(s: requests.Session) -> dict:
+def server_headers() -> dict:
     headers = {
         "Referer": f"{BASE}/dashboard.html#server",
         "X-Requested-With": "XMLHttpRequest",
@@ -146,7 +158,11 @@ def get_server_state(s: requests.Session) -> dict:
     }
     if SERVER_ID:
         headers["X-PortalMine-Server-ID"] = SERVER_ID
-    r = s.get(STATE_URL, headers=headers, timeout=25)
+    return headers
+
+
+def get_server_state(s: requests.Session) -> dict:
+    r = s.get(STATE_URL, headers=server_headers(), timeout=25)
     data = parse_json(r)
     state_key = data.get("state_key") or data.get("state") or data.get("current_state")
     log(
@@ -156,6 +172,27 @@ def get_server_state(s: requests.Session) -> dict:
     if r.status_code != 200 or not data.get("ok"):
         raise PortalMineError(f"server_state 失败：{str(data)[:300]}")
     return data
+
+
+def start_server(s: requests.Session) -> dict:
+    """Request a server start using the same endpoint as the dashboard button."""
+    headers = server_headers()
+    headers["Content-Type"] = "application/json"
+    try:
+        r = s.post(START_URL, headers=headers, timeout=330)
+    except requests.Timeout:
+        # The dashboard also allows a long start request. A timeout does not prove
+        # that the panel rejected it, so the caller will still poll server_state.
+        log("⚠️ start_server 请求等待超时，将继续检查服务器实际状态")
+        return {"ok": False, "error": "START_REQUEST_TIMEOUT"}
+    data = parse_json(r)
+    log(
+        f"📡 POST start_server -> HTTP {r.status_code}; ok={data.get('ok')}; "
+        f"error={data.get('error')}; msg={str(data.get('msg') or '')[:160]}"
+    )
+    data["http_status"] = r.status_code
+    return data
+
 
 def coins_api(s: requests.Session, action: str, body: dict | None = None, timeout: int = 20) -> dict:
     """Call /api/coins.php?action=<action>.
@@ -339,6 +376,61 @@ def classify_server_state(summary: dict) -> tuple[bool, str, str]:
     return False, normalized, f"🔴 PortalMine 服务器未运行（{raw}）"
 
 
+def maybe_auto_start(s: requests.Session, current: dict) -> tuple[dict, dict]:
+    """Start an offline server and poll until it is online or the poll cap is reached."""
+    summary = summarize_state(current)
+    is_running, normalized, status_line = classify_server_state(summary)
+    result = {
+        "enabled": AUTO_START,
+        "attempted": False,
+        "initial_state": normalized,
+        "final_state": normalized,
+        "started": False,
+    }
+    if is_running:
+        return current, result
+    if not AUTO_START:
+        return current, result
+    if normalized not in {"offline", "stopped"}:
+        log(f"ℹ️ 自动启动未执行：当前是 {normalized}，不是离线状态")
+        return current, result
+
+    result["attempted"] = True
+    result["attempt_time"] = now_cn()
+    log(f"🔴 检测到服务器离线，正在自动点击 Start Server（{normalized}）…")
+    response = start_server(s)
+    result["response"] = {
+        k: response.get(k)
+        for k in ("ok", "error", "msg", "state", "state_key", "queued", "preparing", "http_status")
+        if k in response
+    }
+
+    last = current
+    for attempt in range(1, AUTO_START_MAX_POLLS + 1):
+        time.sleep(AUTO_START_POLL_SECONDS)
+        try:
+            last = get_server_state(s)
+        except Exception as exc:
+            log(f"⚠️ 自动启动后第 {attempt} 次状态检查失败：{type(exc).__name__}: {exc}")
+            continue
+        check_summary = summarize_state(last)
+        running, final_state, final_line = classify_server_state(check_summary)
+        result["final_state"] = final_state
+        result["polls"] = attempt
+        if running:
+            result["started"] = True
+            result["success_time"] = now_cn()
+            log(f"✅ 自动启动成功：{final_line}")
+            return last, result
+        log(
+            f"⏳ 自动启动后等待上线：{final_state} "
+            f"({attempt}/{AUTO_START_MAX_POLLS})"
+        )
+
+    log(f"⚠️ 已发送启动命令，但暂未确认上线；最后状态：{result['final_state']}")
+    return last, result
+
+
 def main() -> int:
     log("🚀 PortalMine server_state 检测启动")
     log(f"🕐 北京时间：{now_cn()}")
@@ -359,6 +451,10 @@ def main() -> int:
                 log(f"⏳ 等待 {POLL_SECONDS} 秒后再次检查 server_state ({i+1}/{poll_count})")
                 time.sleep(max(1, min(POLL_SECONDS, 300)))
             last = get_server_state(s)
+
+        # Hourly status workflow: if the server is offline, press Start Server
+        # and verify the resulting state. Other workflows leave AUTO_START off.
+        last, auto_start_result = maybe_auto_start(s, last or {})
 
         # Auto coins (ad_begin -> wait -> ad_claim)
         coins_summary = None
@@ -382,10 +478,17 @@ def main() -> int:
             "server_running": is_running,
             "server_state_normalized": normalized_state,
             "server_state": summary,
+            "auto_start": auto_start_result,
             "poll_count": poll_count,
         })
         save_state(state)
         tg_msg = f"{status_line}\n🕐 {now_cn()}\n🖥️ {summary.get('display_address', '')}"
+        if auto_start_result.get("attempted"):
+            tg_msg += (
+                "\n▶️ 离线后自动启动成功"
+                if auto_start_result.get("started")
+                else "\n⚠️ 已发送自动启动命令，但暂未确认上线"
+            )
         if coins_summary:
             tg_msg += f"\n💰 金币: +{coins_summary['coins_earned']} ({coins_summary['rounds_ok']}/{coins_summary['rounds_attempted']} 轮)"
             if coins_summary.get("errors"):

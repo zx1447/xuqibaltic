@@ -6,6 +6,7 @@ PortalMine 自动检测 + 自动金币 (ad_begin / ad_claim)
 
 - 登录 PortalMine (账号密码 或 cookie)
 - **每小时检查一次服务器是否正在运行**（独立工作流，不影响金币任务）
+- 检测到离线时自动调用 `POST /api/server.php?action=start_server` 启动服务器，并持续确认上线
 - 检查最新 `GET /api/server.php?action=server_state` 接口并明确输出 🟢运行 / 🔴未运行
 - **自动领取金币**：ad_begin → 等 60s → ad_claim，每轮 +20 coins
 - **持续模式 (ad_forever)**：循环领金币直到 GitHub Actions 6h 超时，自动重启下一轮 → 24/7 领金币
@@ -48,7 +49,7 @@ Workflow: `.github/workflows/renew_portalmine.yml`
 2. 5 小时后自动 re-trigger 下一轮
 3. 循环不停（除非 GitHub 限制或 secrets 失效）
 
-**服务器状态定时检测**：`.github/workflows/check_portalmine_hourly.yml` 每小时运行一次，只检测服务器状态，不领取金币，也不会干扰现有持续金币任务。
+**服务器状态定时检测与自动启动**：`.github/workflows/check_portalmine_hourly.yml` 每小时运行一次；在线时只记录状态，离线时自动启动并确认上线。它不领取金币，也不会干扰现有持续金币任务。
 
 ### Secrets 配置
 
