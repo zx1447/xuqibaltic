@@ -68,7 +68,7 @@ function log(msg) { console.log(`[fenix] ${msg}`); }
         log(`still no state, URL: ${url2}`);
         process.exit(1);
       }
-      var state = '';
+      state = '';
     }
     log(`state: ${state.slice(0, 20)}...`);
 
