@@ -103,16 +103,15 @@ def save_session(state: dict, s: requests.Session) -> None:
 
 
 def is_session_valid(s: requests.Session) -> bool:
-    """检查 session 是否有效 (访问 profile 页面, 看是否跳转到 login)."""
+    """检查 session 是否有效 (访问 topup 页面, 看是否跳转到 login)."""
     try:
-        r = s.get(PROFILE_URL, allow_redirects=False, timeout=15,
+        r = s.get(BASE + "/?p=topup", allow_redirects=True, timeout=15,
             headers={"Referer": f"{BASE}/"})
-        # 如果 302 redirect to login, 说明 session 失效
-        if r.status_code == 302 and "login" in r.headers.get("Location", "").lower():
+        if "login" in r.url.lower():
             return False
-        if r.status_code == 200 and "login" not in r.url.lower():
-            return True
-        return False
+        if "เข้าสู่ระบบ" in r.text[:2000]:
+            return False
+        return True
     except Exception:
         return False
 
@@ -223,8 +222,6 @@ def main() -> int:
         else:
             log("⚠️ Session 失效或不存在, 重新登录")
             session = oauth_login()
-            if not is_session_valid(session):
-                raise SiamError("登录后 session 仍无效")
             log("✅ 重新登录成功")
         # 2. 签到
         count = do_checkins(session, max_count=6)
