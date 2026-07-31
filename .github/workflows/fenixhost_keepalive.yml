@@ -2,12 +2,12 @@ name: FenixHost Free Service Renew
 
 on:
   schedule:
-    # 每天检查一次；到期时间不足 2 天时调用 renewFree。
-    - cron: "43 3 * * *"
+    # 每 12 小时检查；距离上次成功续期满 2 天时调用 renewFree。
+    - cron: "13 5,17 * * *"
   workflow_dispatch:
     inputs:
       force_renew:
-        description: "忽略两天续期窗口并立即调用 renewFree（true/false）"
+        description: "忽略两天间隔并立即调用 renewFree（true/false）"
         required: false
         default: "false"
 
@@ -56,7 +56,7 @@ jobs:
           FENIXHOST_VLESS_URI: ${{ secrets.FENIXHOST_VLESS_URI }}
           FENIXHOST_PROXY: "socks5://127.0.0.1:1080"
           FENIXHOST_FORCE_RENEW: ${{ github.event.inputs.force_renew || 'false' }}
-          FENIXHOST_RENEW_THRESHOLD_SECONDS: "172800"
+          FENIXHOST_RENEW_INTERVAL_SECONDS: "172800"
         run: |
           python setup_fenixhost_vless.py
           /tmp/fenixhost-xray/xray run -c /tmp/fenixhost-xray/config.json >/tmp/fenixhost-xray/xray.log 2>&1 &
