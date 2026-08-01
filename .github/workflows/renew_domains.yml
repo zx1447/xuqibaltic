@@ -2,8 +2,11 @@ name: DigitalPlat Domain Auto Renew
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "0 0 1 */2 *"
+  # schedule 已移除：GitHub Actions 数据中心 IP 被 dash CF 拦截，跑不通
+  # 改为本地手动触发或本地 cron 跑 digitalplat_auto_renew.py
+  # 如需恢复定时，取消下面一行的注释（需先解决 IP 问题）：
+  # schedule:
+  #   - cron: "0 0 1 */2 *"
 
 permissions:
   contents: write
