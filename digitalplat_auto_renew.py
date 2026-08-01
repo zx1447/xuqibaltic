@@ -338,11 +338,6 @@ def main() -> int:
             f"days_remaining={record.days_remaining} status={record.status or '-'}"
         )
 
-        if not should_renew(record, renew_before_days):
-            print(f"[SKIP] {record.name} has not entered the renewal window.")
-            state_changed = update_state_for_record(state, record, "skipped", renew_before_days) or state_changed
-            continue
-
         if args.dry_run:
             print(f"[DRY-RUN] Would renew {record.name} with renewal_type={renewal_type} years={renewal_years}.")
             continue
@@ -351,6 +346,7 @@ def main() -> int:
             print(f"[FIXTURE] Would renew {record.name}.")
             continue
 
+        # 每 2 个月定时对所有域名各调一次续期接口（不管是否进入续期窗口）
         try:
             renewed_raw = client.renew_domain(record.name, renewal_type, renewal_years)
             renewed_record = normalize_domain(renewed_raw)
