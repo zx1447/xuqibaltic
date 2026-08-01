@@ -3,7 +3,6 @@ name: DigitalPlat Domain Auto Renew
 on:
   workflow_dispatch:
   schedule:
-    # 每 2 个月 1 号 UTC 00:00
     - cron: "0 0 1 */2 *"
 
 permissions:
@@ -16,7 +15,7 @@ concurrency:
 jobs:
   renew:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - name: Checkout domain branch
         uses: actions/checkout@v4
@@ -29,12 +28,29 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Run renewal check
+      - name: Install system deps (Chrome + Xvfb)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget gnupg xvfb
+          wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add - 2>/dev/null || true
+          echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
+          sudo apt-get update
+          sudo apt-get install -y google-chrome-stable || sudo apt-get install -y chromium-browser
+          google-chrome --version || chromium-browser --version
+
+      - name: Install Python deps (playwright)
+        run: pip install --upgrade pip playwright
+
+      - name: Install Playwright Chromium
+        run: python -m playwright install --with-deps chromium
+
+      - name: Run renewal (browser click)
         env:
           DIGITALPLAT_API_TOKEN: ${{ secrets.DIGITALPLAT_API_TOKEN }}
           DIGITALPLAT_DOMAINS: ${{ vars.DIGITALPLAT_DOMAINS }}
-          DIGITALPLAT_RENEW_BEFORE_DAYS: "120"
-        run: python digitalplat_auto_renew.py --state state/domains-state.json
+          DP_GH_USER: ${{ secrets.DP_GH_USER }}
+          DP_GH_PASS: ${{ secrets.DP_GH_PASS }}
+        run: xvfb-run -a python digitalplat_auto_renew.py --state state/domains-state.json
 
       - name: Commit updated renewal state
         if: always()
@@ -47,7 +63,6 @@ jobs:
             exit 0
           fi
           git commit -m "Update DigitalPlat domain renewal state [skip ci]"
-          # 并发推送保护：变基到最新 domain 后重试，冲突时采用本次运行生成的状态
           for i in 1 2 3 4; do
             git fetch origin domain
             if git rebase origin/domain; then
