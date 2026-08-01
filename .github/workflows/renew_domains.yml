@@ -3,7 +3,6 @@ name: DigitalPlat Domain Auto Renew
 on:
   workflow_dispatch:
   schedule:
-    # 每周一 UTC 04:17
     - cron: "17 4 * * 1"
 
 permissions:
@@ -18,26 +17,23 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: Checkout domain branch
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           ref: domain
-          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
 
-      - name: Install Playwright + camoufox
+      - name: Install Playwright
         run: |
           npm init -y
-          npm install playwright camoufox
-          npx playwright install chromium --with-deps
-          npx camoufox fetch
+          npm install playwright
+          npx playwright install firefox --with-deps
 
       - name: Run domain renew
         env:
           DP_GH_USER: ${{ secrets.DP_GH_USER }}
           DP_GH_PASS: ${{ secrets.DP_GH_PASS }}
-          DIGITALPLAT_API_TOKEN: ${{ secrets.DIGITALPLAT_API_TOKEN }}
         run: node renew_domains.js
