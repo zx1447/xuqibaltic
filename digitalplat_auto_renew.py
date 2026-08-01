@@ -73,7 +73,7 @@ class DigitalPlatClient:
                 if exc.code == 403 and "challenge" in detail.lower():
                     if not CF_COOKIES and attempt == 0:
                         print("⚠️ 检测到 Cloudflare 挑战，尝试用浏览器求解…", flush=True)
-                        CF_COOKIES = solve_cloudflare_playwright(self.api_base)
+                        CF_COOKIES = solve_cloudflare(self.api_base)
                         if CF_COOKIES:
                             print("✅ 已获取 Cloudflare cookie，重试请求", flush=True)
                             continue
@@ -175,41 +175,42 @@ def install_proxy() -> None:
         print(f"[PROXY] 代理初始化失败，回退直连: {exc}", file=sys.stderr)
 
 
-def solve_cloudflare_playwright(api_base: str) -> dict[str, str]:
-    """用 Playwright 真实浏览器通过 Cloudflare 挑战，返回含 cf_clearance 的 cookies。"""
+def solve_cloudflare(api_base: str) -> dict[str, str]:
+    """用 SeleniumBase 隐蔽浏览器（UC）通过 Cloudflare 挑战，返回含 cf_clearance 的 cookies。"""
     try:
-        from playwright.sync_api import sync_playwright
+        from seleniumbase import Driver
     except ImportError:
-        print("[CF] 未安装 playwright，无法用浏览器求解挑战", file=sys.stderr)
+        print("[CF] 未安装 seleniumbase，无法用浏览器求解挑战", file=sys.stderr)
         return {}
     proxy = os.getenv("PROXY_SERVER") or os.getenv("DIGITALPLAT_PROXY")
+    headless = os.getenv("HEADLESS", "false").lower() != "false"
     cookies: dict[str, str] = {}
-    launch_kwargs: dict[str, Any] = {
-        "headless": True,
-        "args": ["--no-sandbox", "--disable-dev-shm-usage"],
+    kwargs: dict[str, Any] = {
+        "uc": True,
+        "headless": headless,
+        "agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 Chrome/150.0.0.0 Safari/537.36"
+        ),
     }
     if proxy:
-        launch_kwargs["proxy"] = {"server": proxy}
+        kwargs["proxy"] = proxy
     try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(**launch_kwargs)
-            ctx = browser.new_context()
-            page = ctx.new_page()
-            try:
-                page.goto(api_base, wait_until="domcontentloaded", timeout=60000)
-            except Exception as exc:
-                print(f"[CF] 导航异常: {exc}", file=sys.stderr)
-            for _ in range(40):
+        driver = Driver(**kwargs)
+        try:
+            driver.get(api_base)
+            for _ in range(45):
                 try:
-                    page.wait_for_load_state("networkidle", timeout=2000)
+                    driver.wait_for_ready_state_complete(timeout=2000)
                 except Exception:
                     pass
-                for c in ctx.cookies():
+                for c in driver.get_cookies():
                     cookies[c["name"]] = c["value"]
                 if "cf_clearance" in cookies:
                     break
                 time.sleep(2)
-            browser.close()
+        finally:
+            driver.quit()
     except Exception as exc:
         print(f"[CF] 浏览器求解失败: {exc}", file=sys.stderr)
     if "cf_clearance" in cookies:
