@@ -482,7 +482,23 @@ def renew_via_panel_api(
 
     results: dict[str, tuple[str, str, str]] = {}
 
-    with Camoufox(headless=True, geoip=True, i_know_what_im_doing=True) as browser:
+    # 本地测试通过的配置：
+    #   - headless=True: 无头模式
+    #   - geoip=True: 根据 IP 自动匹配浏览器指纹的地理位置（locale/timezone）
+    #   - humanize=True: 模拟人类鼠标移动（帮助过 CF 行为检测）
+    #   - i_know_what_im_doing=True: 跳过 Camoufox 的安全确认
+    #
+    # 已知限制：
+    #   - GitHub Actions 数据中心 IP 会被 dash 的 CF 严格防护拦截，
+    #     即使 Camoufox 也过不了 CF 挑战（页面停在 "Loading https://..." 180s+）
+    #   - 本地（住宅 IP）能稳定通过
+    #   - 如果要在 GHA 跑，需要先解决 IP 问题（住宅代理 / 自建中转等）
+    with Camoufox(
+        headless=True,
+        geoip=True,
+        humanize=True,
+        i_know_what_im_doing=True,
+    ) as browser:
         ctx = browser.new_context()
         page = ctx.new_page()
         page.set_default_timeout(45000)

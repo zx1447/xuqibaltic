@@ -28,9 +28,12 @@ dash 在 Cloudflare 后，普通 Python urllib/Playwright headless Chromium 过�
 - `skip_not_expiring` - 剩余 >120 天，DigitalPlat 政策禁止续期（不是错误）
 - `renew_failed` - 真正失败（网络/登录/CSRF/API 异常）
 
-## 本地运行
+## 本地运行（已验证可行）
 
 ```bash
+pip install "camoufox[geoip]"
+python3 -m camoufox fetch
+
 DIGITALPLAT_API_TOKEN=dp_live_xxx \
 DIGITALPLAT_DOMAINS="domain1.com
 domain2.com" \
@@ -40,3 +43,23 @@ python3 digitalplat_auto_renew.py --state state/domains-state.json
 ```
 
 加 `--dry-run` 只查询不续期；加 `--force` 即使 >120 天也尝试（DigitalPlat 会返回 400，用于测试）。
+
+## ⚠️ 已知限制：GitHub Actions 跑不通
+
+本地（住宅 IP）Camoufox 能稳定过 CF 挑战，但 **GitHub Actions 数据中心 IP 会被 dash 的 CF 严格防护拦截**：
+
+- Camoufox 加载 dash 时页面一直停在 `Loading https://dash.domain.digitalplat.org/auth/login`
+- 等待 180s 后超时，HTML 里只有 Cloudflare 自己的链接，没有 dash 真正内容
+- 这是 CF 对 GitHub Actions IP 段的硬性限制，无法通过浏览器指纹绕过
+
+### 可能的解决方案（待探索）
+
+1. **本地 cron**：在自己的机器上跑（最稳）
+2. **部署到稳定探针节点**：unikraft / sweb 等住宅 IP 云主机
+3. **住宅代理**：通过 SOCKS5/HTTP 代理走住宅 IP（Camoufox 支持 `proxy` 参数，但需自备代理）
+4. **Cloudflare Workers 中转**：用 CF Worker 反代 Panel API（但 Worker 也在 CF 网络内，可能仍被拦）
+
+## 实测记录
+
+- 2026-08-01：本地跑通，`cpaner.dpdns.org` 续期成功（20261111 → 20271111）
+- 2026-08-01：GitHub Actions 3 次失败，均卡在 CF 挑战
