@@ -277,32 +277,21 @@ def get_csrf_js() -> str:
     """
 
 
-def wait_cf_challenge(page, timeout_seconds=120):
-    """等 CF 挑战过去 + dash 登录页真正加载完（出现 GitHub 登录链接或邮箱密码表单）"""
+def wait_cf_challenge(page, timeout_seconds=180):
+    """
+    等 dash 登录页真正加载完。判定标准（任一满足）：
+    1. 页面渲染出 GitHub 登录链接（a[href*="/auth/login/github"] 或文本 "Sign in with GitHub"）
+    2. 已经登录态（url 在 dash 域且不在 /auth/ 路径）
+
+    不依赖 title 判定 CF 挑战，因为：
+    - GitHub Actions 上 Camoufox 加载时 title 会暂时是 'Loading https://...'
+    - 本地 Camoufox 也会出现 title='' 的中间态
+    直接尝试找元素 / 检查 url，找不到就继续等。
+    """
     deadline = time.time() + timeout_seconds
-    cf_passed = False
+    last_log = 0.0
     while time.time() < deadline:
-        title = page.title()
-        # CF 挑战页 title 是 "Just a moment..." / "請稍候..." / "Loading https://..."
-        if not cf_passed:
-            if ("just a moment" in title.lower()
-                or "請稍候" in title
-                or "请稍候" in title
-                or title.startswith("Loading ")):
-                time.sleep(2)
-                continue
-            cf_passed = True
-            print(f"[BROWSER] CF 挑战已过，title={title!r}", flush=True)
-        # CF 过后还要等 dash 渲染出 GitHub 登录按钮
-        try:
-            gh_link = page.query_selector('a[href*="/auth/login/github"], a:has-text("Sign in with GitHub")')
-            if gh_link:
-                print("[BROWSER] dash 登录页已就绪（GitHub 链接已渲染）", flush=True)
-                return True
-        except Exception:
-            pass
-        # 或者已经登录态（直接跳转，但不在任何 /auth/ 中间路径）
-        # 注意：用 urlparse 检查 netloc，避免 return_to 参数里的 dash 域名误判
+        # 1. 已登录态？
         url = page.url
         try:
             parsed = urllib.parse.urlparse(url)
@@ -312,7 +301,22 @@ def wait_cf_challenge(page, timeout_seconds=120):
                 return True
         except Exception:
             pass
-        time.sleep(1)
+
+        # 2. 渲染出 GitHub 登录链接？
+        try:
+            gh_link = page.query_selector('a[href*="/auth/login/github"], a:has-text("Sign in with GitHub")')
+            if gh_link:
+                print(f"[BROWSER] dash 登录页已就绪（GitHub 链接已渲染），title={page.title()!r}", flush=True)
+                return True
+        except Exception:
+            pass
+
+        # 每 15s 打一次进度日志
+        now = time.time()
+        if now - last_log >= 15:
+            print(f"[BROWSER] 等待 dash 加载… title={page.title()!r} url={url[:120]}", flush=True)
+            last_log = now
+        time.sleep(2)
     print(f"[BROWSER] wait_cf_challenge 超时，title={page.title()!r} url={page.url}", flush=True)
     return False
 
