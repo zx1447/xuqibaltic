@@ -1,4 +1,1 @@
-runlogs/
-*.zip
-__pycache__/
-cookie_value.txt
+state/dp-dash-cookies.json

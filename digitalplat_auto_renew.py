@@ -1,29 +1,33 @@
 #!/usr/bin/env python3
-# DigitalPlat 免费域名自动续期
-# - 列表/查询走官方 Developer API（带浏览器 UA，绕过 Cloudflare 对 bot UA 的拦截）
-# - 续期走「浏览器点击」：用 Playwright 登录控制面板，逐个域名点击「续费 → 申请免费续费」按钮
-#   （官方 Developer API 没有 /renew 接口，控制面板内部接口带 CF 盾且需登录会话，HTTP 直调会被 403）
+# DigitalPlat 免费域名自动续期（Camoufox + Panel API 版本）
+#
+# 流程：
+#   1. Developer API (domain-api.digitalplat.org) 列出域名 + 检查到期
+#   2. Camoufox (反检测 Firefox) 过 CF 挑战 → GitHub OAuth 登录 dash
+#   3. 在 dash 浏览器上下文里调 Panel API 续期每个域名
+#      真实端点: POST /_panel_api/api/domains/{d}/renew body {"renewal_type":"free","years":1}
+#      需要: dash session cookie + X-CSRF-Token header (从 cookie panel_csrf_token 读)
+#   4. 状态区分: renewed / skip_not_expiring (>120 天 DigitalPlat 政策禁止) / renew_failed
+#
+# 历史: 旧版用 Playwright headless Chromium 点击 "申请免费续费" 按钮,
+#       2026-08 失效 (页面 UI 改版, 按钮文字变了). 改用 Panel API 直调更稳.
 import argparse
 import json
 import os
+import re
 import sys
 import time
 import urllib.error
-import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-
 API_BASE = "https://domain-api.digitalplat.org/api/v1"
-# 控制面板内部 API（续期按钮实际调用的接口；需要登录会话，浏览器点击时由会话 cookie 携带）
-PANEL_API_BASE = "https://dash.domain.digitalplat.org/_panel_api/api"
 DATE_FORMAT = "%Y-%m-%d"
-DEFAULT_RENEW_BEFORE_DAYS = 120
+DEFAULT_RENEW_BEFORE_DAYS = 120  # DigitalPlat 政策: >120 天不允许免费续期
 
-# 浏览器风格请求头，避免被 Cloudflare 当成 bot 触发 Challenge Page（仅用于查询类 API）
 BROWSER_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
@@ -57,15 +61,9 @@ class DigitalPlatClient:
             "Referer": "https://dash.domain.digitalplat.org/",
         }
 
-    def _request(
-        self,
-        path: str,
-        method: str = "GET",
-        payload: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
+    def _request(self, path: str, method: str = "GET", payload: dict[str, Any] | None = None) -> dict[str, Any]:
         body = None if payload is None else json.dumps(payload).encode("utf-8")
         last_exc: Exception | None = None
-        # Cloudflare 挑战是间歇性的，遇到 403/429 退避重试通常即可通过
         for attempt in range(4):
             request = urllib.request.Request(
                 f"{self.api_base}{path}",
@@ -111,9 +109,10 @@ class DigitalPlatClient:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="DigitalPlat free-domain renewal helper.")
+    parser = argparse.ArgumentParser(description="DigitalPlat free-domain renewal helper (Camoufox + Panel API).")
     parser.add_argument("--state", default="state/domains-state.json", help="Path to state JSON file.")
     parser.add_argument("--dry-run", action="store_true", help="Evaluate without renewing or writing state.")
+    parser.add_argument("--force", action="store_true", help="Try renew even if >120 days remaining (DigitalPlat may 400).")
     return parser.parse_args()
 
 
@@ -200,104 +199,283 @@ def update_state_for_record(
     state: dict[str, Any],
     name: str,
     action: str,
+    reason: str = "",
+    new_expiry: str = "",
 ) -> None:
     domains = state.setdefault("domains", {})
     item = domains.setdefault(name, {})
     item["last_action"] = action
+    if reason:
+        item["last_action_reason"] = reason
+    elif "last_action_reason" in item:
+        del item["last_action_reason"]
+    if new_expiry:
+        item["expiry_date"] = new_expiry
+        try:
+            days = (parse_datetime(new_expiry).date() - datetime.now(timezone.utc).date()).days
+            item["days_remaining"] = days
+        except Exception:
+            pass
     item["checked_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-def renew_via_browser(domains: list[str], api_token: str) -> tuple[list[str], list[str]]:
-    """用 Playwright（系统 Chrome）登录控制面板，逐个域名点击「续费 → 申请免费续费」按钮。"""
-    from playwright.sync_api import sync_playwright
+# ============================================================
+# Camoufox + Panel API 续期
+# ============================================================
 
-    user = os.getenv("DP_GH_USER")
-    pwd = os.getenv("DP_GH_PASS")
-    if not (user and pwd):
-        raise RuntimeError("浏览器点击续期需要 DP_GH_USER / DP_GH_PASS 两个 secret")
+def make_fetch_js(method: str, url: str, payload: dict | None = None, extra_headers: dict | None = None) -> str:
+    """生成在浏览器上下文执行的 fetch JS 代码"""
+    if payload is None:
+        body_clause = "body: undefined,"
+        ct_clause = ""
+    else:
+        payload_json = json.dumps(payload)
+        body_clause = f"body: JSON.stringify({payload_json}),"
+        ct_clause = "'Content-Type': 'application/json',"
+    extra = ""
+    if extra_headers:
+        for k, v in extra_headers.items():
+            # 转义单引号
+            v_escaped = str(v).replace("'", "\\'")
+            extra += f"'{k}': '{v_escaped}',"
+    return f"""
+    async () => {{
+        try {{
+            const r = await fetch('{url}', {{
+                method: '{method}',
+                credentials: 'include',
+                headers: {{ 'Accept': 'application/json, text/plain, */*', {ct_clause} {extra} }},
+                {body_clause}
+            }});
+            const text = await r.text();
+            return {{ status: r.status, body: text.substring(0, 2000), ct: r.headers.get('content-type') || '' }};
+        }} catch (e) {{
+            return {{ error: String(e) }};
+        }}
+    }}
+    """
 
-    renewed: list[str] = []
-    failed: list[str] = []
-    with sync_playwright() as p:
-        # 使用系统 Chrome（比 Playwright 自带 chromium 更不易被 Cloudflare 识别）
-        browser = p.chromium.launch(
-            channel="chrome",
-            headless=False,
-            args=[
-                "--no-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-blink-features=AutomationControlled",
-            ],
-        )
-        ctx = browser.new_context(
-            user_agent=BROWSER_UA,
-            viewport={"width": 1280, "height": 800},
-        )
-        page = ctx.new_page()
-        page.set_default_timeout(60000)
-        print("[BROWSER] 打开控制面板…", flush=True)
-        page.goto("https://dash.domain.digitalplat.org/domains", wait_until="domcontentloaded", timeout=60000)
 
-        # 点击 GitHub 登录按钮（CF 挑战解除后按钮才会出现，故给较长等待）
-        gh_clicked = False
-        for sel in [
-            "text=使用 GitHub 登录",
-            "text=Continue with GitHub",
-            "text=GitHub",
-            "a:has-text('GitHub')",
-            "button:has-text('GitHub')",
-        ]:
+def get_csrf_js() -> str:
+    """从 cookie panel_csrf_token 读 CSRF token，若无则请求 /_panel_api/api/security/csrf"""
+    return """
+    async () => {
+        const cookieMatch = document.cookie.match(/panel_csrf_token=([^;]+)/);
+        if (cookieMatch) return { csrf: decodeURIComponent(cookieMatch[1]), source: 'cookie' };
+        try {
+            const r = await fetch('/_panel_api/api/security/csrf', { credentials: 'include', cache: 'no-store' });
+            const data = await r.json().catch(() => null);
+            if (data && typeof data.csrf_token === 'string') {
+                return { csrf: data.csrf_token, source: 'endpoint' };
+            }
+            return { error: 'csrf endpoint returned: ' + JSON.stringify(data) };
+        } catch (e) {
+            return { error: String(e) };
+        }
+    }
+    """
+
+
+def wait_cf_challenge(page, timeout_seconds=90):
+    """等 CF 挑战过去"""
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        title = page.title()
+        if "just a moment" not in title.lower() and "請稍候" not in title and "请稍候" not in title:
+            return True
+        time.sleep(2)
+    return False
+
+
+def login_via_github(page, user: str, pwd: str) -> bool:
+    """走 GitHub OAuth 登录 dash"""
+    print("[LOGIN] 点击 'Sign in with GitHub'...", flush=True)
+    try:
+        page.click("a:has-text('Sign in with GitHub')", timeout=15000)
+    except Exception:
+        try:
+            page.click('a[href*="/auth/login/github"]', timeout=10000)
+        except Exception as e:
+            print(f"[LOGIN] 找不到 GitHub 登录按钮: {e}", flush=True)
+            return False
+
+    # 等 GitHub 登录页加载
+    print("[LOGIN] 等待 GitHub 登录页...", flush=True)
+    found_gh = False
+    for _ in range(20):
+        time.sleep(2)
+        url = page.url
+        title = page.title()
+        if "github.com/login" in url or "Sign in to GitHub" in title:
+            found_gh = True
+            break
+        if "github.com/sessions/two-factor" in url:
+            print("[LOGIN] 需要 2FA！无法自动处理。", flush=True)
+            return False
+        if "dash.domain.digitalplat.org" in url and "/auth/login" not in url and "/auth/callback" not in url:
+            print("[LOGIN] 已登录（GitHub 之前有 session）", flush=True)
+            return True
+    if not found_gh:
+        print("[LOGIN] 没跳到 GitHub 登录页", flush=True)
+        return False
+
+    # 填用户名密码
+    print("[LOGIN] 填入 GitHub 凭据...", flush=True)
+    try:
+        page.fill("#login_field", user, timeout=10000)
+        page.fill("#password", pwd, timeout=10000)
+        page.click('input[type="submit"]', timeout=10000)
+    except Exception as e:
+        print(f"[LOGIN] 填表失败: {e}", flush=True)
+        return False
+
+    # 等跳回 dash
+    print("[LOGIN] 等待跳回 dash...", flush=True)
+    for _ in range(30):
+        time.sleep(2)
+        url = page.url
+        if "github.com/sessions/two-factor" in url:
+            print("[LOGIN] 需要 2FA！无法自动处理。", flush=True)
+            return False
+        if "github.com/login/oauth/authorize" in url:
             try:
-                page.click(sel, timeout=30000)
-                gh_clicked = True
-                break
-            except Exception:
-                continue
-
-        if gh_clicked:
-            print("[BROWSER] GitHub OAuth 登录页，填入凭据…", flush=True)
-            page.wait_for_url("**github.com**", timeout=60000)
-            page.fill("#login_field", user)
-            page.fill("#password", pwd)
-            page.click('input[type="submit"]')
-            # 可能出现授权确认页
-            try:
-                page.click("text=Authorize", timeout=20000)
+                page.click("button:has-text('Authorize'), input[value='Authorize']", timeout=5000)
+                print("[LOGIN] 点击 Authorize", flush=True)
             except Exception:
                 pass
+        if "dash.domain.digitalplat.org" in url and "/auth/login" not in url and "/auth/callback" not in url:
+            print("[LOGIN] 登录成功！", flush=True)
+            return True
+    print("[LOGIN] 登录超时", flush=True)
+    return False
 
-        # 等待回到控制面板（拿到登录会话）
-        page.wait_for_url("**dash.domain.digitalplat.org**", timeout=60000)
-        print("[BROWSER] 登录成功，开始逐域名点击续费…", flush=True)
 
+def renew_one_domain(page, domain: str, force: bool = False) -> tuple[str, str]:
+    """续期单个域名，返回 (action, reason)"""
+    print(f"\n[RENEW] {domain}", flush=True)
+
+    # 1. 拿 CSRF token
+    res = page.evaluate(get_csrf_js())
+    csrf = res.get("csrf")
+    if not csrf:
+        msg = f"获取 CSRF 失败: {res}"
+        print(f"  ❌ {msg}", flush=True)
+        return "renew_failed", msg, ""
+    print(f"  CSRF: {csrf[:20]}... (来源: {res.get('source')})", flush=True)
+
+    # 2. 调 Panel API renew
+    js = make_fetch_js(
+        "POST",
+        f"/_panel_api/api/domains/{domain}/renew",
+        {"renewal_type": "free", "years": 1},
+        {"X-CSRF-Token": csrf},
+    )
+    res = page.evaluate(js)
+    status = res.get("status")
+    body = res.get("body") or res.get("error", "")
+
+    if status == 200:
+        try:
+            data = json.loads(body) if isinstance(body, str) else body
+            if data.get("ok") or data.get("success"):
+                domain_data = data.get("domain") or {}
+                new_expiry = domain_data.get("expiry_date") or domain_data.get("expires_at") or ""
+                print(f"  ✅ 续期成功！new_expiry={new_expiry}", flush=True)
+                return "renewed", f"local camoufox + panel API renew, +1 year", new_expiry
+            else:
+                msg = f"API 200 but no success flag: {body[:200]}"
+                print(f"  ⚠️ {msg}", flush=True)
+                return "renew_failed", msg, ""
+        except Exception as e:
+            msg = f"解析 200 响应失败: {e}, body={body[:200]}"
+            print(f"  ⚠️ {msg}", flush=True)
+            return "renew_failed", msg, ""
+    elif status == 400:
+        # 通常是 >120 天不允许续期
+        lower = body.lower()
+        if "120 days" in lower or "more than" in lower or "cannot renew" in lower:
+            msg = f">120 days remaining, DigitalPlat policy forbids renewal"
+            print(f"  ℹ️ {msg}", flush=True)
+            return "skip_not_expiring", msg, ""
+        else:
+            msg = f"HTTP 400: {body[:200]}"
+            print(f"  ⚠️ {msg}", flush=True)
+            return "renew_failed", msg, ""
+    else:
+        msg = f"HTTP {status}: {body[:200]}"
+        print(f"  ❌ {msg}", flush=True)
+        return "renew_failed", msg, ""
+
+
+def renew_via_panel_api(
+    domains: list[str],
+    gh_user: str,
+    gh_pass: str,
+    force: bool = False,
+) -> dict[str, tuple[str, str, str]]:
+    """
+    用 Camoufox + Panel API 续期。
+    返回 {domain: (action, reason, new_expiry)}
+    """
+    from camoufox.sync_api import Camoufox
+
+    results: dict[str, tuple[str, str, str]] = {}
+
+    with Camoufox(headless=True, geoip=True, i_know_what_im_doing=True) as browser:
+        ctx = browser.new_context()
+        page = ctx.new_page()
+        page.set_default_timeout(45000)
+
+        # Step 1: 打开 dash 登录页（过 CF 挑战）
+        print("[BROWSER] 打开 dash 登录页...", flush=True)
+        for attempt in range(3):
+            try:
+                page.goto(
+                    "https://dash.domain.digitalplat.org/auth/login",
+                    wait_until="domcontentloaded",
+                    timeout=60000,
+                )
+                if wait_cf_challenge(page, timeout_seconds=90):
+                    break
+            except Exception as e:
+                print(f"[BROWSER] goto 失败 (attempt {attempt+1}): {e}", flush=True)
+                time.sleep(5)
+        print(f"[BROWSER] 当前 URL: {page.url}, Title: {page.title()}", flush=True)
+
+        # Step 2: GitHub OAuth 登录
+        if not login_via_github(page, gh_user, gh_pass):
+            raise RuntimeError("GitHub OAuth 登录失败")
+
+        # Step 3: 验证登录态
+        print("\n[BROWSER] 验证登录态...", flush=True)
+        js = make_fetch_js("GET", "/_panel_api/api/auth/me")
+        res = page.evaluate(js)
+        print(f"  GET /_panel_api/api/auth/me -> {res.get('status')}: {res.get('body', '')[:200]}", flush=True)
+        if res.get("status") != 200:
+            raise RuntimeError(f"登录态验证失败: {res}")
+
+        # Step 4: 逐个续期
+        print(f"\n[BROWSER] 开始续期 {len(domains)} 个域名...", flush=True)
         for d in domains:
             try:
-                page.goto(f"https://dash.domain.digitalplat.org/domains/{d}", wait_until="domcontentloaded", timeout=60000)
-                # 点击「续费」区域（部分情况需要展开）
-                for sel in ["text=续费", "button:has-text('续费')", "text=Renew", "#renew"]:
-                    try:
-                        page.click(sel, timeout=10000)
-                        break
-                    except Exception:
-                        continue
-                time.sleep(1)
-                # 点击「申请免费续费」
-                page.click("text=申请免费续费", timeout=20000)
-                time.sleep(2)
-                # 部分情况会有确认弹窗
-                for confirm in ["text=确认", "text=确定", "text=Confirm", "button:has-text('确认')"]:
-                    try:
-                        page.click(confirm, timeout=5000)
-                        break
-                    except Exception:
-                        continue
-                renewed.append(d)
-                print(f"[RENEWED] {d}", flush=True)
-            except Exception as exc:
-                print(f"[WARN] {d}: 浏览器点击续费失败: {exc}", flush=True)
-                failed.append(d)
-        browser.close()
-    return renewed, failed
+                action, reason, new_expiry = renew_one_domain(page, d, force=force)
+                results[d] = (action, reason, new_expiry)
+            except Exception as e:
+                print(f"  ❌ {d}: 异常: {e}", flush=True)
+                results[d] = ("renew_failed", f"exception: {e}", "")
+            time.sleep(2)
+
+        # 保存 cookies 到 state 目录（供调试）
+        try:
+            cookies = ctx.cookies()
+            cookies_path = Path("state/dp-dash-cookies.json")
+            cookies_path.parent.mkdir(parents=True, exist_ok=True)
+            cookies_path.write_text(json.dumps(cookies, indent=2), encoding="utf-8")
+            print(f"\n[BROWSER] Cookies 已保存到 {cookies_path}", flush=True)
+        except Exception as e:
+            print(f"[BROWSER] 保存 cookies 失败: {e}", flush=True)
+
+    return results
 
 
 def main() -> int:
@@ -315,18 +493,16 @@ def main() -> int:
 
     domain_map = {normalize_domain(raw).name: raw for raw in raw_domains}
     state = load_state(state_path)
-    state_changed = False
-    renewed_count = 0
-    errors: list[str] = []
 
     print(f"UTC now: {datetime.now(timezone.utc).isoformat(timespec='seconds')}")
     print(f"目标域名数: {len(managed_names)}")
 
+    # 列出每个域名状态
     for domain in managed_names:
         raw = domain_map.get(domain)
         try:
             record = normalize_domain(raw) if raw else None
-        except Exception as exc:
+        except Exception:
             record = None
         if record is not None:
             print(
@@ -340,41 +516,47 @@ def main() -> int:
             print(f"[DRY-RUN] Would renew {domain}.")
             continue
 
-    # 续期方式：浏览器点击（提供了 DP_GH_USER / DP_GH_PASS 时）
-    use_browser = bool(os.getenv("DP_GH_USER") and os.getenv("DP_GH_PASS"))
-    if use_browser:
-        try:
-            renewed, failed = renew_via_browser(managed_names, token)
-            renewed_count = len(renewed)
-            for d in renewed:
-                state_changed = True
-                update_state_for_record(state, d, "renewed")
-            for d in failed:
-                errors.append(f"{d}: 浏览器点击续费失败")
-                update_state_for_record(state, d, "renew_failed")
-        except Exception as exc:
-            print(f"[ERROR] 浏览器续期流程失败: {exc}", file=sys.stderr)
-            errors.append(f"browser-renew: {exc}")
-    else:
-        print("[INFO] 未提供 DP_GH_USER/DP_GH_PASS，跳过浏览器点击续期（仅查询）。", file=sys.stderr)
+    if args.dry_run:
+        return 0
 
-    if state_changed and not args.dry_run:
-        save_state(state_path, state)
-        print(f"[WRITE] Updated {state_path}")
-
-    if errors:
-        for error in errors:
-            print(f"[ERROR] {error}", file=sys.stderr)
-        # 续期失败不阻断整个流程：查询已成功即视为运行成功
-        if renewed_count > 0 or use_browser:
-            print(f"[DONE] 已尝试续期；成功 {renewed_count} 个，失败 {len(errors)} 个。")
-            return 0
+    # 续期方式：Camoufox + Panel API（需要 DP_GH_USER / DP_GH_PASS）
+    gh_user = os.getenv("DP_GH_USER")
+    gh_pass = os.getenv("DP_GH_PASS")
+    if not (gh_user and gh_pass):
+        print("[ERROR] 未提供 DP_GH_USER/DP_GH_PASS，无法走 Panel API 续期", file=sys.stderr)
         return 1
 
-    if renewed_count == 0:
-        print("[DONE] No domains were renewed in this run.")
-    else:
-        print(f"[DONE] Renewed {renewed_count} domain(s).")
+    try:
+        results = renew_via_panel_api(managed_names, gh_user, gh_pass, force=args.force)
+    except Exception as exc:
+        print(f"[ERROR] Panel API 续期流程失败: {exc}", file=sys.stderr)
+        return 1
+
+    # 更新 state
+    renewed_count = 0
+    skipped_count = 0
+    failed_count = 0
+    for domain, (action, reason, new_expiry) in results.items():
+        if action == "renewed":
+            renewed_count += 1
+        elif action == "skip_not_expiring":
+            skipped_count += 1
+        else:
+            failed_count += 1
+        update_state_for_record(state, domain, action, reason, new_expiry)
+
+    save_state(state_path, state)
+    print(f"\n[WRITE] Updated {state_path}")
+    print(f"\n========== 汇总 ==========")
+    print(f"  ✅ renewed:          {renewed_count}")
+    print(f"  ℹ️ skip_not_expiring: {skipped_count}")
+    print(f"  ❌ renew_failed:      {failed_count}")
+    print(f"  total: {len(results)}")
+
+    # 续期失败不阻断整个流程：查询已成功即视为运行成功
+    # 只有"应该续期但全部失败"才返回 1
+    if renewed_count == 0 and skipped_count == 0 and failed_count > 0:
+        return 1
     return 0
 
 
