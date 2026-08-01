@@ -1,0 +1,40 @@
+name: DigitalPlat Domain Auto Renew
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 每月 1 号 UTC 00:00 自动续期
+    - cron: "0 0 1 * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: domain-renew
+  cancel-in-progress: false
+
+jobs:
+  renew:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout domain branch
+        uses: actions/checkout@v4
+        with:
+          ref: domain
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Playwright
+        run: |
+          npm init -y
+          npm install playwright
+          npx playwright install chromium --with-deps
+
+      - name: Run domain renew
+        env:
+          DP_GH_USER: ${{ secrets.DP_GH_USER }}
+          DP_GH_PASS: ${{ secrets.DP_GH_PASS }}
+        run: node renew_domains.js
