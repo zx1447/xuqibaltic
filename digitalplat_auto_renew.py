@@ -54,12 +54,22 @@ class DigitalPlatClient:
             headers=self.headers,
             method=method,
         )
-        try:
-            with urllib.request.urlopen(request, timeout=30) as response:
-                text = response.read().decode("utf-8")
-        except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"DigitalPlat HTTP {exc.code}: {detail}") from exc
+        # CF managed challenge 可能间歇性拦截, 重试 5 次
+        for attempt in range(5):
+            try:
+                with urllib.request.urlopen(request, timeout=30) as response:
+                    text = response.read().decode("utf-8")
+                break
+            except urllib.error.HTTPError as exc:
+                detail = exc.read().decode("utf-8", errors="replace")
+                if exc.code == 403 and 'challenge' in detail.lower() and attempt < 4:
+                    import time as _time
+                    print(f"CF challenge (attempt {attempt+1}/5), retrying in 10s...", flush=True)
+                    _time.sleep(10)
+                    continue
+                raise RuntimeError(f"DigitalPlat HTTP {exc.code}: {detail[:200]}") from exc
+        else:
+            raise RuntimeError("DigitalPlat: max retries exceeded")
         except urllib.error.URLError as exc:
             raise RuntimeError(f"DigitalPlat network error: {exc}") from exc
 
