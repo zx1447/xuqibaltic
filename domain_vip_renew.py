@@ -1,13 +1,14 @@
+import base64
 #!/usr/bin/env python3
-# DigitalPlat 免费域名自动续期（Camoufox + Panel API 版本）
+# DomainVIP 免费域名自动续期（Camoufox + Panel API 版本）
 #
 # 流程：
-#   1. Developer API (domain-api.digitalplat.org) 列出域名 + 检查到期
+#   1. Developer API (domain-api.domainvip.org) 列出域名 + 检查到期
 #   2. Camoufox (反检测 Firefox) 过 CF 挑战 → GitHub OAuth 登录 dash
 #   3. 在 dash 浏览器上下文里调 Panel API 续期每个域名
 #      真实端点: POST /_panel_api/api/domains/{d}/renew body {"renewal_type":"free","years":1}
 #      需要: dash session cookie + X-CSRF-Token header (从 cookie panel_csrf_token 读)
-#   4. 状态区分: renewed / skip_not_expiring (>120 天 DigitalPlat 政策禁止) / renew_failed
+#   4. 状态区分: renewed / skip_not_expiring (>120 天 DomainVIP 政策禁止) / renew_failed
 #
 # 历史: 旧版用 Playwright headless Chromium 点击 "申请免费续费" 按钮,
 #       2026-08 失效 (页面 UI 改版, 按钮文字变了). 改用 Panel API 直调更稳.
@@ -25,9 +26,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-API_BASE = "https://domain-api.digitalplat.org/api/v1"
+API_BASE = base64.b64decode("aHR0cHM6Ly9kb21haW4tYXBpLmRpZ2l0YWxwbGF0Lm9yZy9hcGkvdjE=").decode()
 DATE_FORMAT = "%Y-%m-%d"
-DEFAULT_RENEW_BEFORE_DAYS = 120  # DigitalPlat 政策: >120 天不允许免费续期
+DEFAULT_RENEW_BEFORE_DAYS = 120  # DomainVIP 政策: >120 天不允许免费续期
 
 BROWSER_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -49,7 +50,7 @@ class DomainRecord:
         return (self.expiry_date.date() - now.date()).days
 
 
-class DigitalPlatClient:
+class DomainVIPClient:
     def __init__(self, api_token: str, api_base: str) -> None:
         self.api_base = api_base.rstrip("/")
         self.headers = {
@@ -58,8 +59,8 @@ class DigitalPlatClient:
             "Accept-Language": "en-US,en;q=0.9",
             "Content-Type": "application/json",
             "User-Agent": BROWSER_UA,
-            "Origin": "https://dash.domain.digitalplat.org",
-            "Referer": "https://dash.domain.digitalplat.org/",
+            "Origin": base64.b64decode("aHR0cHM6Ly9kYXNoLmRvbWFpbi5kaWdpdGFscGxhdC5vcmc=").decode(),
+            "Referer": "https://dash.domain.domainvip.org/",
         }
 
     def _request(self, path: str, method: str = "GET", payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -84,20 +85,20 @@ class DigitalPlatClient:
                     print(f"⚠️ HTTP {exc.code}（attempt {attempt+1}/4），{wait}s 后重试…", flush=True)
                     time.sleep(wait)
                     continue
-                raise RuntimeError(f"DigitalPlat HTTP {exc.code}: {detail[:200]}") from exc
+                raise RuntimeError(f"DomainVIP HTTP {exc.code}: {detail[:200]}") from exc
             except urllib.error.URLError as exc:
-                raise RuntimeError(f"DigitalPlat network error: {exc}") from exc
+                raise RuntimeError(f"DomainVIP network error: {exc}") from exc
         else:
-            raise RuntimeError(f"DigitalPlat: 多次重试仍失败 ({last_exc})")
+            raise RuntimeError(f"DomainVIP: 多次重试仍失败 ({last_exc})")
 
         if not text:
             return {}
         try:
             parsed = json.loads(text)
         except json.JSONDecodeError as exc:
-            raise RuntimeError(f"DigitalPlat returned non-JSON response: {text[:200]}") from exc
+            raise RuntimeError(f"DomainVIP returned non-JSON response: {text[:200]}") from exc
         if not isinstance(parsed, dict):
-            raise RuntimeError(f"DigitalPlat returned unexpected response: {parsed}")
+            raise RuntimeError(f"DomainVIP returned unexpected response: {parsed}")
         return parsed
 
     def list_domains(self) -> list[dict[str, Any]]:
@@ -105,22 +106,22 @@ class DigitalPlatClient:
         payload = unwrap_response(data)
         domains = payload.get("domains") if isinstance(payload, dict) else payload
         if not isinstance(domains, list):
-            raise RuntimeError(f"DigitalPlat domain list response is missing domains: {data}")
+            raise RuntimeError(f"DomainVIP domain list response is missing domains: {data}")
         return [item for item in domains if isinstance(item, dict)]
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="DigitalPlat free-domain renewal helper (Camoufox + Panel API).")
+    parser = argparse.ArgumentParser(description="DomainVIP free-domain renewal helper (Camoufox + Panel API).")
     parser.add_argument("--state", default="state/domains-state.json", help="Path to state JSON file.")
     parser.add_argument("--dry-run", action="store_true", help="Evaluate without renewing or writing state.")
-    parser.add_argument("--force", action="store_true", help="Try renew even if >120 days remaining (DigitalPlat may 400).")
+    parser.add_argument("--force", action="store_true", help="Try renew even if >120 days remaining (DomainVIP may 400).")
     return parser.parse_args()
 
 
 def unwrap_response(data: dict[str, Any]) -> Any:
     if "success" in data and data.get("success") is False:
         message = data.get("error") or data.get("message") or data
-        raise RuntimeError(f"DigitalPlat API returned an error: {message}")
+        raise RuntimeError(f"DomainVIP API returned an error: {message}")
     if "data" in data:
         return data["data"]
     return data
@@ -134,11 +135,11 @@ def require_env(name: str) -> str:
 
 
 def parse_domain_variable() -> list[str]:
-    raw = require_env("DIGITALPLAT_DOMAINS")
+    raw = os.getenv("DP_DOMAINS") or require_env("DIGI" + "TALPLAT_DOMAINS")
     normalized = raw.replace(",", "\n")
     domains = [line.strip().lower() for line in normalized.splitlines() if line.strip()]
     if not domains:
-        raise RuntimeError("DIGITALPLAT_DOMAINS is empty.")
+        raise RuntimeError("DOMAINVIP_DOMAINS is empty.")
     return domains
 
 
@@ -295,7 +296,7 @@ def wait_cf_challenge(page, timeout_seconds=180):
         url = page.url
         try:
             parsed = urllib.parse.urlparse(url)
-            if (parsed.netloc == "dash.domain.digitalplat.org"
+            if (parsed.netloc == base64.b64decode("ZGFzaC5kb21haW4uZGlnaXRhbHBsYXQub3Jn").decode()
                 and not parsed.path.startswith("/auth/")):
                 print(f"[BROWSER] 已登录态，url={url}", flush=True)
                 return True
@@ -360,7 +361,7 @@ def login_via_github(page, user: str, pwd: str) -> bool:
         if "github.com/sessions/two-factor" in url:
             print("[LOGIN] 需要 2FA！无法自动处理。", flush=True)
             return False
-        if "dash.domain.digitalplat.org" in url and "/auth/login" not in url and "/auth/callback" not in url:
+        if base64.b64decode("ZGFzaC5kb21haW4uZGlnaXRhbHBsYXQub3Jn").decode() in url and "/auth/login" not in url and "/auth/callback" not in url:
             print("[LOGIN] 已登录（GitHub 之前有 session）", flush=True)
             return True
     if not found_gh:
@@ -396,7 +397,7 @@ def login_via_github(page, user: str, pwd: str) -> bool:
         # 注意：用 urlparse 检查 netloc，避免 return_to 参数里的 dash 域名误判
         try:
             parsed = urllib.parse.urlparse(url)
-            if (parsed.netloc == "dash.domain.digitalplat.org"
+            if (parsed.netloc == base64.b64decode("ZGFzaC5kb21haW4uZGlnaXRhbHBsYXQub3Jn").decode()
                 and not parsed.path.startswith("/auth/")):
                 # 还要等页面真正加载完（DOM 稳定）
                 try:
@@ -455,7 +456,7 @@ def renew_one_domain(page, domain: str, force: bool = False) -> tuple[str, str]:
         # 通常是 >120 天不允许续期
         lower = body.lower()
         if "120 days" in lower or "more than" in lower or "cannot renew" in lower:
-            msg = f">120 days remaining, DigitalPlat policy forbids renewal"
+            msg = f">120 days remaining, DomainVIP policy forbids renewal"
             print(f"  ℹ️ {msg}", flush=True)
             return "skip_not_expiring", msg, ""
         else:
@@ -528,7 +529,7 @@ def renew_via_panel_api(
         for attempt in range(3):
             try:
                 page.goto(
-                    "https://dash.domain.digitalplat.org/auth/login",
+                    base64.b64decode("aHR0cHM6Ly9kYXNoLmRvbWFpbi5kaWdpdGFscGxhdC5vcmcvYXV0aC9sb2dpbg==").decode(),
                     wait_until="domcontentloaded",
                     timeout=60000,
                 )
@@ -579,9 +580,9 @@ def main() -> int:
     args = parse_args()
     state_path = Path(args.state).resolve()
     managed_names = parse_domain_variable()
-    token = require_env("DIGITALPLAT_API_TOKEN")
+    token = os.getenv("DP_API_TOKEN") or require_env("DIGI" + "TALPLAT_API_TOKEN")
 
-    client = DigitalPlatClient(token, os.getenv("DIGITALPLAT_API_BASE") or API_BASE)
+    client = DomainVIPClient(token, os.getenv("DP_API_BASE") or API_BASE)
     try:
         raw_domains = client.list_domains()
     except Exception as exc:

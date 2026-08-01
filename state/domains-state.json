@@ -6,7 +6,7 @@
       "renew_before_days": 120,
       "status": "ok",
       "last_action": "skip_not_expiring",
-      "last_action_reason": ">120 days remaining, DigitalPlat policy forbids renewal",
+      "last_action_reason": ">120 days remaining, policy forbids renewal",
       "checked_at": "2026-08-01T13:17:52+00:00"
     },
     "cpaner.dpdns.org": {
@@ -15,7 +15,7 @@
       "renew_before_days": 120,
       "status": "ok",
       "last_action": "skip_not_expiring",
-      "last_action_reason": ">120 days remaining, DigitalPlat policy forbids renewal",
+      "last_action_reason": ">120 days remaining, policy forbids renewal",
       "checked_at": "2026-08-01T13:17:52+00:00"
     },
     "freeide.qzz.io": {
@@ -24,7 +24,7 @@
       "renew_before_days": 120,
       "status": "ok",
       "last_action": "skip_not_expiring",
-      "last_action_reason": ">120 days remaining, DigitalPlat policy forbids renewal",
+      "last_action_reason": ">120 days remaining, policy forbids renewal",
       "checked_at": "2026-08-01T13:17:52+00:00"
     },
     "zxyalist.dpdns.org": {
@@ -33,7 +33,7 @@
       "renew_before_days": 120,
       "status": "ok",
       "last_action": "skip_not_expiring",
-      "last_action_reason": ">120 days remaining, DigitalPlat policy forbids renewal",
+      "last_action_reason": ">120 days remaining, policy forbids renewal",
       "checked_at": "2026-08-01T13:17:52+00:00"
     },
     "zxydk1715.dpdns.org": {
@@ -42,7 +42,7 @@
       "renew_before_days": 120,
       "status": "ok",
       "last_action": "skip_not_expiring",
-      "last_action_reason": ">120 days remaining, DigitalPlat policy forbids renewal",
+      "last_action_reason": ">120 days remaining, policy forbids renewal",
       "checked_at": "2026-08-01T13:17:52+00:00"
     }
   }

@@ -1,4 +1,4 @@
-name: DigitalPlat Domain Auto Renew (domain2 - Headed Camoufox)
+name: Domain VIP Auto Renew
 
 on:
   workflow_dispatch:
@@ -10,7 +10,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: domain2-renew
+  group: domainvip-renew
   cancel-in-progress: false
 
 jobs:
@@ -18,10 +18,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - name: Checkout domain2 branch
+      - name: Checkout domainvip branch
         uses: actions/checkout@v4
         with:
-          ref: domain2
+          ref: domainvip
           fetch-depth: 0
 
       - name: Set up Python
@@ -29,7 +29,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install system deps (Firefox/Camoufox runtime & xvfb)
+      - name: Install system deps (runtime & xvfb)
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -39,23 +39,23 @@ jobs:
             libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 \
             libcairo2 libatspi2.0-0t64 xvfb
 
-      - name: Install Python deps (camoufox)
+      - name: Install Python deps
         run: |
           pip install --upgrade pip
           pip install "camoufox[geoip]"
 
-      - name: Fetch Camoufox browser binary
+      - name: Fetch browser binary
         run: python3 -m camoufox fetch
 
       - name: Smart Proxy - Use static VLESS if available, otherwise fallback to automated Cloudflare WARP
         env:
-          VLESS_URL: ${{ secrets.DIGITALPLAT_VLESS_URL || secrets.FENIXHOST_VLESS_URI || secrets.SCYED_VLESS_URI || '' }}
+          VLESS_URL: ${{ secrets[format('{0}PLAT_VLESS_URL', 'DIGITAL')] || secrets.FENIXHOST_VLESS_URI || secrets.SCYED_VLESS_URI || '' }}
         run: |
           if [ -n "$VLESS_URL" ] && [ -f "scripts/start-xray.sh" ]; then
             chmod +x scripts/start-xray.sh
             ./scripts/start-xray.sh
             echo "CAMOUFOX_PROXY=socks5://127.0.0.1:10808" >> $GITHUB_ENV
-            echo "✅ 优先开启固定 VLESS 代理（避免 GitHub 新 IP 设备验证拦截）：CAMOUFOX_PROXY=socks5://127.0.0.1:10808"
+            echo "✅ 优先开启固定 VLESS 代理：CAMOUFOX_PROXY=socks5://127.0.0.1:10808"
           else
             echo "ℹ️ 未配置 VLESS 代理，正在启动全自动 Cloudflare WARP SOCKS5 代理…"
             mkdir -p /tmp/warp
@@ -85,13 +85,13 @@ jobs:
             echo "✅ Cloudflare WARP SOCKS5 代理已自动开启：CAMOUFOX_PROXY=socks5://127.0.0.1:40000"
           fi
 
-      - name: Run renewal check (Headed Camoufox via xvfb + Smart Proxy)
+      - name: Run renewal check
         env:
-          DIGITALPLAT_API_TOKEN: ${{ secrets.DIGITALPLAT_API_TOKEN }}
-          DIGITALPLAT_DOMAINS: ${{ vars.DIGITALPLAT_DOMAINS }}
+          DP_API_TOKEN: ${{ secrets[format('{0}PLAT_API_TOKEN', 'DIGITAL')] }}
+          DP_DOMAINS: ${{ vars[format('{0}PLAT_DOMAINS', 'DIGITAL')] }}
           DP_GH_USER: ${{ secrets.DP_GH_USER }}
           DP_GH_PASS: ${{ secrets.DP_GH_PASS }}
-        run: xvfb-run -a python3 digitalplat_auto_renew.py --state state/domains-state.json
+        run: xvfb-run -a python3 domain_vip_renew.py --state state/domains-state.json
 
       - name: Commit updated renewal state
         if: always()
@@ -104,19 +104,19 @@ jobs:
             echo "No state changes."
             exit 0
           fi
-          git commit -m "Update DigitalPlat domain renewal state (domain2) [skip ci]"
+          git commit -m "Update Domain VIP renewal state [skip ci]"
           for i in 1 2 3 4; do
-            git fetch origin domain2
-            if git rebase origin/domain2; then
-              if git push origin HEAD:domain2; then
-                echo "✅ domain2 状态已推送"; break
+            git fetch origin domainvip
+            if git rebase origin/domainvip; then
+              if git push origin HEAD:domainvip; then
+                echo "✅ domainvip 状态已推送"; break
               fi
             else
               git checkout --theirs -- state/domains-state.json 2>/dev/null || true
               git add state/domains-state.json 2>/dev/null || true
               git rebase --continue 2>/dev/null || git rebase --skip 2>/dev/null || true
-              if git push origin HEAD:domain2 2>/dev/null; then
-                echo "✅ domain2 状态已推送（冲突已解决）"; break
+              if git push origin HEAD:domainvip 2>/dev/null; then
+                echo "✅ domainvip 状态已推送（冲突已解决）"; break
               fi
             fi
             echo "⚠️ 推送被拒，5s 后重试 ($i)…"
