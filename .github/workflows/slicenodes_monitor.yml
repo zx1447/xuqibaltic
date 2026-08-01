@@ -1,0 +1,106 @@
+name: SliceNodes All-Server Hourly Monitor
+
+on:
+  workflow_dispatch:
+    inputs:
+      runtime_minutes:
+        description: "本轮持续运行分钟数（默认 350，直到接近 GitHub 上限）"
+        required: false
+        default: "350"
+      interval_minutes:
+        description: "全部服务器检测间隔分钟数（默认 60）"
+        required: false
+        default: "60"
+      continuous:
+        description: "本轮结束后自动启动下一轮（true/false）"
+        required: false
+        default: "true"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: slicenodes-all-server-hourly-monitor
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    # Workflow 不会检查一次后结束；它会保持运行约 350 分钟。
+    timeout-minutes: 360
+    steps:
+      - name: Checkout clean SliceNodes branch
+        uses: actions/checkout@v4
+        with:
+          ref: slicenodes
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependency
+        run: pip install --upgrade requests
+
+      - name: Monitor every owned server until workflow limit
+        env:
+          SLICENODES_API_KEY: ${{ secrets.SLICENODES_API_KEY }}
+          SLICENODES_PANEL_URL: "https://panel.slicenodes.in"
+          RUNTIME_MINUTES: ${{ github.event.inputs.runtime_minutes || '350' }}
+          INTERVAL_MINUTES: ${{ github.event.inputs.interval_minutes || '60' }}
+          SLICENODES_VERIFY_INTERVAL_SECONDS: "15"
+          SLICENODES_VERIFY_MAX_POLLS: "20"
+        run: |
+          export SLICENODES_RUNTIME_SECONDS=$((RUNTIME_MINUTES * 60))
+          export SLICENODES_MONITOR_INTERVAL_SECONDS=$((INTERVAL_MINUTES * 60))
+          python slicenodes_monitor.py
+
+      - name: Save SliceNodes state
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add slicenodes_state.json || true
+          if git diff --cached --quiet; then
+            echo "No SliceNodes state change."
+            exit 0
+          fi
+          git commit -m "Update SliceNodes monitor state [skip ci]"
+          git push origin HEAD:slicenodes
+
+      - name: Start next full-length SliceNodes workflow
+        if: ${{ success() && github.event.inputs.continuous != 'false' }}
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+        run: |
+          python - <<'PY'
+          import os
+          import requests
+
+          token = os.environ.get("GH_PAT", "").strip()
+          if not token:
+              raise SystemExit("GH_PAT is missing")
+          repository = os.environ["GITHUB_REPOSITORY"]
+          response = requests.post(
+              f"https://api.github.com/repos/{repository}/actions/workflows/slicenodes_monitor.yml/dispatches",
+              headers={
+                  "Authorization": f"Bearer {token}",
+                  "Accept": "application/vnd.github+json",
+                  "X-GitHub-Api-Version": "2022-11-28",
+              },
+              json={
+                  "ref": "main",
+                  "inputs": {
+                      "runtime_minutes": "350",
+                      "interval_minutes": "60",
+                      "continuous": "true",
+                  },
+              },
+              timeout=30,
+          )
+          print(f"dispatch HTTP {response.status_code}")
+          if response.status_code != 204:
+              raise SystemExit(response.text[:500])
+          print("✅ 下一轮 SliceNodes 完整 Workflow 已排队")
+          PY
