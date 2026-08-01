@@ -1,9 +1,9 @@
 {
-  "last_status": "ERROR: RuntimeError: OAuth entry HTTP 523",
+  "last_status": "waiting_for_cooldown",
   "daily_url": "https://bot-server.site/dashboard/daily",
   "cooldown_policy": "respect_server_24_hour_cooldown",
-  "encrypted_cookies": "gAAAAABqbUHi0t2GXz0KzYWkQTaoChaADusDGebyX6CcbKG_gOrzyl5Xp7-8XkXeVdq0n3CIFTvD8DgmKmWJqM2Vhn-m9ZCS0BkoBFNbTBJ3PGUv3x4iIhCfepDPHOzji6g7rXe32xHQYxhoWrCdTK5lRRxVmOrW4vGmXMRraCDoxMA7tvxr06wDRUO8MB-TzIbl4yLYBp75gzLlCdJ6Xb__xLvV-1HjE3re9DFDR1xwqPzaOzRnwi1irGZe6eoDQqPoJRsHNvJ0EBeIltIqn3DiHrQZHxPvgw==",
-  "session_saved_time": "2026-08-01 08:46:26",
+  "encrypted_cookies": "gAAAAABqbYXk5heNAjcrCeesu0JmodxXBAITc3Ip5Azt56pM7K_7lD42YW3gZKIZ2XiNm6QsS4O9Vdi1SBpAEFvQwqBq8W5CwclqfL6_O06ky2Y5XbnsrSGp4mkEo65m5PLTyGkVxmdOSn0d509k4OiogD494zJuIJ9_MZYfJXlToIQ4C0riRdZn4MiKi-OwPqJAjkTkdQfLRsx6AKo6_MODkFvCaM_VFBzCDzebdLqKyinKMCDa5Y5UqL-jLG66cv4GHDN3SUDo4NwNu0Kj60ENrRGIDUmLvQ==",
+  "session_saved_time": "2026-08-01 13:36:36",
   "last_login_source": "encrypted_session",
   "account_username": "ajkvip",
   "account_discord_id": "1438491113576202260",
@@ -11,7 +11,7 @@
   "observed_times_claimed": 6,
   "next_claim_timestamp": 1785641868,
   "next_claim_time": "2026-08-02 11:37:48",
-  "last_check_time": "2026-08-01 12:41:27",
+  "last_check_time": "2026-08-01 13:36:36",
   "before": {
     "balance": 80,
     "times_claimed": 6,
