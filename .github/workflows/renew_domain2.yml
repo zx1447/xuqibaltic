@@ -1,0 +1,99 @@
+name: DigitalPlat Domain Auto Renew (domain2 - Headed Camoufox)
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 每 2 个月 1 号 UTC 00:00
+    - cron: "0 0 1 */2 *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: domain2-renew
+  cancel-in-progress: false
+
+jobs:
+  renew:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout domain2 branch
+        uses: actions/checkout@v4
+        with:
+          ref: domain2
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install system deps (Firefox/Camoufox runtime & xvfb)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgtk-3-0 libdbus-glib-1-2 libxt6 libasound2t64 \
+            libnss3 libnspr4 libatk1.0-0t64 libatk-bridge2.0-0t64 \
+            libcups2t64 libdrm2 libxcb1 libxkbcommon0 libxcomposite1 \
+            libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 \
+            libcairo2 libatspi2.0-0t64 xvfb
+
+      - name: Install Python deps (camoufox)
+        run: |
+          pip install --upgrade pip
+          pip install "camoufox[geoip]"
+
+      - name: Fetch Camoufox browser binary
+        run: python3 -m camoufox fetch
+
+      - name: Optional - Start VLESS proxy if configured
+        env:
+          VLESS_URL: ${{ secrets.DIGITALPLAT_VLESS_URL || secrets.FENIXHOST_VLESS_URI || secrets.SCYED_VLESS_URI || '' }}
+        run: |
+          if [ -n "$VLESS_URL" ] && [ -f "scripts/start-xray.sh" ]; then
+            chmod +x scripts/start-xray.sh
+            ./scripts/start-xray.sh
+            echo "CAMOUFOX_PROXY=socks5://127.0.0.1:10808" >> $GITHUB_ENV
+            echo "✅ VLESS 代理已开启：CAMOUFOX_PROXY=socks5://127.0.0.1:10808"
+          else
+            echo "ℹ️ 未配置 VLESS 代理或无需开启，使用默认网络"
+          fi
+
+      - name: Run renewal check (Headed Camoufox via xvfb)
+        env:
+          DIGITALPLAT_API_TOKEN: ${{ secrets.DIGITALPLAT_API_TOKEN }}
+          DIGITALPLAT_DOMAINS: ${{ vars.DIGITALPLAT_DOMAINS }}
+          DP_GH_USER: ${{ secrets.DP_GH_USER }}
+          DP_GH_PASS: ${{ secrets.DP_GH_PASS }}
+        run: xvfb-run -a python3 digitalplat_auto_renew.py --state state/domains-state.json
+
+      - name: Commit updated renewal state
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          rm -f state/dp-dash-cookies.json
+          git add state/domains-state.json || true
+          if git diff --cached --quiet; then
+            echo "No state changes."
+            exit 0
+          fi
+          git commit -m "Update DigitalPlat domain renewal state (domain2) [skip ci]"
+          for i in 1 2 3 4; do
+            git fetch origin domain2
+            if git rebase origin/domain2; then
+              if git push origin HEAD:domain2; then
+                echo "✅ domain2 状态已推送"; break
+              fi
+            else
+              git checkout --theirs -- state/domains-state.json 2>/dev/null || true
+              git add state/domains-state.json 2>/dev/null || true
+              git rebase --continue 2>/dev/null || git rebase --skip 2>/dev/null || true
+              if git push origin HEAD:domain2 2>/dev/null; then
+                echo "✅ domain2 状态已推送（冲突已解决）"; break
+              fi
+            fi
+            echo "⚠️ 推送被拒，5s 后重试 ($i)…"
+            sleep 5
+          done

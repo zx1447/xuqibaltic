@@ -483,7 +483,7 @@ def renew_via_panel_api(
     results: dict[str, tuple[str, str, str]] = {}
 
     # Camoufox 配置：
-    #   - headless=True: 无头模式
+    #   - headless=False: 有头模式 (配合 xvfb-run -a 避免 CF 检测)
     #   - humanize=True: 模拟人类鼠标移动（帮助过 CF 行为检测）
     #   - i_know_what_im_doing=True: 跳过 Camoufox 的安全确认
     #
@@ -499,7 +499,7 @@ def renew_via_panel_api(
     #   - VLESS 代理出口德国 GoeTel 住宅 IP (proxy=false, hosting=false) 可过 CF
     proxy_url = os.getenv("CAMOUFOX_PROXY", "")
     extra_kwargs = {
-        "headless": True,
+        "headless": False,
         "humanize": True,
         "i_know_what_im_doing": True,
     }
