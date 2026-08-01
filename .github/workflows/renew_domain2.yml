@@ -47,35 +47,45 @@ jobs:
       - name: Fetch Camoufox browser binary
         run: python3 -m camoufox fetch
 
-      - name: Setup automated Cloudflare WARP SOCKS5 proxy (wgcf + wireproxy)
+      - name: Smart Proxy - Use static VLESS if available, otherwise fallback to automated Cloudflare WARP
+        env:
+          VLESS_URL: ${{ secrets.DIGITALPLAT_VLESS_URL || secrets.FENIXHOST_VLESS_URI || secrets.SCYED_VLESS_URI || '' }}
         run: |
-          mkdir -p /tmp/warp
-          curl -fsSL https://github.com/ViRb3/wgcf/releases/download/v2.2.32/wgcf_2.2.32_linux_amd64 -o /tmp/warp/wgcf
-          chmod +x /tmp/warp/wgcf
-          curl -fsSL https://github.com/windtf/wireproxy/releases/download/v1.1.3/wireproxy_linux_amd64.tar.gz -o /tmp/warp/wireproxy.tar.gz
-          tar -xzf /tmp/warp/wireproxy.tar.gz -C /tmp/warp/
-          chmod +x /tmp/warp/wireproxy
-          cd /tmp/warp
-          ./wgcf register --accept-tos
-          ./wgcf generate
-          echo "" >> wgcf-profile.conf
-          echo "[Socks5]" >> wgcf-profile.conf
-          echo "BindAddress = 127.0.0.1:40000" >> wgcf-profile.conf
-          ./wireproxy -c wgcf-profile.conf > /tmp/warp/wireproxy.log 2>&1 &
-          W_PID=$!
-          echo "WARP_PID=$W_PID" >> $GITHUB_ENV
-          for i in $(seq 1 15); do
-            if curl -fsS --max-time 5 -x socks5h://127.0.0.1:40000 https://www.cloudflare.com/cdn-cgi/trace > /tmp/warp/trace; then
-              break
-            fi
-            sleep 1
-          done
-          echo "=== Cloudflare WARP Trace ==="
-          grep -E '^(ip|loc|warp)=' /tmp/warp/trace
-          echo "CAMOUFOX_PROXY=socks5://127.0.0.1:40000" >> $GITHUB_ENV
-          echo "✅ Cloudflare WARP SOCKS5 代理已自动开启：CAMOUFOX_PROXY=socks5://127.0.0.1:40000"
+          if [ -n "$VLESS_URL" ] && [ -f "scripts/start-xray.sh" ]; then
+            chmod +x scripts/start-xray.sh
+            ./scripts/start-xray.sh
+            echo "CAMOUFOX_PROXY=socks5://127.0.0.1:10808" >> $GITHUB_ENV
+            echo "✅ 优先开启固定 VLESS 代理（避免 GitHub 新 IP 设备验证拦截）：CAMOUFOX_PROXY=socks5://127.0.0.1:10808"
+          else
+            echo "ℹ️ 未配置 VLESS 代理，正在启动全自动 Cloudflare WARP SOCKS5 代理…"
+            mkdir -p /tmp/warp
+            curl -fsSL https://github.com/ViRb3/wgcf/releases/download/v2.2.32/wgcf_2.2.32_linux_amd64 -o /tmp/warp/wgcf
+            chmod +x /tmp/warp/wgcf
+            curl -fsSL https://github.com/windtf/wireproxy/releases/download/v1.1.3/wireproxy_linux_amd64.tar.gz -o /tmp/warp/wireproxy.tar.gz
+            tar -xzf /tmp/warp/wireproxy.tar.gz -C /tmp/warp/
+            chmod +x /tmp/warp/wireproxy
+            cd /tmp/warp
+            ./wgcf register --accept-tos
+            ./wgcf generate
+            echo "" >> wgcf-profile.conf
+            echo "[Socks5]" >> wgcf-profile.conf
+            echo "BindAddress = 127.0.0.1:40000" >> wgcf-profile.conf
+            ./wireproxy -c wgcf-profile.conf > /tmp/warp/wireproxy.log 2>&1 &
+            W_PID=$!
+            echo "WARP_PID=$W_PID" >> $GITHUB_ENV
+            for i in $(seq 1 15); do
+              if curl -fsS --max-time 5 -x socks5h://127.0.0.1:40000 https://www.cloudflare.com/cdn-cgi/trace > /tmp/warp/trace; then
+                break
+              fi
+              sleep 1
+            done
+            echo "=== Cloudflare WARP Trace ==="
+            grep -E '^(ip|loc|warp)=' /tmp/warp/trace
+            echo "CAMOUFOX_PROXY=socks5://127.0.0.1:40000" >> $GITHUB_ENV
+            echo "✅ Cloudflare WARP SOCKS5 代理已自动开启：CAMOUFOX_PROXY=socks5://127.0.0.1:40000"
+          fi
 
-      - name: Run renewal check (Headed Camoufox via xvfb + WARP SOCKS5)
+      - name: Run renewal check (Headed Camoufox via xvfb + Smart Proxy)
         env:
           DIGITALPLAT_API_TOKEN: ${{ secrets.DIGITALPLAT_API_TOKEN }}
           DIGITALPLAT_DOMAINS: ${{ vars.DIGITALPLAT_DOMAINS }}
