@@ -45,11 +45,21 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install Python deps (pysocks + playwright for Cloudflare)
-        run: pip install --upgrade pip pysocks playwright
+      - name: Install system deps (Chrome)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget gnupg xvfb
+          wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add - 2>/dev/null || true
+          echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
+          sudo apt-get update
+          sudo apt-get install -y google-chrome-stable || sudo apt-get install -y chromium-browser
+          google-chrome --version || chromium-browser --version
 
-      - name: Install Playwright Chromium
-        run: python -m playwright install --with-deps chromium
+      - name: Install Python deps (seleniumbase + pysocks)
+        run: pip install --upgrade pip seleniumbase cryptography pysocks
+
+      - name: Install chromedriver
+        run: python -m seleniumbase install chromedriver
 
       - name: Run renewal check
         env:
@@ -57,7 +67,8 @@ jobs:
           DIGITALPLAT_DOMAINS: ${{ vars.DIGITALPLAT_DOMAINS }}
           DIGITALPLAT_RENEW_BEFORE_DAYS: "120"
           PROXY_SERVER: "socks5://127.0.0.1:40001"
-        run: python digitalplat_auto_renew.py --state state/domains-state.json
+          HEADLESS: "false"
+        run: xvfb-run -a python digitalplat_auto_renew.py --state state/domains-state.json
 
       - name: Commit updated state
         if: always()
