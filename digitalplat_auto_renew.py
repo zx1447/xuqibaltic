@@ -17,9 +17,6 @@ API_BASE = "https://domain-api.digitalplat.org/api/v1"
 DATE_FORMAT = "%Y-%m-%d"
 DEFAULT_RENEW_BEFORE_DAYS = 120
 
-# 通过浏览器求解 Cloudflare 挑战后写入的 cookie（含 cf_clearance）
-CF_COOKIES: dict[str, str] = {}
-
 
 @dataclass
 class DomainRecord:
@@ -38,11 +35,18 @@ class DomainRecord:
 class DigitalPlatClient:
     def __init__(self, api_token: str, api_base: str) -> None:
         self.api_base = api_base.rstrip("/")
+        # 浏览器风格请求头，避免被 Cloudflare 当成 bot 触发 Challenge Page
         self.headers = {
             "Authorization": f"Bearer {api_token}",
-            "Accept": "application/json",
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "en-US,en;q=0.9",
             "Content-Type": "application/json",
-            "User-Agent": "digitalplat-auto-renew/1.0",
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
+            ),
+            "Origin": "https://dash.domain.digitalplat.org",
+            "Referer": "https://dash.domain.digitalplat.org/",
         }
 
     def _request(
@@ -51,41 +55,33 @@ class DigitalPlatClient:
         method: str = "GET",
         payload: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        global CF_COOKIES
         body = None if payload is None else json.dumps(payload).encode("utf-8")
-        # CF managed challenge 可能间歇性拦截；必要时用浏览器求解后重试，最多 5 次
-        for attempt in range(5):
+        last_exc: Exception | None = None
+        # Cloudflare 挑战是间歇性的，遇到 403/429 退避重试通常即可通过
+        for attempt in range(4):
             request = urllib.request.Request(
                 f"{self.api_base}{path}",
                 data=body,
                 headers=self.headers,
                 method=method,
             )
-            cookie_header = "; ".join(f"{k}={v}" for k, v in CF_COOKIES.items())
-            if cookie_header:
-                request.add_header("Cookie", cookie_header)
             try:
                 with urllib.request.urlopen(request, timeout=30) as response:
                     text = response.read().decode("utf-8")
                 break
             except urllib.error.HTTPError as exc:
                 detail = exc.read().decode("utf-8", errors="replace")
-                if exc.code == 403 and "challenge" in detail.lower():
-                    if not CF_COOKIES and attempt == 0:
-                        print("⚠️ 检测到 Cloudflare 挑战，尝试用浏览器求解…", flush=True)
-                        CF_COOKIES = solve_cloudflare(self.api_base)
-                        if CF_COOKIES:
-                            print("✅ 已获取 Cloudflare cookie，重试请求", flush=True)
-                            continue
-                    if attempt < 4:
-                        print(f"CF challenge (attempt {attempt+1}/5), retrying in 10s...", flush=True)
-                        time.sleep(10)
-                        continue
+                last_exc = exc
+                if exc.code in (403, 429) and attempt < 3:
+                    wait = 15 * (attempt + 1)
+                    print(f"⚠️ HTTP {exc.code}（attempt {attempt+1}/4），{wait}s 后重试…", flush=True)
+                    time.sleep(wait)
+                    continue
                 raise RuntimeError(f"DigitalPlat HTTP {exc.code}: {detail[:200]}") from exc
             except urllib.error.URLError as exc:
                 raise RuntimeError(f"DigitalPlat network error: {exc}") from exc
         else:
-            raise RuntimeError("DigitalPlat: max retries exceeded")
+            raise RuntimeError(f"DigitalPlat: 多次重试仍失败 ({last_exc})")
 
         if not text:
             return {}
@@ -150,74 +146,6 @@ def require_env(name: str) -> str:
     if not value:
         raise RuntimeError(f"Missing required environment variable: {name}")
     return value
-
-
-def install_proxy() -> None:
-    """可选通过 SOCKS5/HTTP 代理（如 Cloudflare WARP）发送请求，规避 Cloudflare 挑战。"""
-    proxy = os.getenv("DIGITALPLAT_PROXY") or os.getenv("PROXY_SERVER")
-    if not proxy:
-        return
-    try:
-        from urllib.request import build_opener, install_opener
-        if proxy.startswith("socks5"):
-            import socks
-            from sockshandler import SocksiPyHandler
-            rest = proxy.split("://", 1)[1]
-            host, port = rest.rsplit(":", 1)
-            opener = build_opener(SocksiPyHandler(socks.SOCKS5, host, int(port)))
-            install_opener(opener)
-            print(f"[PROXY] 通过 SOCKS5 代理 {host}:{port} 发送请求")
-        else:
-            opener = build_opener(urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
-            install_opener(opener)
-            print(f"[PROXY] 通过代理 {proxy} 发送请求")
-    except Exception as exc:
-        print(f"[PROXY] 代理初始化失败，回退直连: {exc}", file=sys.stderr)
-
-
-def solve_cloudflare(api_base: str) -> dict[str, str]:
-    """用 SeleniumBase 隐蔽浏览器（UC）通过 Cloudflare 挑战，返回含 cf_clearance 的 cookies。"""
-    try:
-        from seleniumbase import Driver
-    except ImportError:
-        print("[CF] 未安装 seleniumbase，无法用浏览器求解挑战", file=sys.stderr)
-        return {}
-    proxy = os.getenv("PROXY_SERVER") or os.getenv("DIGITALPLAT_PROXY")
-    headless = os.getenv("HEADLESS", "false").lower() != "false"
-    cookies: dict[str, str] = {}
-    kwargs: dict[str, Any] = {
-        "uc": True,
-        "headless": headless,
-        "agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 Chrome/150.0.0.0 Safari/537.36"
-        ),
-    }
-    if proxy:
-        kwargs["proxy"] = proxy
-    try:
-        driver = Driver(**kwargs)
-        try:
-            driver.get(api_base)
-            for _ in range(45):
-                try:
-                    driver.wait_for_ready_state_complete(timeout=2000)
-                except Exception:
-                    pass
-                for c in driver.get_cookies():
-                    cookies[c["name"]] = c["value"]
-                if "cf_clearance" in cookies:
-                    break
-                time.sleep(2)
-        finally:
-            driver.quit()
-    except Exception as exc:
-        print(f"[CF] 浏览器求解失败: {exc}", file=sys.stderr)
-    if "cf_clearance" in cookies:
-        print(f"[CF] 已获得 cf_clearance（共 {len(cookies)} 个 cookie）")
-    else:
-        print("[CF] 未能获取 cf_clearance，挑战可能为人机验证", file=sys.stderr)
-    return cookies
 
 
 def optional_int_env(name: str, default: int) -> int:
@@ -357,7 +285,6 @@ def remove_stale_domains(state: dict[str, Any], active_domains: set[str]) -> boo
 
 def main() -> int:
     args = parse_args()
-    install_proxy()
     state_path = Path(args.state).resolve()
     managed_names = parse_domain_variable()
     renew_before_days = optional_int_env("DIGITALPLAT_RENEW_BEFORE_DAYS", DEFAULT_RENEW_BEFORE_DAYS)

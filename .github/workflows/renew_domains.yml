@@ -3,6 +3,7 @@ name: DigitalPlat Domain Auto Renew
 on:
   workflow_dispatch:
   schedule:
+    # 每 2 个月 1 号 UTC 00:00
     - cron: "0 0 1 */2 *"
 
 permissions:
@@ -15,69 +16,37 @@ concurrency:
 jobs:
   renew:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
-      - name: Checkout
+      - name: Checkout domain branch
         uses: actions/checkout@v4
         with:
           ref: domain
           fetch-depth: 0
-
-      - name: Install and Start Cloudflare WARP SOCKS5 Proxy
-        run: |
-          curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | sudo gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
-          echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ noble main" | sudo tee /etc/apt/sources.list.d/cloudflare-client.list
-          sudo apt-get update
-          sudo apt-get install -y cloudflare-warp
-          sudo systemctl restart warp-svc
-          sleep 3
-          warp-cli --accept-tos registration delete || true
-          warp-cli --accept-tos registration new
-          warp-cli --accept-tos mode proxy
-          warp-cli --accept-tos proxy port 40001
-          warp-cli --accept-tos connect
-          sleep 4
-          echo "=== WARP SOCKS5 PROXY CHECK ==="
-          curl -fsS -x socks5h://127.0.0.1:40001 https://www.cloudflare.com/cdn-cgi/trace | grep -E '^(ip|loc|warp)=' || true
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: Install system deps (Chrome)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y wget gnupg xvfb
-          wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add - 2>/dev/null || true
-          echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
-          sudo apt-get update
-          sudo apt-get install -y google-chrome-stable || sudo apt-get install -y chromium-browser
-          google-chrome --version || chromium-browser --version
-
-      - name: Install Python deps (seleniumbase + pysocks)
-        run: pip install --upgrade pip seleniumbase cryptography pysocks
-
-      - name: Install chromedriver
-        run: python -m seleniumbase install chromedriver
-
       - name: Run renewal check
         env:
           DIGITALPLAT_API_TOKEN: ${{ secrets.DIGITALPLAT_API_TOKEN }}
           DIGITALPLAT_DOMAINS: ${{ vars.DIGITALPLAT_DOMAINS }}
           DIGITALPLAT_RENEW_BEFORE_DAYS: "120"
-          PROXY_SERVER: "socks5://127.0.0.1:40001"
-          HEADLESS: "false"
-        run: xvfb-run -a python digitalplat_auto_renew.py --state state/domains-state.json
+        run: python digitalplat_auto_renew.py --state state/domains-state.json
 
-      - name: Commit updated state
+      - name: Commit updated renewal state
         if: always()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add state/domains-state.json || true
-          if git diff --cached --quiet; then exit 0; fi
-          git commit -m "Update domain state [skip ci]"
+          if git diff --cached --quiet; then
+            echo "No state changes."
+            exit 0
+          fi
+          git commit -m "Update DigitalPlat domain renewal state [skip ci]"
           # 并发推送保护：变基到最新 domain 后重试，冲突时采用本次运行生成的状态
           for i in 1 2 3 4; do
             git fetch origin domain
