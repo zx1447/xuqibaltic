@@ -3,8 +3,8 @@ name: Domain VIP Auto Renew
 on:
   workflow_dispatch:
   schedule:
-    # 每 2 个月 1 号 UTC 00:00
-    - cron: "0 0 1 */2 *"
+    # 自动定时：每 2 个月运行一次（每隔一个月的 1 号 UTC 02:30 / 北京时间 10:30）
+    - cron: "30 2 1 */2 *"
 
 permissions:
   contents: write
