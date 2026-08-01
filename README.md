@@ -6,7 +6,8 @@
 
 - 使用 Discord OAuth 登录 `https://bot-server.site`
 - 登录 Cookie 使用 Fernet 加密后保存
-- 每小时读取一次 `/dashboard/daily`
+- 每 24 小时运行一次（北京时间 13:00），读取 `/dashboard/daily`
+- 对 Cloudflare 临时错误（523/502/503 等）与网络抖动自动重试
 - 严格解析网站页面返回的下一次可签到时间
 - 冷却未结束时不发送签到请求
 - 冷却结束后只正常签到一次

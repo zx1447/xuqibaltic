@@ -28,6 +28,36 @@ UA = (
     "AppleWebKit/537.36 Chrome/150.0.0.0 Safari/537.36"
 )
 
+# 对 Cloudflare 临时错误（523/502/503/524 等）与网络抖动做有限次重试
+MAX_ATTEMPTS = 4
+TRANSIENT_STATUS = {429, 502, 503, 504, 523, 524}
+
+
+def request_with_retry(method, url, **kwargs):
+    """对网络异常与 Cloudflare 临时错误进行有限次重试（带退避）。"""
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        try:
+            resp = method(url, **kwargs)
+        except requests.RequestException as exc:
+            if attempt < MAX_ATTEMPTS:
+                wait = 5 * attempt
+                log(f"⚠️ 请求 {url} 第 {attempt}/{MAX_ATTEMPTS} 次网络失败：{exc}；{wait}s 后重试…")
+                time.sleep(wait)
+                continue
+            raise
+        if resp.status_code in TRANSIENT_STATUS:
+            if attempt < MAX_ATTEMPTS:
+                wait = 5 * attempt
+                log(
+                    f"⚠️ 请求 {url} 返回临时错误 HTTP {resp.status_code}"
+                    f"（第 {attempt}/{MAX_ATTEMPTS} 次）；{wait}s 后重试…"
+                )
+                time.sleep(wait)
+                continue
+            return resp
+        return resp
+    return resp
+
 
 def log(message: str) -> None:
     print(message, flush=True)
@@ -101,7 +131,7 @@ def make_session(cookies: list[dict] | None = None) -> requests.Session:
 
 
 def get_daily_page(session: requests.Session) -> requests.Response:
-    return session.get(DAILY_URL, allow_redirects=False, timeout=30)
+    return request_with_retry(session.get, DAILY_URL, allow_redirects=False, timeout=30)
 
 
 def session_valid(session: requests.Session) -> tuple[bool, str]:
@@ -122,7 +152,7 @@ def session_valid(session: requests.Session) -> tuple[bool, str]:
 def discord_login(session: requests.Session) -> str:
     if not DISCORD_TOKEN:
         raise RuntimeError("missing BOTSERVER_DISCORD_TOKEN")
-    entry = session.get(OAUTH_ENTRY, allow_redirects=False, timeout=30)
+    entry = request_with_retry(session.get, OAUTH_ENTRY, allow_redirects=False, timeout=30)
     authorize_url = entry.headers.get("Location", "")
     if entry.status_code not in (301, 302, 303, 307, 308) or not authorize_url:
         raise RuntimeError(f"OAuth entry HTTP {entry.status_code}")
@@ -136,7 +166,8 @@ def discord_login(session: requests.Session) -> str:
         "Origin": "https://discord.com",
         "Referer": authorize_url,
     }
-    response = requests.post(
+    response = request_with_retry(
+        requests.post,
         api_url,
         headers=headers,
         json={
@@ -161,7 +192,7 @@ def discord_login(session: requests.Session) -> str:
             f"Discord OAuth HTTP {response.status_code}: {str(data)[:250]}"
         )
 
-    callback_response = session.get(callback, allow_redirects=True, timeout=60)
+    callback_response = request_with_retry(session.get, callback, allow_redirects=True, timeout=60)
     if callback_response.status_code != 200 or "/dashboard" not in callback_response.url:
         raise RuntimeError(
             f"BOT SERVER OAuth callback failed: HTTP {callback_response.status_code} "
@@ -208,7 +239,8 @@ def parse_daily(html_text: str) -> dict:
 
 
 def claim_once(session: requests.Session, before: dict) -> tuple[dict, bool]:
-    response = session.post(
+    response = request_with_retry(
+        session.post,
         DAILY_URL,
         headers={"Origin": BASE_URL, "Referer": DAILY_URL},
         allow_redirects=True,

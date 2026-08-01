@@ -3,8 +3,8 @@ name: BOT SERVER Daily Reward
 on:
   workflow_dispatch:
   schedule:
-    # 每小时检查一次；脚本严格读取并遵守网站返回的 24 小时冷却。
-    - cron: "23 * * * *"
+    # 每 24 小时运行一次（北京时间 13:00）；脚本严格读取并遵守网站返回的 24 小时冷却。
+    - cron: "0 5 * * *"
 
 permissions:
   contents: write
