@@ -45,8 +45,11 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install Python deps (pysocks for SOCKS5 proxy)
-        run: pip install --upgrade pip pysocks
+      - name: Install Python deps (pysocks + playwright for Cloudflare)
+        run: pip install --upgrade pip pysocks playwright
+
+      - name: Install Playwright Chromium
+        run: python -m playwright install --with-deps chromium
 
       - name: Run renewal check
         env:
