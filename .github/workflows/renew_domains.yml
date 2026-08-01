@@ -1,27 +1,27 @@
-name: FenixHost Auto Renew
+name: DigitalPlat Domain Auto Renew
 
 on:
   workflow_dispatch:
   schedule:
-    # 每 3 天跑一次 (UTC 00:00)
-    - cron: "0 0 */3 * *"
+    # 每月 1 号 UTC 00:00 自动续期
+    - cron: "0 0 1 * *"
 
 permissions:
   contents: read
 
 concurrency:
-  group: fenix-renew
+  group: domain-renew
   cancel-in-progress: false
 
 jobs:
   renew:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
-      - name: Checkout
+      - name: Checkout domain branch
         uses: actions/checkout@v4
         with:
-          ref: main
+          ref: domain
 
       - uses: actions/setup-node@v4
         with:
@@ -33,8 +33,8 @@ jobs:
           npm install playwright
           npx playwright install chromium --with-deps
 
-      - name: Run FenixHost renew
+      - name: Run domain renew
         env:
-          DISCORD_TOKEN: ${{ secrets.FENIX_DISCORD_TOKEN }}
-          FENIX_SERVICE: ${{ secrets.FENIX_SERVICE }}
-        run: node fenix_renew.js
+          DP_GH_USER: ${{ secrets.DP_GH_USER }}
+          DP_GH_PASS: ${{ secrets.DP_GH_PASS }}
+        run: node renew_domains.js
