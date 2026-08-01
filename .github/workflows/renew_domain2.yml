@@ -47,18 +47,9 @@ jobs:
       - name: Fetch Camoufox browser binary
         run: python3 -m camoufox fetch
 
-      - name: Optional - Start VLESS proxy if configured
-        env:
-          VLESS_URL: ${{ secrets.DIGITALPLAT_VLESS_URL || secrets.FENIXHOST_VLESS_URI || secrets.SCYED_VLESS_URI || '' }}
+      - name: Direct Connection Test (No Proxy)
         run: |
-          if [ -n "$VLESS_URL" ] && [ -f "scripts/start-xray.sh" ]; then
-            chmod +x scripts/start-xray.sh
-            ./scripts/start-xray.sh
-            echo "CAMOUFOX_PROXY=socks5://127.0.0.1:10808" >> $GITHUB_ENV
-            echo "✅ VLESS 代理已开启：CAMOUFOX_PROXY=socks5://127.0.0.1:10808"
-          else
-            echo "ℹ️ 未配置 VLESS 代理或无需开启，使用默认网络"
-          fi
+          echo "ℹ️ 本次运行不使用任何代理（纯直连），测试有头模式在 Azure 机房 IP 下是否能直接通过 Cloudflare"
 
       - name: Run renewal check (Headed Camoufox via xvfb)
         env:
