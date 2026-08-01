@@ -3,7 +3,7 @@ name: DigitalPlat Domain Auto Renew
 on:
   workflow_dispatch:
   schedule:
-    - cron: "17 4 * * 1"
+    - cron: "0 0 1 */2 *"
 
 permissions:
   contents: write
@@ -15,25 +15,32 @@ concurrency:
 jobs:
   renew:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           ref: domain
+          fetch-depth: 0
 
-      - uses: actions/setup-node@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          node-version: "20"
+          python-version: "3.12"
 
-      - name: Install Playwright
-        run: |
-          npm init -y
-          npm install playwright
-          npx playwright install firefox --with-deps
-
-      - name: Run domain renew
+      - name: Run renewal check
         env:
-          DP_GH_USER: ${{ secrets.DP_GH_USER }}
-          DP_GH_PASS: ${{ secrets.DP_GH_PASS }}
-        run: node renew_domains.js
+          DIGITALPLAT_API_TOKEN: ${{ secrets.DIGITALPLAT_API_TOKEN }}
+          DIGITALPLAT_DOMAINS: ${{ vars.DIGITALPLAT_DOMAINS }}
+          DIGITALPLAT_RENEW_BEFORE_DAYS: "120"
+        run: python digitalplat_auto_renew.py --state state/domains-state.json
+
+      - name: Commit updated state
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add state/domains-state.json || true
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "Update domain state [skip ci]"
+          git push origin HEAD:domain
