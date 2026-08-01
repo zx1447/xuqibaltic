@@ -18,6 +18,7 @@ import re
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -276,14 +277,43 @@ def get_csrf_js() -> str:
     """
 
 
-def wait_cf_challenge(page, timeout_seconds=90):
-    """等 CF 挑战过去"""
+def wait_cf_challenge(page, timeout_seconds=120):
+    """等 CF 挑战过去 + dash 登录页真正加载完（出现 GitHub 登录链接或邮箱密码表单）"""
     deadline = time.time() + timeout_seconds
+    cf_passed = False
     while time.time() < deadline:
         title = page.title()
-        if "just a moment" not in title.lower() and "請稍候" not in title and "请稍候" not in title:
-            return True
-        time.sleep(2)
+        # CF 挑战页 title 是 "Just a moment..." / "請稍候..." / "Loading https://..."
+        if not cf_passed:
+            if ("just a moment" in title.lower()
+                or "請稍候" in title
+                or "请稍候" in title
+                or title.startswith("Loading ")):
+                time.sleep(2)
+                continue
+            cf_passed = True
+            print(f"[BROWSER] CF 挑战已过，title={title!r}", flush=True)
+        # CF 过后还要等 dash 渲染出 GitHub 登录按钮
+        try:
+            gh_link = page.query_selector('a[href*="/auth/login/github"], a:has-text("Sign in with GitHub")')
+            if gh_link:
+                print("[BROWSER] dash 登录页已就绪（GitHub 链接已渲染）", flush=True)
+                return True
+        except Exception:
+            pass
+        # 或者已经登录态（直接跳转，但不在任何 /auth/ 中间路径）
+        # 注意：用 urlparse 检查 netloc，避免 return_to 参数里的 dash 域名误判
+        url = page.url
+        try:
+            parsed = urllib.parse.urlparse(url)
+            if (parsed.netloc == "dash.domain.digitalplat.org"
+                and not parsed.path.startswith("/auth/")):
+                print(f"[BROWSER] 已登录态，url={url}", flush=True)
+                return True
+        except Exception:
+            pass
+        time.sleep(1)
+    print(f"[BROWSER] wait_cf_challenge 超时，title={page.title()!r} url={page.url}", flush=True)
     return False
 
 
@@ -329,9 +359,10 @@ def login_via_github(page, user: str, pwd: str) -> bool:
         print(f"[LOGIN] 填表失败: {e}", flush=True)
         return False
 
-    # 等跳回 dash
+    # 等跳回 dash 的非 /auth/ 页面（避开 callback 中间页 /auth/kyc/github/callback）
     print("[LOGIN] 等待跳回 dash...", flush=True)
-    for _ in range(30):
+    deadline = time.time() + 90
+    while time.time() < deadline:
         time.sleep(2)
         url = page.url
         if "github.com/sessions/two-factor" in url:
@@ -343,10 +374,22 @@ def login_via_github(page, user: str, pwd: str) -> bool:
                 print("[LOGIN] 点击 Authorize", flush=True)
             except Exception:
                 pass
-        if "dash.domain.digitalplat.org" in url and "/auth/login" not in url and "/auth/callback" not in url:
-            print("[LOGIN] 登录成功！", flush=True)
-            return True
-    print("[LOGIN] 登录超时", flush=True)
+        # 必须在 dash 域 + 不在任何 /auth/ 路径（登录、callback、kyc 都算中间态）
+        # 注意：用 urlparse 检查 netloc，避免 return_to 参数里的 dash 域名误判
+        try:
+            parsed = urllib.parse.urlparse(url)
+            if (parsed.netloc == "dash.domain.digitalplat.org"
+                and not parsed.path.startswith("/auth/")):
+                # 还要等页面真正加载完（DOM 稳定）
+                try:
+                    page.wait_for_load_state("domcontentloaded", timeout=10000)
+                except Exception:
+                    pass
+                print(f"[LOGIN] 登录成功！url={url}", flush=True)
+                return True
+        except Exception:
+            pass
+    print(f"[LOGIN] 登录超时，最后 url={page.url}", flush=True)
     return False
 
 
