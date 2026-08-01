@@ -3,6 +3,7 @@ import argparse
 import json
 import os
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -15,6 +16,9 @@ from typing import Any
 API_BASE = "https://domain-api.digitalplat.org/api/v1"
 DATE_FORMAT = "%Y-%m-%d"
 DEFAULT_RENEW_BEFORE_DAYS = 120
+
+# 通过浏览器求解 Cloudflare 挑战后写入的 cookie（含 cf_clearance）
+CF_COOKIES: dict[str, str] = {}
 
 
 @dataclass
@@ -47,26 +51,36 @@ class DigitalPlatClient:
         method: str = "GET",
         payload: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        global CF_COOKIES
         body = None if payload is None else json.dumps(payload).encode("utf-8")
-        request = urllib.request.Request(
-            f"{self.api_base}{path}",
-            data=body,
-            headers=self.headers,
-            method=method,
-        )
-        # CF managed challenge 可能间歇性拦截, 重试 5 次
+        # CF managed challenge 可能间歇性拦截；必要时用浏览器求解后重试，最多 5 次
         for attempt in range(5):
+            request = urllib.request.Request(
+                f"{self.api_base}{path}",
+                data=body,
+                headers=self.headers,
+                method=method,
+            )
+            cookie_header = "; ".join(f"{k}={v}" for k, v in CF_COOKIES.items())
+            if cookie_header:
+                request.add_header("Cookie", cookie_header)
             try:
                 with urllib.request.urlopen(request, timeout=30) as response:
                     text = response.read().decode("utf-8")
                 break
             except urllib.error.HTTPError as exc:
                 detail = exc.read().decode("utf-8", errors="replace")
-                if exc.code == 403 and 'challenge' in detail.lower() and attempt < 4:
-                    import time as _time
-                    print(f"CF challenge (attempt {attempt+1}/5), retrying in 10s...", flush=True)
-                    _time.sleep(10)
-                    continue
+                if exc.code == 403 and "challenge" in detail.lower():
+                    if not CF_COOKIES and attempt == 0:
+                        print("⚠️ 检测到 Cloudflare 挑战，尝试用浏览器求解…", flush=True)
+                        CF_COOKIES = solve_cloudflare_playwright(self.api_base)
+                        if CF_COOKIES:
+                            print("✅ 已获取 Cloudflare cookie，重试请求", flush=True)
+                            continue
+                    if attempt < 4:
+                        print(f"CF challenge (attempt {attempt+1}/5), retrying in 10s...", flush=True)
+                        time.sleep(10)
+                        continue
                 raise RuntimeError(f"DigitalPlat HTTP {exc.code}: {detail[:200]}") from exc
             except urllib.error.URLError as exc:
                 raise RuntimeError(f"DigitalPlat network error: {exc}") from exc
@@ -159,6 +173,50 @@ def install_proxy() -> None:
             print(f"[PROXY] 通过代理 {proxy} 发送请求")
     except Exception as exc:
         print(f"[PROXY] 代理初始化失败，回退直连: {exc}", file=sys.stderr)
+
+
+def solve_cloudflare_playwright(api_base: str) -> dict[str, str]:
+    """用 Playwright 真实浏览器通过 Cloudflare 挑战，返回含 cf_clearance 的 cookies。"""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print("[CF] 未安装 playwright，无法用浏览器求解挑战", file=sys.stderr)
+        return {}
+    proxy = os.getenv("PROXY_SERVER") or os.getenv("DIGITALPLAT_PROXY")
+    cookies: dict[str, str] = {}
+    launch_kwargs: dict[str, Any] = {
+        "headless": True,
+        "args": ["--no-sandbox", "--disable-dev-shm-usage"],
+    }
+    if proxy:
+        launch_kwargs["proxy"] = {"server": proxy}
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(**launch_kwargs)
+            ctx = browser.new_context()
+            page = ctx.new_page()
+            try:
+                page.goto(api_base, wait_until="domcontentloaded", timeout=60000)
+            except Exception as exc:
+                print(f"[CF] 导航异常: {exc}", file=sys.stderr)
+            for _ in range(40):
+                try:
+                    page.wait_for_load_state("networkidle", timeout=2000)
+                except Exception:
+                    pass
+                for c in ctx.cookies():
+                    cookies[c["name"]] = c["value"]
+                if "cf_clearance" in cookies:
+                    break
+                time.sleep(2)
+            browser.close()
+    except Exception as exc:
+        print(f"[CF] 浏览器求解失败: {exc}", file=sys.stderr)
+    if "cf_clearance" in cookies:
+        print(f"[CF] 已获得 cf_clearance（共 {len(cookies)} 个 cookie）")
+    else:
+        print("[CF] 未能获取 cf_clearance，挑战可能为人机验证", file=sys.stderr)
+    return cookies
 
 
 def optional_int_env(name: str, default: int) -> int:
