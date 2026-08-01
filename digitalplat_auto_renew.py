@@ -14,6 +14,8 @@ from typing import Any
 
 
 API_BASE = "https://domain-api.digitalplat.org/api/v1"
+# 官方 Developer API 未提供 /renew；续期走控制面板内部 API（F12 实测 200 OK）
+RENEW_API_BASE = "https://dash.domain.digitalplat.org/_panel_api/api"
 DATE_FORMAT = "%Y-%m-%d"
 DEFAULT_RENEW_BEFORE_DAYS = 120
 
@@ -35,6 +37,7 @@ class DomainRecord:
 class DigitalPlatClient:
     def __init__(self, api_token: str, api_base: str) -> None:
         self.api_base = api_base.rstrip("/")
+        self.renew_base = (os.getenv("DIGITALPLAT_RENEW_API_BASE") or RENEW_API_BASE).rstrip("/")
         # 浏览器风格请求头，避免被 Cloudflare 当成 bot 触发 Challenge Page
         self.headers = {
             "Authorization": f"Bearer {api_token}",
@@ -54,13 +57,15 @@ class DigitalPlatClient:
         path: str,
         method: str = "GET",
         payload: dict[str, Any] | None = None,
+        base: str | None = None,
     ) -> dict[str, Any]:
+        base = base or self.api_base
         body = None if payload is None else json.dumps(payload).encode("utf-8")
         last_exc: Exception | None = None
         # Cloudflare 挑战是间歇性的，遇到 403/429 退避重试通常即可通过
         for attempt in range(4):
             request = urllib.request.Request(
-                f"{self.api_base}{path}",
+                f"{base}{path}",
                 data=body,
                 headers=self.headers,
                 method=method,
@@ -116,6 +121,7 @@ class DigitalPlatClient:
             f"/domains/{encoded}/renew",
             method="POST",
             payload={"renewal_type": renewal_type, "years": years},
+            base=self.renew_base,
         )
         payload = unwrap_response(data)
         record = payload.get("domain", payload) if isinstance(payload, dict) else None
@@ -349,7 +355,7 @@ def main() -> int:
             renewed_raw = client.renew_domain(record.name, renewal_type, renewal_years)
             renewed_record = normalize_domain(renewed_raw)
         except Exception as exc:
-            errors.append(f"{record.name}: renewal failed: {exc}")
+            print(f"[WARN] {record.name}: renewal failed: {exc}")
             state_changed = update_state_for_record(state, record, "renew_failed", renew_before_days) or state_changed
             continue
 
