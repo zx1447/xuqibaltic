@@ -43,4 +43,21 @@ jobs:
           git add state/domains-state.json || true
           if git diff --cached --quiet; then exit 0; fi
           git commit -m "Update domain state [skip ci]"
-          git push origin HEAD:domain
+          # 并发推送保护：变基到最新 domain 后重试，冲突时采用本次运行生成的状态
+          for i in 1 2 3 4; do
+            git fetch origin domain
+            if git rebase origin/domain; then
+              if git push origin HEAD:domain; then
+                echo "✅ domain 状态已推送"; break
+              fi
+            else
+              git checkout --theirs -- state/domains-state.json 2>/dev/null || true
+              git add state/domains-state.json 2>/dev/null || true
+              git rebase --continue 2>/dev/null || git rebase --skip 2>/dev/null || true
+              if git push origin HEAD:domain 2>/dev/null; then
+                echo "✅ domain 状态已推送（冲突已解决）"; break
+              fi
+            fi
+            echo "⚠️ 推送被拒，5s 后重试 ($i)…"
+            sleep 5
+          done

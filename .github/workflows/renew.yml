@@ -88,4 +88,21 @@ jobs:
             exit 0
           fi
           git commit -m "Update BalticHost session state [skip ci]"
-          git push origin HEAD:main
+          # 并发推送保护：变基到最新 main 后重试，冲突时采用本次运行生成的状态
+          for i in 1 2 3 4; do
+            git fetch origin main
+            if git rebase origin/main; then
+              if git push origin HEAD:main; then
+                echo "✅ BalticHost 状态已推送"; break
+              fi
+            else
+              git checkout --theirs -- baltichost_state.json 2>/dev/null || true
+              git add baltichost_state.json 2>/dev/null || true
+              git rebase --continue 2>/dev/null || git rebase --skip 2>/dev/null || true
+              if git push origin HEAD:main 2>/dev/null; then
+                echo "✅ BalticHost 状态已推送（冲突已解决）"; break
+              fi
+            fi
+            echo "⚠️ 推送被拒，5s 后重试 ($i)…"
+            sleep 5
+          done
