@@ -208,7 +208,7 @@ def update_state_for_record(
 
 
 def renew_via_browser(domains: list[str], api_token: str) -> tuple[list[str], list[str]]:
-    """用 Playwright 登录控制面板，逐个域名点击「续费 → 申请免费续费」按钮。"""
+    """用 Playwright（系统 Chrome）登录控制面板，逐个域名点击「续费 → 申请免费续费」按钮。"""
     from playwright.sync_api import sync_playwright
 
     user = os.getenv("DP_GH_USER")
@@ -219,32 +219,53 @@ def renew_via_browser(domains: list[str], api_token: str) -> tuple[list[str], li
     renewed: list[str] = []
     failed: list[str] = []
     with sync_playwright() as p:
+        # 使用系统 Chrome（比 Playwright 自带 chromium 更不易被 Cloudflare 识别）
         browser = p.chromium.launch(
+            channel="chrome",
             headless=False,
-            args=["--no-sandbox", "--disable-dev-shm-usage"],
+            args=[
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-blink-features=AutomationControlled",
+            ],
         )
-        ctx = browser.new_context(user_agent=BROWSER_UA)
+        ctx = browser.new_context(
+            user_agent=BROWSER_UA,
+            viewport={"width": 1280, "height": 800},
+        )
         page = ctx.new_page()
+        page.set_default_timeout(60000)
         print("[BROWSER] 打开控制面板…", flush=True)
         page.goto("https://dash.domain.digitalplat.org/domains", wait_until="domcontentloaded", timeout=60000)
 
-        # GitHub OAuth 登录
-        for sel in ["text=GitHub", "a:has-text('GitHub')", "text=使用 GitHub", "text=Continue with GitHub"]:
+        # 点击 GitHub 登录按钮（CF 挑战解除后按钮才会出现，故给较长等待）
+        gh_clicked = False
+        for sel in [
+            "text=使用 GitHub 登录",
+            "text=Continue with GitHub",
+            "text=GitHub",
+            "a:has-text('GitHub')",
+            "button:has-text('GitHub')",
+        ]:
             try:
-                page.click(sel, timeout=15000)
+                page.click(sel, timeout=30000)
+                gh_clicked = True
                 break
             except Exception:
                 continue
-        page.wait_for_url("**github.com**", timeout=30000)
-        print("[BROWSER] GitHub 登录页，填入凭据…", flush=True)
-        page.fill("#login_field", user)
-        page.fill("#password", pwd)
-        page.click('input[type="submit"]')
-        # 可能出现授权确认页
-        try:
-            page.click("text=Authorize", timeout=15000)
-        except Exception:
-            pass
+
+        if gh_clicked:
+            print("[BROWSER] GitHub OAuth 登录页，填入凭据…", flush=True)
+            page.wait_for_url("**github.com**", timeout=60000)
+            page.fill("#login_field", user)
+            page.fill("#password", pwd)
+            page.click('input[type="submit"]')
+            # 可能出现授权确认页
+            try:
+                page.click("text=Authorize", timeout=20000)
+            except Exception:
+                pass
+
         # 等待回到控制面板（拿到登录会话）
         page.wait_for_url("**dash.domain.digitalplat.org**", timeout=60000)
         print("[BROWSER] 登录成功，开始逐域名点击续费…", flush=True)
@@ -252,16 +273,16 @@ def renew_via_browser(domains: list[str], api_token: str) -> tuple[list[str], li
         for d in domains:
             try:
                 page.goto(f"https://dash.domain.digitalplat.org/domains/{d}", wait_until="domcontentloaded", timeout=60000)
-                # "续费" 区域（可能需先展开）
-                for sel in ["text=续费", "text=Renew", "#renew button", "button:has-text('续费')"]:
+                # 点击「续费」区域（部分情况需要展开）
+                for sel in ["text=续费", "button:has-text('续费')", "text=Renew", "#renew"]:
                     try:
-                        page.click(sel, timeout=8000)
+                        page.click(sel, timeout=10000)
                         break
                     except Exception:
                         continue
                 time.sleep(1)
                 # 点击「申请免费续费」
-                page.click("text=申请免费续费", timeout=15000)
+                page.click("text=申请免费续费", timeout=20000)
                 time.sleep(2)
                 # 部分情况会有确认弹窗
                 for confirm in ["text=确认", "text=确定", "text=Confirm", "button:has-text('确认')"]:
