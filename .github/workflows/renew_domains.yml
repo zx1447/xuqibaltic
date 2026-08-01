@@ -15,7 +15,7 @@ concurrency:
 jobs:
   renew:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -23,16 +23,37 @@ jobs:
           ref: domain
           fetch-depth: 0
 
+      - name: Install and Start Cloudflare WARP SOCKS5 Proxy
+        run: |
+          curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | sudo gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
+          echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ noble main" | sudo tee /etc/apt/sources.list.d/cloudflare-client.list
+          sudo apt-get update
+          sudo apt-get install -y cloudflare-warp
+          sudo systemctl restart warp-svc
+          sleep 3
+          warp-cli --accept-tos registration delete || true
+          warp-cli --accept-tos registration new
+          warp-cli --accept-tos mode proxy
+          warp-cli --accept-tos proxy port 40001
+          warp-cli --accept-tos connect
+          sleep 4
+          echo "=== WARP SOCKS5 PROXY CHECK ==="
+          curl -fsS -x socks5h://127.0.0.1:40001 https://www.cloudflare.com/cdn-cgi/trace | grep -E '^(ip|loc|warp)=' || true
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - name: Install Python deps (pysocks for SOCKS5 proxy)
+        run: pip install --upgrade pip pysocks
 
       - name: Run renewal check
         env:
           DIGITALPLAT_API_TOKEN: ${{ secrets.DIGITALPLAT_API_TOKEN }}
           DIGITALPLAT_DOMAINS: ${{ vars.DIGITALPLAT_DOMAINS }}
           DIGITALPLAT_RENEW_BEFORE_DAYS: "120"
+          PROXY_SERVER: "socks5://127.0.0.1:40001"
         run: python digitalplat_auto_renew.py --state state/domains-state.json
 
       - name: Commit updated state
