@@ -32,7 +32,6 @@ function log(msg) { console.log(`[domain] ${msg}`); }
     }
     
     const context = await browser.newContext();
-    });
     const page = await context.newPage();
 
     // 1. 走 GitHub OAuth (不需要过 dash CF)
