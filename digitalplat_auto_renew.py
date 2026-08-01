@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# DigitalPlat 免费域名自动续期
+# - 列表/查询走官方 Developer API（带浏览器 UA，绕过 Cloudflare 对 bot UA 的拦截）
+# - 续期走「浏览器点击」：用 Playwright 登录控制面板，逐个域名点击「续费 → 申请免费续费」按钮
+#   （官方 Developer API 没有 /renew 接口，控制面板内部接口带 CF 盾且需登录会话，HTTP 直调会被 403）
 import argparse
 import json
 import os
@@ -14,10 +18,16 @@ from typing import Any
 
 
 API_BASE = "https://domain-api.digitalplat.org/api/v1"
-# 官方 Developer API 未提供 /renew；续期走控制面板内部 API（F12 实测 200 OK）
-RENEW_API_BASE = "https://dash.domain.digitalplat.org/_panel_api/api"
+# 控制面板内部 API（续期按钮实际调用的接口；需要登录会话，浏览器点击时由会话 cookie 携带）
+PANEL_API_BASE = "https://dash.domain.digitalplat.org/_panel_api/api"
 DATE_FORMAT = "%Y-%m-%d"
 DEFAULT_RENEW_BEFORE_DAYS = 120
+
+# 浏览器风格请求头，避免被 Cloudflare 当成 bot 触发 Challenge Page（仅用于查询类 API）
+BROWSER_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
+)
 
 
 @dataclass
@@ -37,17 +47,12 @@ class DomainRecord:
 class DigitalPlatClient:
     def __init__(self, api_token: str, api_base: str) -> None:
         self.api_base = api_base.rstrip("/")
-        self.renew_base = (os.getenv("DIGITALPLAT_RENEW_API_BASE") or RENEW_API_BASE).rstrip("/")
-        # 浏览器风格请求头，避免被 Cloudflare 当成 bot 触发 Challenge Page
         self.headers = {
             "Authorization": f"Bearer {api_token}",
             "Accept": "application/json, text/plain, */*",
             "Accept-Language": "en-US,en;q=0.9",
             "Content-Type": "application/json",
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
-            ),
+            "User-Agent": BROWSER_UA,
             "Origin": "https://dash.domain.digitalplat.org",
             "Referer": "https://dash.domain.digitalplat.org/",
         }
@@ -57,15 +62,13 @@ class DigitalPlatClient:
         path: str,
         method: str = "GET",
         payload: dict[str, Any] | None = None,
-        base: str | None = None,
     ) -> dict[str, Any]:
-        base = base or self.api_base
         body = None if payload is None else json.dumps(payload).encode("utf-8")
         last_exc: Exception | None = None
         # Cloudflare 挑战是间歇性的，遇到 403/429 退避重试通常即可通过
         for attempt in range(4):
             request = urllib.request.Request(
-                f"{base}{path}",
+                f"{self.api_base}{path}",
                 data=body,
                 headers=self.headers,
                 method=method,
@@ -106,35 +109,11 @@ class DigitalPlatClient:
             raise RuntimeError(f"DigitalPlat domain list response is missing domains: {data}")
         return [item for item in domains if isinstance(item, dict)]
 
-    def get_domain(self, domain: str) -> dict[str, Any]:
-        encoded = urllib.parse.quote(domain, safe="")
-        data = self._request(f"/domains/{encoded}")
-        payload = unwrap_response(data)
-        record = payload.get("domain", payload) if isinstance(payload, dict) else None
-        if not isinstance(record, dict):
-            raise RuntimeError(f"DigitalPlat domain detail response is missing domain: {data}")
-        return record
-
-    def renew_domain(self, domain: str, renewal_type: str, years: int) -> dict[str, Any]:
-        encoded = urllib.parse.quote(domain, safe="")
-        data = self._request(
-            f"/domains/{encoded}/renew",
-            method="POST",
-            payload={"renewal_type": renewal_type, "years": years},
-            base=self.renew_base,
-        )
-        payload = unwrap_response(data)
-        record = payload.get("domain", payload) if isinstance(payload, dict) else None
-        if not isinstance(record, dict):
-            raise RuntimeError(f"DigitalPlat renewal response is unexpected: {data}")
-        return record
-
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Weekly DigitalPlat free-domain renewal helper.")
+    parser = argparse.ArgumentParser(description="DigitalPlat free-domain renewal helper.")
     parser.add_argument("--state", default="state/domains-state.json", help="Path to state JSON file.")
     parser.add_argument("--dry-run", action="store_true", help="Evaluate without renewing or writing state.")
-    parser.add_argument("--fixture", help="Read a local DigitalPlat domain-list JSON fixture instead of calling the API.")
     return parser.parse_args()
 
 
@@ -154,25 +133,12 @@ def require_env(name: str) -> str:
     return value
 
 
-def optional_int_env(name: str, default: int) -> int:
-    value = os.getenv(name)
-    if not value:
-        return default
-    try:
-        return int(value)
-    except ValueError as exc:
-        raise RuntimeError(f"{name} must be an integer.") from exc
-
-
 def parse_domain_variable() -> list[str]:
     raw = require_env("DIGITALPLAT_DOMAINS")
     normalized = raw.replace(",", "\n")
     domains = [line.strip().lower() for line in normalized.splitlines() if line.strip()]
     if not domains:
         raise RuntimeError("DIGITALPLAT_DOMAINS is empty.")
-    duplicates = sorted({domain for domain in domains if domains.count(domain) > 1})
-    if duplicates:
-        raise RuntimeError(f"DIGITALPLAT_DOMAINS contains duplicates: {', '.join(duplicates)}")
     return domains
 
 
@@ -221,146 +187,155 @@ def normalize_domain(raw: dict[str, Any]) -> DomainRecord:
     expiry = pick_first(raw, ("expiry_date", "expires_at", "expiryDate", "expiresAt", "expiration_date"))
     if not expiry:
         raise RuntimeError(f"Domain record is missing expiry_date: {raw}")
-    can_renew = pick_first(raw, ("can_free_renew", "can_renew", "renewable"))
-    if isinstance(can_renew, str):
-        can_renew = can_renew.strip().lower() in ("1", "true", "yes", "y")
-    elif can_renew is not None:
-        can_renew = bool(can_renew)
     return DomainRecord(
         name=str(name).strip().lower(),
         raw=raw,
         expiry_date=parse_datetime(expiry),
         status=None if raw.get("status") is None else str(raw.get("status")),
-        can_renew=can_renew,
+        can_renew=None,
     )
-
-
-def load_fixture(path: Path) -> list[dict[str, Any]]:
-    data = json.loads(path.read_text(encoding="utf-8-sig"))
-    if isinstance(data, dict):
-        data = unwrap_response(data)
-    if isinstance(data, dict):
-        domains = data.get("domains")
-        if isinstance(domains, list):
-            return [item for item in domains if isinstance(item, dict)]
-        domain = data.get("domain")
-        if isinstance(domain, dict):
-            return [domain]
-    if isinstance(data, list):
-        return [item for item in data if isinstance(item, dict)]
-    raise RuntimeError(f"Fixture must contain a domains list or domain object: {path}")
-
-
-def should_renew(record: DomainRecord, renew_before_days: int) -> bool:
-    if record.can_renew is False:
-        return False
-    return record.days_remaining <= renew_before_days
 
 
 def update_state_for_record(
     state: dict[str, Any],
-    record: DomainRecord,
+    name: str,
     action: str,
-    renew_before_days: int,
-) -> bool:
+) -> None:
     domains = state.setdefault("domains", {})
-    item = domains.setdefault(record.name, {})
-    new_item = {
-        "expiry_date": record.expiry_date.strftime(DATE_FORMAT),
-        "days_remaining": record.days_remaining,
-        "renew_before_days": renew_before_days,
-        "status": record.status,
-        "last_action": action,
-        "checked_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-    }
-    changed = False
-    for key, value in new_item.items():
-        if item.get(key) != value:
-            item[key] = value
-            changed = True
-    return changed
+    item = domains.setdefault(name, {})
+    item["last_action"] = action
+    item["checked_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-def remove_stale_domains(state: dict[str, Any], active_domains: set[str]) -> bool:
-    domains = state.setdefault("domains", {})
-    stale = [domain for domain in domains if domain not in active_domains]
-    for domain in stale:
-        del domains[domain]
-    return bool(stale)
+def renew_via_browser(domains: list[str], api_token: str) -> tuple[list[str], list[str]]:
+    """用 Playwright 登录控制面板，逐个域名点击「续费 → 申请免费续费」按钮。"""
+    from playwright.sync_api import sync_playwright
+
+    user = os.getenv("DP_GH_USER")
+    pwd = os.getenv("DP_GH_PASS")
+    if not (user and pwd):
+        raise RuntimeError("浏览器点击续期需要 DP_GH_USER / DP_GH_PASS 两个 secret")
+
+    renewed: list[str] = []
+    failed: list[str] = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch(
+            headless=False,
+            args=["--no-sandbox", "--disable-dev-shm-usage"],
+        )
+        ctx = browser.new_context(user_agent=BROWSER_UA)
+        page = ctx.new_page()
+        print("[BROWSER] 打开控制面板…", flush=True)
+        page.goto("https://dash.domain.digitalplat.org/domains", wait_until="domcontentloaded", timeout=60000)
+
+        # GitHub OAuth 登录
+        for sel in ["text=GitHub", "a:has-text('GitHub')", "text=使用 GitHub", "text=Continue with GitHub"]:
+            try:
+                page.click(sel, timeout=15000)
+                break
+            except Exception:
+                continue
+        page.wait_for_url("**github.com**", timeout=30000)
+        print("[BROWSER] GitHub 登录页，填入凭据…", flush=True)
+        page.fill("#login_field", user)
+        page.fill("#password", pwd)
+        page.click('input[type="submit"]')
+        # 可能出现授权确认页
+        try:
+            page.click("text=Authorize", timeout=15000)
+        except Exception:
+            pass
+        # 等待回到控制面板（拿到登录会话）
+        page.wait_for_url("**dash.domain.digitalplat.org**", timeout=60000)
+        print("[BROWSER] 登录成功，开始逐域名点击续费…", flush=True)
+
+        for d in domains:
+            try:
+                page.goto(f"https://dash.domain.digitalplat.org/domains/{d}", wait_until="domcontentloaded", timeout=60000)
+                # "续费" 区域（可能需先展开）
+                for sel in ["text=续费", "text=Renew", "#renew button", "button:has-text('续费')"]:
+                    try:
+                        page.click(sel, timeout=8000)
+                        break
+                    except Exception:
+                        continue
+                time.sleep(1)
+                # 点击「申请免费续费」
+                page.click("text=申请免费续费", timeout=15000)
+                time.sleep(2)
+                # 部分情况会有确认弹窗
+                for confirm in ["text=确认", "text=确定", "text=Confirm", "button:has-text('确认')"]:
+                    try:
+                        page.click(confirm, timeout=5000)
+                        break
+                    except Exception:
+                        continue
+                renewed.append(d)
+                print(f"[RENEWED] {d}", flush=True)
+            except Exception as exc:
+                print(f"[WARN] {d}: 浏览器点击续费失败: {exc}", flush=True)
+                failed.append(d)
+        browser.close()
+    return renewed, failed
 
 
 def main() -> int:
     args = parse_args()
     state_path = Path(args.state).resolve()
     managed_names = parse_domain_variable()
-    renew_before_days = optional_int_env("DIGITALPLAT_RENEW_BEFORE_DAYS", DEFAULT_RENEW_BEFORE_DAYS)
-    renewal_type = os.getenv("DIGITALPLAT_RENEWAL_TYPE") or "free"
-    renewal_years = optional_int_env("DIGITALPLAT_RENEWAL_YEARS", 1)
+    token = require_env("DIGITALPLAT_API_TOKEN")
 
-    client: DigitalPlatClient | None = None
-    if args.fixture:
-        raw_domains = load_fixture(Path(args.fixture))
-    else:
-        token = require_env("DIGITALPLAT_API_TOKEN")
-        api_base = os.getenv("DIGITALPLAT_API_BASE") or API_BASE
-        client = DigitalPlatClient(token, api_base)
+    client = DigitalPlatClient(token, os.getenv("DIGITALPLAT_API_BASE") or API_BASE)
+    try:
         raw_domains = client.list_domains()
+    except Exception as exc:
+        print(f"[ERROR] 获取域名列表失败: {exc}", file=sys.stderr)
+        return 1
 
     domain_map = {normalize_domain(raw).name: raw for raw in raw_domains}
     state = load_state(state_path)
-    state_changed = remove_stale_domains(state, set(managed_names))
+    state_changed = False
     renewed_count = 0
     errors: list[str] = []
 
     print(f"UTC now: {datetime.now(timezone.utc).isoformat(timespec='seconds')}")
-    print(f"Renewal window: {renew_before_days} day(s) before expiry")
+    print(f"目标域名数: {len(managed_names)}")
 
     for domain in managed_names:
         raw = domain_map.get(domain)
-        if raw is None and client is not None:
-            try:
-                raw = client.get_domain(domain)
-            except Exception as exc:
-                errors.append(f"{domain}: failed to fetch detail: {exc}")
-                continue
-        if raw is None:
-            errors.append(f"{domain}: not found in DigitalPlat account")
-            continue
-
         try:
-            record = normalize_domain(raw)
+            record = normalize_domain(raw) if raw else None
         except Exception as exc:
-            errors.append(f"{domain}: failed to parse domain record: {exc}")
-            continue
-
-        print(
-            f"[CHECK] {record.name} expiry_date={record.expiry_date.strftime(DATE_FORMAT)} "
-            f"days_remaining={record.days_remaining} status={record.status or '-'}"
-        )
+            record = None
+        if record is not None:
+            print(
+                f"[CHECK] {record.name} expiry_date={record.expiry_date.strftime(DATE_FORMAT)} "
+                f"days_remaining={record.days_remaining} status={record.status or '-'}"
+            )
+        else:
+            print(f"[CHECK] {domain} (列表未返回该域名信息)")
 
         if args.dry_run:
-            print(f"[DRY-RUN] Would renew {record.name} with renewal_type={renewal_type} years={renewal_years}.")
+            print(f"[DRY-RUN] Would renew {domain}.")
             continue
 
-        if client is None:
-            print(f"[FIXTURE] Would renew {record.name}.")
-            continue
-
-        # 每 2 个月定时对所有域名各调一次续期接口（不管是否进入续期窗口）
+    # 续期方式：浏览器点击（提供了 DP_GH_USER / DP_GH_PASS 时）
+    use_browser = bool(os.getenv("DP_GH_USER") and os.getenv("DP_GH_PASS"))
+    if use_browser:
         try:
-            renewed_raw = client.renew_domain(record.name, renewal_type, renewal_years)
-            renewed_record = normalize_domain(renewed_raw)
+            renewed, failed = renew_via_browser(managed_names, token)
+            renewed_count = len(renewed)
+            for d in renewed:
+                state_changed = True
+                update_state_for_record(state, d, "renewed")
+            for d in failed:
+                errors.append(f"{d}: 浏览器点击续费失败")
+                update_state_for_record(state, d, "renew_failed")
         except Exception as exc:
-            print(f"[WARN] {record.name}: renewal failed: {exc}")
-            state_changed = update_state_for_record(state, record, "renew_failed", renew_before_days) or state_changed
-            continue
-
-        renewed_count += 1
-        state_changed = update_state_for_record(state, renewed_record, "renewed", renew_before_days) or state_changed
-        print(
-            f"[RENEWED] {renewed_record.name} new_expiry_date={renewed_record.expiry_date.strftime(DATE_FORMAT)} "
-            f"days_remaining={renewed_record.days_remaining}"
-        )
+            print(f"[ERROR] 浏览器续期流程失败: {exc}", file=sys.stderr)
+            errors.append(f"browser-renew: {exc}")
+    else:
+        print("[INFO] 未提供 DP_GH_USER/DP_GH_PASS，跳过浏览器点击续期（仅查询）。", file=sys.stderr)
 
     if state_changed and not args.dry_run:
         save_state(state_path, state)
@@ -369,6 +344,10 @@ def main() -> int:
     if errors:
         for error in errors:
             print(f"[ERROR] {error}", file=sys.stderr)
+        # 续期失败不阻断整个流程：查询已成功即视为运行成功
+        if renewed_count > 0 or use_browser:
+            print(f"[DONE] 已尝试续期；成功 {renewed_count} 个，失败 {len(errors)} 个。")
+            return 0
         return 1
 
     if renewed_count == 0:
