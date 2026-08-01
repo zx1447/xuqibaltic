@@ -318,6 +318,20 @@ def wait_cf_challenge(page, timeout_seconds=180):
             last_log = now
         time.sleep(2)
     print(f"[BROWSER] wait_cf_challenge 超时，title={page.title()!r} url={page.url}", flush=True)
+    # dump 页面状态便于调试
+    try:
+        html = page.content()[:3000]
+        print(f"[BROWSER] 页面 HTML 前 3000 字:\n{html}", flush=True)
+        # 看看是否有任何 a 标签
+        all_links = page.evaluate("""() => {
+            return Array.from(document.querySelectorAll('a')).slice(0, 20).map(a => ({
+                text: (a.innerText || '').trim().substring(0, 50),
+                href: a.href
+            }));
+        }""")
+        print(f"[BROWSER] 页面前 20 个 a 标签: {all_links}", flush=True)
+    except Exception as e:
+        print(f"[BROWSER] dump HTML 失败: {e}", flush=True)
     return False
 
 
