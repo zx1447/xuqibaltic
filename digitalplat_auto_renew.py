@@ -138,6 +138,29 @@ def require_env(name: str) -> str:
     return value
 
 
+def install_proxy() -> None:
+    """可选通过 SOCKS5/HTTP 代理（如 Cloudflare WARP）发送请求，规避 Cloudflare 挑战。"""
+    proxy = os.getenv("DIGITALPLAT_PROXY") or os.getenv("PROXY_SERVER")
+    if not proxy:
+        return
+    try:
+        from urllib.request import build_opener, install_opener
+        if proxy.startswith("socks5"):
+            import socks
+            from sockshandler import SocksiPyHandler
+            rest = proxy.split("://", 1)[1]
+            host, port = rest.rsplit(":", 1)
+            opener = build_opener(SocksiPyHandler(socks.SOCKS5, host, int(port)))
+            install_opener(opener)
+            print(f"[PROXY] 通过 SOCKS5 代理 {host}:{port} 发送请求")
+        else:
+            opener = build_opener(urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
+            install_opener(opener)
+            print(f"[PROXY] 通过代理 {proxy} 发送请求")
+    except Exception as exc:
+        print(f"[PROXY] 代理初始化失败，回退直连: {exc}", file=sys.stderr)
+
+
 def optional_int_env(name: str, default: int) -> int:
     value = os.getenv(name)
     if not value:
@@ -275,6 +298,7 @@ def remove_stale_domains(state: dict[str, Any], active_domains: set[str]) -> boo
 
 def main() -> int:
     args = parse_args()
+    install_proxy()
     state_path = Path(args.state).resolve()
     managed_names = parse_domain_variable()
     renew_before_days = optional_int_env("DIGITALPLAT_RENEW_BEFORE_DAYS", DEFAULT_RENEW_BEFORE_DAYS)
