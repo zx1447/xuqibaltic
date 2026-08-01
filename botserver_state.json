@@ -1,0 +1,24 @@
+{
+  "last_status": "waiting_for_cooldown",
+  "daily_url": "https://bot-server.site/dashboard/daily",
+  "cooldown_policy": "respect_server_24_hour_cooldown",
+  "encrypted_cookies": "gAAAAABqbUGvgKd3ZDhaxM0X0NKRnx8hZ9iQ3h6spPPUFD2WJ1dNDaxpg--ePG9PnpCYFoPVlj2wlvPIBnU82kg1JaGJN-fVI1uvSeo0JMR23kN-7ZU7vq3UQlWAMoWwW4ChIYLZXSWp4spFU4z0ndePv6XNvTyvUXAY_QrgN3iRistGBikAo0RQ5LKmALVdhM7LijhN0QeRAs49krh7M143UUSme3YPu43e3R21_TB7CHeJFWmjI2PHF3wCwZas7V3KQUHCNCpti12TgUQcp5PwmZ7_ssxbFA==",
+  "session_saved_time": "2026-08-01 08:45:35",
+  "last_login_source": "encrypted_session",
+  "account_username": "ajkvip",
+  "account_discord_id": "1438491113576202260",
+  "observed_balance": 80,
+  "observed_times_claimed": 6,
+  "next_claim_timestamp": 1785641868,
+  "next_claim_time": "2026-08-02 11:37:48",
+  "last_check_time": "2026-08-01 08:45:35",
+  "before": {
+    "balance": 80,
+    "times_claimed": 6,
+    "total_earned": 60,
+    "next_claim_timestamp": 1785641868,
+    "next_claim_time": "2026-08-02 11:37:48",
+    "cooldown_active": true,
+    "page_says_already_claimed": true
+  }
+}
