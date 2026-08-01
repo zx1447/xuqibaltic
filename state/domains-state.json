@@ -16,7 +16,7 @@
       "status": "ok",
       "last_action": "skip_not_expiring",
       "last_action_reason": ">120 days remaining, DigitalPlat policy forbids renewal",
-      "checked_at": "2026-08-01T12:23:45+00:00"
+      "checked_at": "2026-08-01T12:31:59+00:00"
     },
     "freeide.qzz.io": {
       "expiry_date": "2027-05-18",

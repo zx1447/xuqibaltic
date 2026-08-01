@@ -482,23 +482,43 @@ def renew_via_panel_api(
 
     results: dict[str, tuple[str, str, str]] = {}
 
-    # 本地测试通过的配置：
+    # Camoufox 配置：
     #   - headless=True: 无头模式
-    #   - geoip=True: 根据 IP 自动匹配浏览器指纹的地理位置（locale/timezone）
     #   - humanize=True: 模拟人类鼠标移动（帮助过 CF 行为检测）
     #   - i_know_what_im_doing=True: 跳过 Camoufox 的安全确认
     #
-    # 已知限制：
-    #   - GitHub Actions 数据中心 IP 会被 dash 的 CF 严格防护拦截，
-    #     即使 Camoufox 也过不了 CF 挑战（页面停在 "Loading https://..." 180s+）
-    #   - 本地（住宅 IP）能稳定通过
-    #   - 如果要在 GHA 跑，需要先解决 IP 问题（住宅代理 / 自建中转等）
-    with Camoufox(
-        headless=True,
-        geoip=True,
-        humanize=True,
-        i_know_what_im_doing=True,
-    ) as browser:
+    # 代理支持（CAMOUFOX_PROXY 环境变量）：
+    #   - 不设置时：直连（本地住宅/云主机 IP，需 IP reputation OK）
+    #   - 设置时：走指定代理（绕开数据中心 IP 被 CF 拦截的问题）
+    #     支持 socks5://host:port 或 http://host:port
+    #     用代理时关闭 geoip（避免 Camoufox 调用 ipecho.net 失败），手动设 locale=en-US
+    #
+    # 实测：
+    #   - 阿里云香港 IP (47.57.x.x, proxy=false) 直连可过 CF
+    #   - GitHub Actions IP (proxy=true) 直连被 CF 拦
+    #   - VLESS 代理出口德国 GoeTel 住宅 IP (proxy=false, hosting=false) 可过 CF
+    proxy_url = os.getenv("CAMOUFOX_PROXY", "")
+    extra_kwargs = {
+        "headless": True,
+        "humanize": True,
+        "i_know_what_im_doing": True,
+    }
+    if proxy_url:
+        from urllib.parse import urlparse
+        p = urlparse(proxy_url)
+        scheme = p.scheme or "socks5"
+        proxy_arg = {"server": f"{scheme}://{p.hostname}:{p.port}"}
+        if p.username:
+            proxy_arg["username"] = p.username
+        if p.password:
+            proxy_arg["password"] = p.password
+        extra_kwargs["proxy"] = proxy_arg
+        extra_kwargs["geoip"] = False
+        extra_kwargs["locale"] = "en-US"
+        print(f"[BROWSER] 使用代理: {scheme}://{p.hostname}:{p.port}", flush=True)
+    else:
+        extra_kwargs["geoip"] = True
+    with Camoufox(**extra_kwargs) as browser:
         ctx = browser.new_context()
         page = ctx.new_page()
         page.set_default_timeout(45000)

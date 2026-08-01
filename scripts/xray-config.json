@@ -1,0 +1,59 @@
+{
+  "log": { "loglevel": "warning" },
+  "inbounds": [
+    {
+      "tag": "socks",
+      "port": 10808,
+      "listen": "127.0.0.1",
+      "protocol": "socks",
+      "settings": { "udp": true }
+    },
+    {
+      "tag": "http",
+      "port": 10809,
+      "listen": "127.0.0.1",
+      "protocol": "http",
+      "settings": {}
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "vless",
+      "protocol": "vless",
+      "settings": {
+        "vnext": [
+          {
+            "address": "{{VLESS_HOST}}",
+            "port": 443,
+            "users": [
+              { "id": "{{VLESS_UUID}}", "encryption": "none", "flow": "" }
+            ]
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "ws",
+        "security": "tls",
+        "tlsSettings": {
+          "serverName": "{{VLESS_HOST}}",
+          "fingerprint": "chrome",
+          "allowInsecure": false
+        },
+        "wsSettings": {
+          "path": "{{VLESS_PATH}}",
+          "headers": { "Host": "{{VLESS_HOST}}" }
+        }
+      }
+    },
+    {
+      "tag": "direct",
+      "protocol": "freedom",
+      "settings": {}
+    }
+  ],
+  "routing": {
+    "rules": [
+      { "type": "field", "outboundTag": "direct", "ip": ["127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"] }
+    ]
+  }
+}
