@@ -3,8 +3,8 @@ name: DigitalPlat Domain Auto Renew
 on:
   workflow_dispatch:
   schedule:
-    # 每周一 UTC 04:17
-    - cron: "17 4 * * 1"
+    # 每 2 个月 1 号 UTC 00:00
+    - cron: "0 0 1 */2 *"
 
 permissions:
   contents: write
@@ -16,7 +16,7 @@ concurrency:
 jobs:
   renew:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - name: Checkout domain branch
         uses: actions/checkout@v4
@@ -24,20 +24,27 @@ jobs:
           ref: domain
           fetch-depth: 0
 
-      - uses: actions/setup-node@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          node-version: "20"
+          python-version: "3.12"
 
-      - name: Install Playwright + camoufox
-        run: |
-          npm init -y
-          npm install playwright camoufox
-          npx playwright install chromium --with-deps
-          npx camoufox fetch
-
-      - name: Run domain renew
+      - name: Run renewal check
         env:
-          DP_GH_USER: ${{ secrets.DP_GH_USER }}
-          DP_GH_PASS: ${{ secrets.DP_GH_PASS }}
           DIGITALPLAT_API_TOKEN: ${{ secrets.DIGITALPLAT_API_TOKEN }}
-        run: node renew_domains.js
+          DIGITALPLAT_DOMAINS: ${{ vars.DIGITALPLAT_DOMAINS }}
+          DIGITALPLAT_RENEW_BEFORE_DAYS: "120"
+        run: python digitalplat_auto_renew.py --state state/domains-state.json
+
+      - name: Commit updated renewal state
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add state/domains-state.json || true
+          if git diff --cached --quiet; then
+            echo "No state changes."
+            exit 0
+          fi
+          git commit -m "Update DigitalPlat domain renewal state [skip ci]"
+          git push origin HEAD:domain
