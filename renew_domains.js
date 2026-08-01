@@ -31,9 +31,7 @@ function log(msg) { console.log(`[domain] ${msg}`); }
       browser = await chromium.launch({ headless: true });
     }
     
-    const context = await browser.newContext({
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0',
-    });
+    const context = await browser.newContext();
     const page = await context.newPage();
 
     // 1. 走 GitHub OAuth (不需要过 dash CF)
