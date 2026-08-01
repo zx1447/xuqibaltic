@@ -68,10 +68,10 @@ class DigitalPlatClient:
                     _time.sleep(10)
                     continue
                 raise RuntimeError(f"DigitalPlat HTTP {exc.code}: {detail[:200]}") from exc
+            except urllib.error.URLError as exc:
+                raise RuntimeError(f"DigitalPlat network error: {exc}") from exc
         else:
             raise RuntimeError("DigitalPlat: max retries exceeded")
-        except urllib.error.URLError as exc:
-            raise RuntimeError(f"DigitalPlat network error: {exc}") from exc
 
         if not text:
             return {}
