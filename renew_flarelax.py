@@ -128,6 +128,27 @@ def discord_authorize(location: str, client_id: str, redirect_uri: str, scope: s
     return callback
 
 
+def click_turnstile_checkbox_precision(browser) -> bool:
+    try:
+        coords = browser.execute_script(
+            """
+            const el = document.querySelector(".g-recaptcha, .captcha-wrapper, iframe[src*='cloudflare'], iframe");
+            if (!el) return null;
+            const rect = el.getBoundingClientRect();
+            if (rect.width === 0 && rect.height === 0) return null;
+            return [Math.round(rect.left + 30), Math.round(rect.top + rect.height / 2)];
+            """
+        )
+        if coords and len(coords) == 2:
+            x, y = coords[0], coords[1]
+            log(f"   🖱️ 精准定位到 Turnstile 像素坐标: ({x}, {y})，点击复选框...")
+            browser.driver.uc_gui_click_x_y(x, y)
+            return True
+    except Exception as exc:
+        log(f"   ⚠️ 定位出错: {exc}")
+    return False
+
+
 def turnstile_token(browser) -> str:
     try:
         return browser.execute_script(
@@ -141,36 +162,18 @@ def turnstile_token(browser) -> str:
         return ""
 
 
-def turnstile_solved(browser) -> bool:
-    try:
-        title = browser.get_title()
-        if "checking" not in title.lower() and "just a moment" not in title.lower():
-            return True
-        for c in browser.get_cookies():
-            if c.get("name") == "TOKEN" and c.get("value"):
-                return True
-    except Exception:
-        pass
-    return False
-
-
 def solve_turnstile(browser) -> None:
     log("🛡️ 检查并处理 Flarelax Turnstile 验证...")
     for attempt in range(1, 35):
         if turnstile_solved(browser):
             log("   ✅ 当前页面非人机校验页或 Token 已生成")
             return
-        if attempt in (1, 5, 10, 15, 20):
+        if attempt in (1, 4, 8, 12, 16, 20):
             log(f"   🖱️ 尝试点击 Turnstile 人机验证框 (第 {attempt} 秒)...")
-            for clicker in (
-                lambda: browser.driver.uc_gui_click_cf(frame="iframe[src*='challenges.cloudflare.com']"),
-                lambda: browser.driver.uc_gui_click_cf(),
-                lambda: browser.driver.uc_gui_click_captcha(),
-                lambda: browser.driver.uc_gui_click_cf(frame="iframe"),
-            ):
+            clicked = click_turnstile_checkbox_precision(browser)
+            if not clicked:
                 try:
-                    clicker()
-                    break
+                    browser.driver.uc_gui_click_cf()
                 except Exception:
                     pass
         time.sleep(1)
@@ -178,10 +181,10 @@ def solve_turnstile(browser) -> None:
     log("⚠️ 无法自动通过 Turnstile，输出调试信息：")
     try:
         log(f"URL: {browser.get_current_url()} Title: {browser.get_title()}")
-        for i, f in enumerate(browser.find_elements("iframe")):
-            log(f"  iframe {i}: src={f.get_attribute('src')[:100]} title={f.get_attribute('title')}")
-    except Exception:
-        pass
+        iframes = browser.execute_script("return [...document.querySelectorAll('iframe')].map(f => ({src: f.src, title: f.title, rect: f.getBoundingClientRect().toJSON()}))")
+        log(f"IFRAMES JS DUMP: {iframes}")
+    except Exception as exc:
+        log(f"debug log exc: {exc}")
     raise FlarelaxError("Cloudflare Turnstile 验证超时 (页面始终未跳转)")
 
 
