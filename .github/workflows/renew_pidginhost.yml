@@ -16,26 +16,21 @@ concurrency:
 jobs:
   renew:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
     steps:
       - name: Checkout PidginHost branch
         uses: actions/checkout@v4
         with:
           ref: pidginhost
 
-      - uses: actions/setup-node@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          node-version: "20"
+          python-version: "3.12"
 
-      - name: Install Playwright
-        run: |
-          npm init -y
-          npm install playwright
-          npx playwright install chromium --with-deps
-
-      - name: Run PidginHost renew
+      - name: Run PidginHost renew (pure API)
         env:
           PIDGINHOST_SESSION: ${{ secrets.PIDGINHOST_SESSION }}
           PIDGINHOST_CSRF: ${{ secrets.PIDGINHOST_CSRF }}
           PIDGINHOST_SERVER_ID: ${{ secrets.PIDGINHOST_SERVER_ID }}
-        run: node renew_pidginhost.js
+        run: python3 renew_pidginhost.py
