@@ -1,18 +1,16 @@
 #!/usr/bin/env python3
 """
-PidginHost 自动续期 + 自动刷新 session cookie
+PidginHost 自动续期
+
+两种模式:
+1. 有 PIDGINHOST_API_TOKEN: 用 API token 查状态 (快, 不需要登录)
+2. 续期: 必须用 Playwright + GitHub OAuth 登录 (panel 表单需要 session cookie)
 
 流程:
-1. 用 Playwright + GitHub OAuth 登录 pidginhost.com, 拿新 session/CSRF cookie
-2. 用新 cookie 调续期 API (POST action=extend_renewal)
-3. 把新 cookie 写回 GitHub secret (下次 workflow 用新 session)
-
-这样 session 永远是新鲜的, 不会过期。
-需要 secrets:
-- DP_GH_USER: GitHub 用户名
-- DP_GH_PASS: GitHub 密码
-- GH_TOKEN: GitHub PAT (有 repo 权限, 用于更新 secret)
-- PIDGINHOST_SERVER_ID: 服务器 ID
+1. 用 API token 查 server 状态 (如果有 token)
+2. Playwright 登录拿 session cookie
+3. 用 session cookie POST extend_renewal 续期
+4. 把新 session cookie 写回 GitHub secret
 """
 import base64
 import json
@@ -28,6 +26,7 @@ SERVER_ID = os.getenv("PIDGINHOST_SERVER_ID", "3920")
 GH_USER = os.getenv("DP_GH_USER", "")
 GH_PASS = os.getenv("DP_GH_PASS", "")
 GH_TOKEN = os.getenv("GH_TOKEN", "")
+API_TOKEN = os.getenv("PIDGINHOST_API_TOKEN", "")
 REPO = os.getenv("GITHUB_REPOSITORY", "zx1447/xuqibaltic")
 
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
@@ -37,8 +36,36 @@ def log(msg):
     print(f"[pidgin] {msg}", flush=True)
 
 
+def api_get(path):
+    """用 API token GET (查状态)"""
+    if not API_TOKEN:
+        return None
+    req = urllib.request.Request(
+        f"{BASE}{path}",
+        headers={"Authorization": f"Token {API_TOKEN}", "User-Agent": UA},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return json.loads(resp.read().decode())
+    except Exception as e:
+        log(f"  ⚠️ API GET {path} 失败: {e}")
+        return None
+
+
+def check_server_status():
+    """用 API token 查 server 状态"""
+    if not API_TOKEN:
+        log("⚠️ PIDGINHOST_API_TOKEN 未设置, 跳过状态检查")
+        return None
+    log("🔄 用 API token 查 server 状态...")
+    data = api_get(f"/api/v1/cloud/servers/{SERVER_ID}/")
+    if data:
+        log(f"  ✅ server {SERVER_ID}: status={data.get('status')} machine={data.get('machine',{}).get('status')}")
+    return data
+
+
 def login_and_get_cookies():
-    """用 Playwright + GitHub OAuth 登录, 返回 (sessionid, csrftoken)"""
+    """Playwright + GitHub OAuth 登录"""
     from playwright.sync_api import sync_playwright
 
     log("🔄 Playwright 登录 pidginhost.com...")
@@ -61,11 +88,10 @@ def login_and_get_cookies():
         found_gh = False
         for _ in range(15):
             time.sleep(2)
-            url = page.url
-            if "github.com/login" in url:
+            if "github.com/login" in page.url:
                 found_gh = True
                 break
-            if "pidginhost.com" in url and "/social/complete/" not in url and "/account/login" not in url:
+            if "pidginhost.com" in page.url and "/social/complete/" not in page.url and "/account/login" not in page.url:
                 log("  已登录 (session 还有效)")
                 cookies = ctx.cookies()
                 session = next((c["value"] for c in cookies if c["name"] == "sessionid" and "pidginhost.com" in c["domain"]), "")
@@ -74,7 +100,6 @@ def login_and_get_cookies():
                 return session, csrf
 
         if not found_gh:
-            log("  ❌ 没跳到 GitHub 登录页")
             browser.close()
             return None, None
 
@@ -98,13 +123,12 @@ def login_and_get_cookies():
                 browser.close()
                 return None, None
             if "github.com/sessions/verified-device" in url:
-                log("  ❌ GitHub 要求设备验证 (异地登录)")
+                log("  ❌ GitHub 要求设备验证")
                 browser.close()
                 return None, None
             if "github.com/login/oauth/authorize" in url:
                 try:
                     page.click("button:has-text('Authorize'), input[value='Authorize']", timeout=5000)
-                    log("  点 Authorize")
                 except Exception:
                     pass
             if "pidginhost.com" in url and "/social/complete/" not in url and "/account/login" not in url:
@@ -112,55 +136,46 @@ def login_and_get_cookies():
                     page.wait_for_load_state("domcontentloaded", timeout=10000)
                 except Exception:
                     pass
-                log(f"  ✅ 登录成功: {url}")
+                log(f"  ✅ 登录成功")
                 break
         else:
-            log(f"  ❌ 登录超时, url={page.url}")
             browser.close()
             return None, None
 
         cookies = ctx.cookies()
         session = next((c["value"] for c in cookies if c["name"] == "sessionid" and "pidginhost.com" in c["domain"]), "")
         csrf = next((c["value"] for c in cookies if c["name"] == "csrftoken" and "pidginhost.com" in c["domain"]), "")
-
         browser.close()
         if session and csrf:
-            log(f"  ✅ 拿到新 cookie: session={session[:15]}... csrf={csrf[:15]}...")
+            log(f"  ✅ 拿到新 cookie")
             return session, csrf
-        else:
-            log(f"  ❌ 没拿到 cookie")
-            return None, None
-
-
-def api_call(session, csrf, method, path, payload=None):
-    url = f"{BASE}{path}"
-    headers = {
-        "User-Agent": UA,
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Cookie": f"sessionid={session}; csrftoken={csrf}",
-        "Referer": f"{BASE}/panel/cloud/servers/{SERVER_ID}/",
-        "Origin": BASE,
-        "X-CSRFToken": csrf,
-    }
-    body = None
-    if payload is not None:
-        body = urllib.parse.urlencode(payload).encode()
-        headers["Content-Type"] = "application/x-www-form-urlencoded"
-
-    req = urllib.request.Request(url, data=body, headers=headers, method=method)
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            return resp.status, resp.read().decode("utf-8", errors="replace")
-    except urllib.error.HTTPError as e:
-        return e.code, e.read().decode("utf-8", errors="replace")
-    except Exception as e:
-        return -1, str(e)
+        return None, None
 
 
 def extend_renewal(session, csrf):
+    """用 session cookie 调 panel 续期"""
     log(f"🔄 续期 server {SERVER_ID}...")
     payload = {"csrfmiddlewaretoken": csrf, "action": "extend_renewal"}
-    status, text = api_call(session, csrf, "POST", f"/panel/cloud/servers/{SERVER_ID}/", payload)
+    url = f"{BASE}/panel/cloud/servers/{SERVER_ID}/"
+    req = urllib.request.Request(url, method="POST")
+    req.add_header("User-Agent", UA)
+    req.add_header("Cookie", f"sessionid={session}; csrftoken={csrf}")
+    req.add_header("Referer", url)
+    req.add_header("Origin", BASE)
+    req.add_header("X-CSRFToken", csrf)
+    req.add_header("Content-Type", "application/x-www-form-urlencoded")
+    body = urllib.parse.urlencode(payload).encode()
+    try:
+        with urllib.request.urlopen(req, data=body, timeout=30) as resp:
+            text = resp.read().decode("utf-8", errors="replace")
+            status = resp.status
+    except urllib.error.HTTPError as e:
+        text = e.read().decode("utf-8", errors="replace")
+        status = e.code
+    except Exception as e:
+        log(f"  ❌ 网络错误: {e}")
+        return False
+
     text_lower = text.lower()
     if "extended for 30 days" in text_lower:
         log("  ✅ 续期成功! (extended for 30 days)")
@@ -182,13 +197,12 @@ def extend_renewal(session, csrf):
 
 
 def update_github_secret(name, value):
+    """把新 cookie 写回 GitHub secret"""
     if not GH_TOKEN:
-        log(f"  ⚠️ GH_TOKEN 未设置, 跳过更新 secret {name}")
         return False
     try:
         from nacl import public
     except ImportError:
-        log(f"  ⚠️ pynacl 未安装, 跳过更新 secret {name}")
         return False
 
     log(f"  🔄 更新 GitHub secret {name}...")
@@ -216,39 +230,31 @@ def update_github_secret(name, value):
     )
     try:
         with urllib.request.urlopen(req, timeout=15) as r:
-            log(f"  ✅ secret {name} 已更新 (HTTP {r.status})")
+            log(f"  ✅ secret {name} 已更新")
             return True
     except urllib.error.HTTPError as e:
-        log(f"  ❌ 更新 secret 失败 HTTP {e.code}: {e.read().decode()[:200]}")
+        log(f"  ❌ 更新 secret 失败: {e.read().decode()[:200]}")
         return False
 
 
 def main():
-    log("=== PidginHost auto-renew + session refresh ===")
+    log("=== PidginHost auto-renew ===")
 
     if not GH_USER or not GH_PASS:
         log("ERROR: missing DP_GH_USER or DP_GH_PASS")
         return 1
 
-    # 1. 登录拿新 cookie
+    # 1. 用 API token 查状态 (如果有)
+    check_server_status()
+
+    # 2. Playwright 登录拿新 cookie
     session, csrf = login_and_get_cookies()
     if not session or not csrf:
         log("FATAL: 登录失败")
         return 1
 
-    # 2. 续期
+    # 3. 续期
     ok = extend_renewal(session, csrf)
-
-    # 3. 验证
-    if ok:
-        log("🔄 验证 server 状态...")
-        status, text = api_call(session, csrf, "GET", f"/api/v1/cloud/servers/{SERVER_ID}/")
-        if status == 200:
-            try:
-                data = json.loads(text)
-                log(f"  ✅ server {SERVER_ID} status={data.get('status')}")
-            except Exception:
-                pass
 
     # 4. 写回 secret
     log("🔄 写回新 cookie 到 GitHub secret...")
