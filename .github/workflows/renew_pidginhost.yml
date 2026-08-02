@@ -16,7 +16,7 @@ concurrency:
 jobs:
   renew:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
     steps:
       - name: Checkout PidginHost branch
         uses: actions/checkout@v4
@@ -28,17 +28,10 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install deps (playwright + pynacl)
-        run: |
-          pip install playwright pynacl
-          python -m playwright install chromium --with-deps
-
-      - name: Run PidginHost renew
+      - name: Run PidginHost renew (pure API)
         env:
-          DP_GH_USER: ${{ secrets.DP_GH_USER }}
-          DP_GH_PASS: ${{ secrets.DP_GH_PASS }}
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          PIDGINHOST_SESSION: ${{ secrets.PIDGINHOST_SESSION }}
+          PIDGINHOST_CSRF: ${{ secrets.PIDGINHOST_CSRF }}
           PIDGINHOST_API_TOKEN: ${{ secrets.PIDGINHOST_API_TOKEN }}
           PIDGINHOST_SERVER_ID: ${{ secrets.PIDGINHOST_SERVER_ID }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
         run: python3 renew_pidginhost.py
