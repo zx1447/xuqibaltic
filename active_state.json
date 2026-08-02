@@ -29,6 +29,12 @@
   "api_status": "success",
   "next_api_login_timestamp": 1785821969,
   "next_api_login_time": "2026-08-04 13:39:29",
-  "last_check_time": "2026-08-02 13:39:29",
-  "browser_error": "Enzonic 登录失败，仍在登录页。页面摘要：Sign in\nLogin*\nPassword*\nForgot password?\nRemember me\nSign in\n© 2026 Enzonic Cloud - Powered by Pelican"
+  "last_check_time": "2026-08-02 16:42:24",
+  "browser_error": "访问 Active 页面时被重定向到登录页",
+  "next_phenix_check_timestamp": 1785746525,
+  "next_phenix_check_time": "2026-08-03 16:42:05",
+  "last_phenix_check_timestamp": 1785660125,
+  "last_phenix_check_time": "2026-08-02 16:42:05",
+  "last_phenix_server_state": "starting",
+  "last_phenix_action": "running_starting"
 }
