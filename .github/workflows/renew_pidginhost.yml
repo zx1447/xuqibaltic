@@ -2,9 +2,11 @@ name: PidginHost Server Auto Renew
 
 on:
   workflow_dispatch:
-  schedule:
-    # 每 7 天跑一次 (UTC 00:00)
-    - cron: "0 0 */7 * *"
+  # schedule 已停用: 续期改在服务器自己上跑 cron (更稳, session 自动刷新)
+  # 服务器 cron: /etc/cron.d/pidginhost-renew (每周一 0:00 UTC)
+  # 如需恢复 GHA 自动跑, 取消下面两行注释:
+  # schedule:
+  #   - cron: "0 0 */7 * *"
 
 permissions:
   contents: read
