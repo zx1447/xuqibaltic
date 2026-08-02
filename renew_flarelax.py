@@ -151,13 +151,17 @@ def solve_turnstile(browser) -> None:
         if "checking" not in title.lower() and "just a moment" not in title.lower():
             log(f"   ✅ 当前页面非人机校验页 (title={title[:50]})")
             return
-        if attempt in (1, 5, 10):
+        if attempt in (1, 4, 8, 12):
             log(f"   🖱️ 尝试点击 Turnstile 人机验证框 (第 {attempt} 秒)...")
-            try:
-                browser.driver.uc_gui_click_cf()
-            except Exception:
+            for clicker in (
+                lambda: browser.driver.uc_gui_click_cf(),
+                lambda: browser.driver.uc_gui_click_cf(frame="div.g-recaptcha iframe"),
+                lambda: browser.driver.uc_gui_click_captcha(),
+                lambda: browser.driver.uc_gui_click_cf(frame="iframe"),
+            ):
                 try:
-                    browser.driver.uc_gui_click_captcha()
+                    clicker()
+                    break
                 except Exception:
                     pass
         time.sleep(1)
