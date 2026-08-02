@@ -166,7 +166,17 @@ def get_session_with_browser() -> requests.Session:
     from seleniumbase import SB
 
     log("🌐 启动 SeleniumBase UC 浏览器过 Cloudflare 并进行 Discord OAuth...")
-    with SB(uc=True, xvfb=True, headless=False, locale="en", window_size="1280,720") as sb:
+    options = {
+        "uc": True,
+        "xvfb": True,
+        "headless": False,
+        "locale": "en",
+        "window_size": "1280,720",
+    }
+    if CUSTOM_PROXY:
+        options["proxy"] = CUSTOM_PROXY
+        log(f"   🔗 浏览器将通过代理：{CUSTOM_PROXY}")
+    with SB(**options) as sb:
         sb.uc_open_with_reconnect(AUTH_URL, 6)
         time.sleep(4)
         solve_turnstile(sb)

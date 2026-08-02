@@ -29,22 +29,45 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install dependencies
+      - name: Install dependencies & Xray
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb
+          sudo apt-get install -y xvfb unzip
           google-chrome --version
           pip install --upgrade pip seleniumbase requests cryptography
           seleniumbase install chromedriver
+          mkdir -p /tmp/flarelax-xray
+          XRAY_TAG=$(curl -fsSL -H "User-Agent: flarelax-renew" https://api.github.com/repos/XTLS/Xray-core/releases/latest | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag_name"])')
+          curl -fsSL "https://github.com/XTLS/Xray-core/releases/download/${XRAY_TAG}/Xray-linux-64.zip" -o /tmp/flarelax-xray/xray.zip
+          unzip -q /tmp/flarelax-xray/xray.zip -d /tmp/flarelax-xray
+          chmod +x /tmp/flarelax-xray/xray
 
       - name: Run Flarelax server status monitor and renewal
         env:
           FLARELAX_DISCORD_TOKEN: ${{ secrets.FLARELAX_DISCORD_TOKEN }}
           FLARELAX_SESSION_KEY: ${{ secrets.FLARELAX_SESSION_KEY }}
-          FLARELAX_PROXY: ${{ secrets.FLARELAX_PROXY }}
+          FLARELAX_VLESS_URI: ${{ secrets.FLARELAX_VLESS_URI || secrets.FENIXHOST_VLESS_URI || secrets.SCYED_VLESS_URI }}
+          FLARELAX_PROXY: "socks5://127.0.0.1:1080"
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-        run: xvfb-run -a python3 renew_flarelax.py
+        run: |
+          if [ -n "$FLARELAX_VLESS_URI" ] && [ -f "setup_vless.py" ]; then
+            python setup_vless.py
+            /tmp/flarelax-xray/xray run -c /tmp/flarelax-xray/config.json >/tmp/flarelax-xray/xray.log 2>&1 &
+            XRAY_PID=$!
+            trap 'kill "$XRAY_PID" 2>/dev/null || true' EXIT
+            for i in $(seq 1 15); do
+              if curl -fsS --max-time 5 -x socks5h://127.0.0.1:1080 https://www.cloudflare.com/cdn-cgi/trace > /tmp/flarelax-xray/trace; then
+                break
+              fi
+              sleep 1
+            done
+            grep -E '^(ip|loc|warp)=' /tmp/flarelax-xray/trace || true
+            echo "✅ VLESS 节点访问成功"
+          else
+            echo "ℹ️ 未配置 VLESS 代理，使用默认出口"
+          fi
+          xvfb-run -a python3 renew_flarelax.py
 
       - name: Save Flarelax state
         if: always()
