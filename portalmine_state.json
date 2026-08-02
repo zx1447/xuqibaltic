@@ -1,7 +1,7 @@
 {
   "last_check_timestamp": 1785685801,
-  "last_check_time": "2026-08-02 23:50:01",
-  "last_status": "success",
+  "last_check_time": "2026-08-03 00:34:19",
+  "last_status": "ERROR: HTTPSConnectionPool(host='verified-project.com', port=443): Max retries exceeded with url: / (Caused by NameResolutionError(\"HTTPSConnection(host='verified-project.com', port=443): Failed to resolve 'verified-project.com' ([Errno -3] Temporary failure in name resolution)\"))",
   "server_state": {
     "state": "running",
     "state_key": "online",
