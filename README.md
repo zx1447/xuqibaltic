@@ -1,50 +1,50 @@
 # xuqibaltic (pidginhost branch)
 
-PidginHost cloud server 自动延期 - 纯 API 调用 (无浏览器)。
+PidginHost cloud server 自动延期 + 自动刷新 session cookie。
 
 ## 功能
 
-- 用 session cookie + CSRF token 直接 POST 续期
-- **不依赖 Playwright/浏览器**, 不会被 UI 改版影响
-- 几秒完成 (之前 Playwright 要 30 秒+)
-- GitHub Actions 每 7 天自动跑
+- **自动登录**: 每次跑都用 Playwright + GitHub OAuth 重新登录, 拿新 session cookie
+- **纯 API 续期**: 用新 cookie POST `action=extend_renewal`, 不点按钮
+- **自动刷新 secret**: 把新 cookie 写回 GitHub secret, 下次 workflow 用新 session
+- **永不过期**: session 永远是新鲜的, 不需要手动更新
 
-## 续期 API
+## 流程
 
 ```
-POST https://www.pidginhost.com/panel/cloud/servers/{id}/
-Content-Type: application/x-www-form-urlencoded
-Cookie: sessionid=...; csrftoken=...
-X-CSRFToken: ...
-Referer: https://www.pidginhost.com/panel/cloud/servers/{id}/
-Body: csrfmiddlewaretoken={CSRF}&action=extend_renewal
+1. Playwright 登录 pidginhost.com (GitHub OAuth)
+   → 拿到新 sessionid + csrftoken
+2. 用新 cookie POST /panel/cloud/servers/{id}/
+   → action=extend_renewal 续期 30 天
+3. 用 GitHub API 把新 cookie 写回 secret
+   → PIDGINHOST_SESSION + PIDGINHOST_CSRF 更新
 ```
-
-成功响应: 页面包含 "expires in 30 days" 或 "extended for 30 days"
 
 ## Secrets
 
 | Secret | 说明 |
 |--------|------|
-| `PIDGINHOST_SESSION` | sessionid cookie (从浏览器 F12 获取) |
-| `PIDGINHOST_CSRF` | csrftoken cookie |
+| `DP_GH_USER` | GitHub 用户名 (用于 OAuth 登录 pidginhost) |
+| `DP_GH_PASS` | GitHub 密码 |
+| `GH_TOKEN` | GitHub PAT (需要 repo 权限, 用于更新 secret) |
 | `PIDGINHOST_SERVER_ID` | 服务器 ID (如 3920) |
 
-## 如何获取 cookie
+注意: 不再需要 `PIDGINHOST_SESSION` 和 `PIDGINHOST_CSRF` (脚本会自动更新它们), 但第一次跑需要它们存在 (可以是空值或旧值)。
 
-1. 登录 https://www.pidginhost.com/panel/ (用 GitHub OAuth)
-2. F12 → Application → Cookies → `https://www.pidginhost.com`
-3. 复制 `sessionid` 和 `csrftoken` 的 value
+## 频率
 
-## 注意
-
-- **Session 过期**: 通常 14-30 天过期, workflow 失败时 (401/403) 需要重新登录拿新 cookie
-- **续期上限**: PidginHost 免费服务器最多续到 30 天, 已经 30 天时不能再续 (脚本会显示 "已是 30 天上限")
-- **频率**: 每 7 天跑一次, 到期前 7 天才能续 (实际到期 30 天 - 7 天 = 23 天就要开始续)
+每 7 天跑一次 (UTC 00:00), 到期前 7 天才能续。
 
 ## 本地测试
 
 ```bash
-PIDGINHOST_SESSION=xxx PIDGINHOST_CSRF=xxx PIDGINHOST_SERVER_ID=3920 \
+DP_GH_USER=xxx DP_GH_PASS=xxx GH_TOKEN=ghp_xxx PIDGINHOST_SERVER_ID=3920 \
+  GITHUB_REPOSITORY=zx1447/xuqibaltic \
   python3 renew_pidginhost.py
 ```
+
+## 注意
+
+- GitHub OAuth 登录时如果触发 "verified-device" (异地登录验证), 脚本会失败
+- 这种情况需要你手动登录一次 pidginhost.com, 让 GitHub 记住 GHA 的 IP
+- 实测 GHA 数据中心 IP 登录 GitHub 不会触发 verified-device (跟 dash.domain.digitalplat.org 不同)
