@@ -33,11 +33,12 @@ jobs:
           pip install playwright pynacl
           python -m playwright install chromium --with-deps
 
-      - name: Run PidginHost renew (auto login + extend + refresh secret)
+      - name: Run PidginHost renew
         env:
           DP_GH_USER: ${{ secrets.DP_GH_USER }}
           DP_GH_PASS: ${{ secrets.DP_GH_PASS }}
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          PIDGINHOST_API_TOKEN: ${{ secrets.PIDGINHOST_API_TOKEN }}
           PIDGINHOST_SERVER_ID: ${{ secrets.PIDGINHOST_SERVER_ID }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: python3 renew_pidginhost.py
