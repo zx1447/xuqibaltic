@@ -30,7 +30,12 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install --upgrade pip requests "requests[socks]" cryptography
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+          google-chrome --version
+          pip install --upgrade pip seleniumbase requests cryptography
+          seleniumbase install chromedriver
 
       - name: Run Flarelax server status monitor and renewal
         env:
@@ -39,7 +44,7 @@ jobs:
           FLARELAX_PROXY: ${{ secrets.FLARELAX_PROXY }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-        run: python renew_flarelax.py
+        run: xvfb-run -a python3 renew_flarelax.py
 
       - name: Save Flarelax state
         if: always()

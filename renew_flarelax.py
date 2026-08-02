@@ -5,13 +5,12 @@ Flarelax 服务器开机状态检测与自动续期（已停止获取 AFK 积分
 
 - 检查服务器 8a4d1879 是否正在运行，如离线/停止则发送开机命令。
 - 距离上次成功续期满 48 小时自动发起服务器续期（/api/server/8a4d1879/renew）。
-- 移除了 350 分钟 AFK 积分获取循环，每次任务极速完成。
-- 支持节点更换后复用原会话 Cookie，大幅提高稳定性。
+- 移除了 350 分钟 AFK 积分获取循环，每次任务在 15-30 秒内极速完成。
+- 使用 SeleniumBase UC 浏览器自动通过 Cloudflare Turnstile 验证，彻底告别不稳定的免费代理池。
 """
 
 from __future__ import annotations
 
-import concurrent.futures
 import datetime as dt
 import json
 import os
@@ -26,7 +25,6 @@ import requests
 from cryptography.fernet import Fernet, InvalidToken
 
 BASE_URL = "https://free-dash.flarelax.com"
-WARNING_URL = f"{BASE_URL}/auth/warning"
 AUTH_URL = f"{BASE_URL}/auth/discord"
 CALLBACK_URL = f"{BASE_URL}/auth/discord/callback"
 SERVER_RENEW_URL = f"{BASE_URL}/api/server/8a4d1879/renew"
@@ -48,16 +46,6 @@ USER_AGENTS = [
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
 ]
 UA = random.choice(USER_AGENTS)
-
-PROXY_SOURCES = [
-    "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks5.txt",
-    "https://raw.githubusercontent.com/hookzof/socks5_list/master/proxy.txt",
-    "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks5.txt",
-    "https://raw.githubusercontent.com/prxchk/proxy-list/main/socks5.txt",
-    "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt",
-    "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt",
-    "https://raw.githubusercontent.com/prxchk/proxy-list/main/http.txt",
-]
 
 
 class FlarelaxError(RuntimeError):
@@ -87,16 +75,7 @@ def send_tg(msg: str) -> None:
         pass
 
 
-def normalize_proxy(address: str) -> str:
-    if not address:
-        return ""
-    address = address.strip()
-    if address.startswith(("http://", "https://", "socks5://", "socks5h://")):
-        return address
-    return f"socks5h://{address}"
-
-
-def make_session(proxy: str = "") -> requests.Session:
+def make_session() -> requests.Session:
     session = requests.Session()
     session.trust_env = False
     session.headers.update({
@@ -105,26 +84,11 @@ def make_session(proxy: str = "") -> requests.Session:
         "Accept-Language": "en-US,en;q=0.9",
         "Connection": "keep-alive",
     })
-    if proxy:
-        session.proxies.update({"http": proxy, "https": proxy})
     return session
 
 
-def get_oauth_parameters(session: requests.Session) -> tuple[str, str, str, str]:
-    entry = session.get(AUTH_URL, allow_redirects=False, timeout=25)
-    location = entry.headers.get("Location", "")
-    if entry.status_code not in (301, 302, 303, 307, 308) or "discord.com" not in location:
-        raise FlarelaxError(f"OAuth 入口异常：HTTP {entry.status_code}")
-    query = urllib.parse.parse_qs(urllib.parse.urlparse(location).query)
-    client_id = query.get("client_id", [""])[0]
-    redirect_uri = query.get("redirect_uri", [""])[0]
-    scope = query.get("scope", [""])[0]
-    if not client_id or not redirect_uri:
-        raise FlarelaxError("OAuth 地址缺少必要参数")
-    return location, client_id, redirect_uri, scope
-
-
 def discord_authorize(location: str, client_id: str, redirect_uri: str, scope: str) -> str:
+    """直连 Discord 完成 OAuth 授权并获取 callback 地址。"""
     discord_session = make_session()
     response = discord_session.post(
         f"{DISCORD_API}/oauth2/authorize",
@@ -164,27 +128,84 @@ def discord_authorize(location: str, client_id: str, redirect_uri: str, scope: s
     return callback
 
 
-def login_via_proxy(proxy: str) -> requests.Session:
-    log(f"🔗 尝试节点：{proxy}")
-    site_session = make_session(proxy)
-    site_session.get(WARNING_URL, timeout=20)
-    location, client_id, redirect_uri, scope = get_oauth_parameters(site_session)
-    log(f"   ✅ 获取 OAuth 参数：client_id={client_id}")
-    log("   🔐 直连 Discord 提交授权（Token 不经过代理）...")
-    callback_url = discord_authorize(location, client_id, redirect_uri, scope)
-    log("   ✅ Discord 授权 Code 获取成功，正在通过节点完成 Callback...")
-    callback = site_session.get(callback_url, allow_redirects=True, timeout=25)
-    if callback.status_code != 200 or "/login" in callback.url.lower():
-        raise FlarelaxError(
-            f"Callback 响应不为登录状态：HTTP {callback.status_code}，最终 URL：{callback.url}"
-        )
-    afk_page = site_session.get(f"{BASE_URL}/dashboard", timeout=20)
-    if afk_page.status_code != 200 or "/login" in afk_page.url.lower():
-        raise FlarelaxError(
-            f"后台页面验证失败：HTTP {afk_page.status_code}，当前 URL：{afk_page.url}"
-        )
-    log(f"   🎉 登录并验证成功，最终页面：{afk_page.url}")
-    return site_session
+def turnstile_token(browser) -> str:
+    try:
+        return browser.execute_script(
+            """
+            const el = document.querySelector('input[name="cf-turnstile-response"]');
+            if (el && el.value) return el.value;
+            try { return window.turnstile?.getResponse?.() || ''; } catch (e) { return ''; }
+            """
+        ) or ""
+    except Exception:
+        return ""
+
+
+def solve_turnstile(browser) -> None:
+    if turnstile_token(browser):
+        return
+    log("🛡️ 正在使用 SeleniumBase UC 自动处理 Cloudflare Turnstile...")
+    methods = (
+        lambda: browser.driver.uc_gui_click_cf(frame="#cf-turnstile", retry=False),
+        lambda: browser.driver.uc_gui_click_captcha(),
+        lambda: browser.driver.uc_gui_handle_cf(frame="#cf-turnstile"),
+    )
+    for index, method in enumerate(methods, 1):
+        try:
+            method()
+        except Exception as exc:
+            log(f"   ⚠️ Turnstile 第 {index} 种方式跳过：{type(exc).__name__}")
+        for _ in range(15):
+            if turnstile_token(browser):
+                log("   ✅ Turnstile 验证通过，Token 已生成")
+                return
+            time.sleep(1)
+
+
+def get_session_with_browser() -> requests.Session:
+    from seleniumbase import SB
+
+    log("🌐 启动 SeleniumBase UC 浏览器过 Cloudflare 并进行 Discord OAuth...")
+    with SB(uc=True, xvfb=True, headless=False, locale="en", window_size="1280,720") as sb:
+        sb.uc_open_with_reconnect(AUTH_URL, 6)
+        time.sleep(4)
+        solve_turnstile(sb)
+        time.sleep(3)
+        cur = sb.get_current_url()
+        if "discord.com" not in cur:
+            raise FlarelaxError(f"未能重定向到 Discord OAuth 页面，当前 URL：{cur}")
+        query = urllib.parse.parse_qs(urllib.parse.urlparse(cur).query)
+        client_id = query.get("client_id", [""])[0]
+        redirect_uri = query.get("redirect_uri", [""])[0]
+        scope = query.get("scope", [""])[0]
+        if not client_id or not redirect_uri:
+            raise FlarelaxError("Discord OAuth 地址缺少必要参数")
+        log(f"   ✅ 成功获取 OAuth 参数：client_id={client_id}")
+        log("   🔐 直连 Discord 提交授权...")
+        callback_url = discord_authorize(cur, client_id, redirect_uri, scope)
+        log("   ✅ Discord 授权 Code 获取成功，由浏览器打开 Callback...")
+        sb.open(callback_url)
+        for _ in range(30):
+            time.sleep(1)
+            u = sb.get_current_url()
+            if "/login" not in u.lower() and "free-dash.flarelax.com" in u.lower():
+                log(f"   🎉 后台登录成功，最终 URL：{u}")
+                break
+        else:
+            raise FlarelaxError(f"等待 Dashboard 加载超时，当前 URL：{sb.get_current_url()}")
+
+        cookies = sb.get_cookies()
+        session = make_session()
+        for c in cookies:
+            try:
+                session.cookies.set(
+                    c["name"], c["value"],
+                    domain=c.get("domain", "free-dash.flarelax.com"),
+                    path=c.get("path", "/")
+                )
+            except Exception:
+                pass
+        return session
 
 
 def load_state() -> dict:
@@ -203,35 +224,55 @@ def save_state(data: dict) -> None:
     os.replace(temporary, STATE_FILE)
 
 
-def save_encrypted_session(state: dict, session: requests.Session, proxy: str) -> None:
+def save_encrypted_session(state: dict, session: requests.Session) -> None:
     if not SESSION_KEY:
         log("⚠️ 未配置 FLARELAX_SESSION_KEY，本次不持久化 Flarelax 会话")
         return
-    cookie_value = next(
-        (cookie.value for cookie in session.cookies if cookie.name == SESSION_COOKIE_NAME),
-        None,
-    )
-    if not cookie_value:
-        log("⚠️ 当前 Flarelax 会话没有 connect.sid，无法持久化")
+    cookies = [
+        {"name": c.name, "value": c.value, "domain": c.domain, "path": c.path}
+        for c in session.cookies
+    ]
+    if not cookies:
+        log("⚠️ 当前会话没有任何 Cookie，无法持久化")
         return
     try:
-        state["encrypted_session_cookie"] = Fernet(SESSION_KEY.encode()).encrypt(cookie_value.encode()).decode()
-        state["last_session_proxy"] = proxy
+        state["encrypted_session_cookies"] = Fernet(SESSION_KEY.encode()).encrypt(
+            json.dumps(cookies).encode()
+        ).decode()
         state["session_saved_time"] = now_str()
     except Exception as exc:
         log(f"⚠️ 加密 Flarelax 会话失败：{type(exc).__name__}")
 
 
-def restore_encrypted_session(state: dict, proxy: str) -> requests.Session | None:
-    encrypted = state.get("encrypted_session_cookie")
+def restore_encrypted_session(state: dict) -> requests.Session | None:
+    encrypted = state.get("encrypted_session_cookies")
     if not encrypted or not SESSION_KEY:
+        # 兼容旧版仅保存 connect.sid 的状态
+        old_val = state.get("encrypted_session_cookie")
+        if old_val and SESSION_KEY:
+            try:
+                cookie_value = Fernet(SESSION_KEY.encode()).decrypt(old_val.encode()).decode()
+                session = make_session()
+                session.cookies.set(SESSION_COOKIE_NAME, cookie_value, domain="free-dash.flarelax.com", path="/")
+                return session
+            except Exception:
+                return None
         return None
     try:
-        cookie_value = Fernet(SESSION_KEY.encode()).decrypt(encrypted.encode()).decode()
+        raw = Fernet(SESSION_KEY.encode()).decrypt(encrypted.encode())
+        cookies = json.loads(raw.decode())
     except (InvalidToken, ValueError, TypeError):
         return None
-    session = make_session(proxy)
-    session.cookies.set(SESSION_COOKIE_NAME, cookie_value, domain="free-dash.flarelax.com", path="/")
+    session = make_session()
+    for c in cookies:
+        try:
+            session.cookies.set(
+                c["name"], c["value"],
+                domain=c.get("domain", "free-dash.flarelax.com"),
+                path=c.get("path", "/")
+            )
+        except Exception:
+            pass
     return session
 
 
@@ -352,121 +393,34 @@ def check_and_start_server(session: requests.Session, server_id: str = "8a4d1879
             log(f"   ⚠️ 请求 {url} 失败: {e}")
 
 
-def build_proxy_list() -> list[str]:
-    if CUSTOM_PROXY:
-        log("🔧 检测到 FLARELAX_PROXY，优先尝试自定义节点")
-        return [normalize_proxy(CUSTOM_PROXY)]
-
-    log("🌐 正在抓取公开代理节点列表...")
-    raw_proxies: set[str] = set()
-    for url in PROXY_SOURCES:
-        try:
-            response = requests.get(url, timeout=10)
-            if response.status_code != 200:
-                continue
-            for line in response.text.splitlines():
-                candidate = line.strip()
-                if re.fullmatch(r"(\d{1,3}\.){3}\d{1,3}:\d{2,5}", candidate):
-                    if "http" in url:
-                        raw_proxies.add(f"http://{candidate}")
-                    else:
-                        raw_proxies.add(f"socks5h://{candidate}")
-        except Exception:
-            continue
-
-    proxies = list(raw_proxies)
-    random.shuffle(proxies)
-    log(f"📥 共发现 {len(proxies)} 个候选节点，挑选最多 150 个并发检测...")
-    return proxies[:150]
-
-
-def check_proxy(proxy: str) -> Optional[str]:
-    session = make_session(proxy)
-    try:
-        check = session.get(WARNING_URL, timeout=10)
-        if check.status_code in (400, 401, 404, 500) or "tokenerror" in check.text.lower():
-            return proxy
-        return None
-    except Exception:
-        return None
-
-
-def find_accepted_proxies(candidates: list[str]) -> list[str]:
-    accepted: list[str] = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=25) as executor:
-        future_map = {executor.submit(check_proxy, proxy): proxy for proxy in candidates}
-        for future in concurrent.futures.as_completed(future_map):
-            result = future.result()
-            if result:
-                accepted.append(result)
-                if len(accepted) >= 5:
-                    break
-    return accepted
-
-
 def main() -> int:
     log("=" * 62)
-    log("🚀 Flarelax 服务器开机状态检测与自动续期（已停止获取积分）")
+    log("🚀 Flarelax 服务器开机状态检测与开机 + 48小时续期（已停止获取积分）")
     log(f"🕐 北京时间：{now_str()}")
     log("=" * 62)
 
     state = load_state()
-    session: Optional[requests.Session] = None
-    current_proxy = ""
+    session = None
 
-    # 1. 优先尝试保存的代理和加密会话
-    saved_proxy = state.get("last_session_proxy", "")
-    if saved_proxy:
-        log(f"♻️ 尝试复用上次 Flarelax 登录节点：{saved_proxy}")
-        restored = restore_encrypted_session(state, saved_proxy)
-        if restored is not None and session_is_valid(restored):
-            session = restored
-            current_proxy = saved_proxy
-            log("✅ Flarelax Discord 会话有效，本次无需重新登录")
-        else:
-            log("⌛ 上次 Flarelax 会话或节点失效，准备筛选节点")
+    # 1. 优先尝试保存的会话与 cf_clearance
+    restored = restore_encrypted_session(state)
+    if restored is not None and session_is_valid(restored):
+        session = restored
+        log("✅ 保存的 Flarelax 会话与 CF Clearance 仍有效，无需打开浏览器登录")
+    else:
+        log("⌛ 保存的会话失效或已被 Cloudflare 阻断，启动 SeleniumBase UC 浏览器重新登录")
+        session = get_session_with_browser()
+        save_encrypted_session(state, session)
 
-    if session is None:
-        proxies = build_proxy_list()
-        if not proxies:
-            log("⚠️ 本次未获取到可用公开代理节点")
-            return 0
-        accepted = find_accepted_proxies(proxies)
-        if not accepted:
-            log("❌ 未找到能够通过 Flarelax 访问检测的节点")
-            return 1
-        # 优先检测在使用新有效节点后，上次已保存的会话 Cookie 是否能用
-        for proxy in accepted:
-            restored = restore_encrypted_session(state, proxy)
-            if restored is not None and session_is_valid(restored):
-                session = restored
-                current_proxy = proxy
-                log(f"✅ 在新节点 ({proxy}) 下成功复用了加密的 Flarelax 会话，跳过 OAuth！")
-                break
-
-        if session is None:
-            for proxy in accepted:
-                try:
-                    session = login_via_proxy(proxy)
-                    current_proxy = proxy
-                    break
-                except Exception as exc:
-                    log(f"⚠️ 节点 {proxy} 登录失败：{exc}")
-
-        if session is None:
-            log("❌ 重新 OAuth 登录尝试了所有候选节点均失败")
-            return 1
-        save_encrypted_session(state, session, current_proxy)
-
-    # 2. 检测服务器并开机
+    # 2. 检测服务器并启动 (若离线)
     try:
         check_and_start_server(session, "8a4d1879")
     except Exception as exc:
         log(f"⚠️ 服务器状态检测出现异常：{exc}")
 
-    # 3. 距离上次续期满 48 小时自动发续期
+    # 3. 距离上次续期满 48 小时自动发起服务器续期
     try:
-        maybe_renew_server(session, 100)
+        maybe_renew_server(session)
     except Exception as exc:
         log(f"⚠️ 服务器续期尝试提示：{exc}")
 
