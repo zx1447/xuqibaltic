@@ -3,10 +3,10 @@
   "panel_url": "https://panel.slicenodes.in",
   "monitor_interval_seconds": 3600,
   "runtime_seconds": 21000,
-  "last_check_time": "2026-08-03 00:26:00",
+  "last_check_time": "2026-08-03 06:18:38",
   "last_cycle": {
     "cycle_number": 6,
-    "check_time": "2026-08-03 00:26:00",
+    "check_time": "2026-08-03 06:18:38",
     "server_count": 3,
     "failures": 0,
     "servers": [
@@ -15,37 +15,28 @@
         "uuid": "6461f922-e0e0-4412-9ba8-02036e8462a8",
         "name": "in02",
         "node": "Mumbai-01",
-        "checked_time": "2026-08-03 00:25:58",
+        "checked_time": "2026-08-03 06:18:37",
         "start_attempted": false,
         "start_success": false,
-        "initial_state": "running",
-        "resources": {
-          "memory_bytes": 338190336,
-          "cpu_absolute": 2.726,
-          "disk_bytes": 1136814619,
-          "network_rx_bytes": 49660826,
-          "network_tx_bytes": 19144628,
-          "uptime": 115810452
-        },
-        "state": "running",
-        "action": "already_running"
+        "state": "suspended",
+        "action": "skip_suspended"
       },
       {
         "identifier": "721e9bc3",
         "uuid": "721e9bc3-e218-45eb-820e-2634a55c0bf0",
         "name": "nice",
         "node": "London-01",
-        "checked_time": "2026-08-03 00:25:59",
+        "checked_time": "2026-08-03 06:18:37",
         "start_attempted": false,
         "start_success": false,
         "initial_state": "running",
         "resources": {
-          "memory_bytes": 936730624,
-          "cpu_absolute": 6.055,
-          "disk_bytes": 1133739656,
-          "network_rx_bytes": 55883323,
-          "network_tx_bytes": 24900704,
-          "uptime": 146402246
+          "memory_bytes": 1123090432,
+          "cpu_absolute": 2.58,
+          "disk_bytes": 1133823870,
+          "network_rx_bytes": 32383119,
+          "network_tx_bytes": 1958369,
+          "uptime": 10917189
         },
         "state": "running",
         "action": "already_running"
@@ -55,297 +46,25 @@
         "uuid": "b1d8e8fb-667c-40e4-85dd-0605ab1108b2",
         "name": "sgnice",
         "node": "Singapore-01",
-        "checked_time": "2026-08-03 00:25:59",
+        "checked_time": "2026-08-03 06:18:38",
         "start_attempted": false,
         "start_success": false,
         "initial_state": "running",
         "resources": {
-          "memory_bytes": 1158369280,
-          "cpu_absolute": 0.694,
-          "disk_bytes": 259196524,
-          "network_rx_bytes": 6964988,
-          "network_tx_bytes": 110264,
-          "uptime": 63363117
+          "memory_bytes": 1141407744,
+          "cpu_absolute": 0.817,
+          "disk_bytes": 259196534,
+          "network_rx_bytes": 9112847,
+          "network_tx_bytes": 143762,
+          "uptime": 84510046
         },
         "state": "running",
         "action": "already_running"
       }
     ]
   },
-  "total_cycles": 33,
+  "total_cycles": 37,
   "recent_cycles": [
-    {
-      "cycle_number": 3,
-      "check_time": "2026-08-02 15:35:37",
-      "server_count": 3,
-      "failures": 0,
-      "servers": [
-        {
-          "identifier": "6461f922",
-          "uuid": "6461f922-e0e0-4412-9ba8-02036e8462a8",
-          "name": "in02",
-          "node": "Mumbai-01",
-          "checked_time": "2026-08-02 15:35:35",
-          "start_attempted": false,
-          "start_success": false,
-          "initial_state": "running",
-          "resources": {
-            "memory_bytes": 312438784,
-            "cpu_absolute": 2.179,
-            "disk_bytes": 1136782584,
-            "network_rx_bytes": 44640397,
-            "network_tx_bytes": 13944034,
-            "uptime": 84000339
-          },
-          "state": "running",
-          "action": "already_running"
-        },
-        {
-          "identifier": "721e9bc3",
-          "uuid": "721e9bc3-e218-45eb-820e-2634a55c0bf0",
-          "name": "nice",
-          "node": "London-01",
-          "checked_time": "2026-08-02 15:35:35",
-          "start_attempted": false,
-          "start_success": false,
-          "initial_state": "running",
-          "resources": {
-            "memory_bytes": 920391680,
-            "cpu_absolute": 1.935,
-            "disk_bytes": 1133743079,
-            "network_rx_bytes": 50712716,
-            "network_tx_bytes": 19498804,
-            "uptime": 114591326
-          },
-          "state": "running",
-          "action": "already_running"
-        },
-        {
-          "identifier": "b1d8e8fb",
-          "uuid": "b1d8e8fb-667c-40e4-85dd-0605ab1108b2",
-          "name": "sgnice",
-          "node": "Singapore-01",
-          "checked_time": "2026-08-02 15:35:36",
-          "start_attempted": false,
-          "start_success": false,
-          "initial_state": "running",
-          "resources": {
-            "memory_bytes": 1150332928,
-            "cpu_absolute": 0.654,
-            "disk_bytes": 259196530,
-            "network_rx_bytes": 3027081,
-            "network_tx_bytes": 59336,
-            "uptime": 31554919
-          },
-          "state": "running",
-          "action": "already_running"
-        }
-      ]
-    },
-    {
-      "cycle_number": 5,
-      "check_time": "2026-08-02 17:36:11",
-      "server_count": 3,
-      "failures": 0,
-      "servers": [
-        {
-          "identifier": "6461f922",
-          "uuid": "6461f922-e0e0-4412-9ba8-02036e8462a8",
-          "name": "in02",
-          "node": "Mumbai-01",
-          "checked_time": "2026-08-02 17:36:07",
-          "start_attempted": false,
-          "start_success": false,
-          "initial_state": "running",
-          "resources": {
-            "memory_bytes": 290598912,
-            "cpu_absolute": 11.541,
-            "disk_bytes": 1136782689,
-            "network_rx_bytes": 45818329,
-            "network_tx_bytes": 15133071,
-            "uptime": 91230048
-          },
-          "state": "running",
-          "action": "already_running"
-        },
-        {
-          "identifier": "721e9bc3",
-          "uuid": "721e9bc3-e218-45eb-820e-2634a55c0bf0",
-          "name": "nice",
-          "node": "London-01",
-          "checked_time": "2026-08-02 17:36:08",
-          "start_attempted": false,
-          "start_success": false,
-          "initial_state": "running",
-          "resources": {
-            "memory_bytes": 926253056,
-            "cpu_absolute": 2.641,
-            "disk_bytes": 1133799581,
-            "network_rx_bytes": 51853370,
-            "network_tx_bytes": 20720767,
-            "uptime": 121823434
-          },
-          "state": "running",
-          "action": "already_running"
-        },
-        {
-          "identifier": "b1d8e8fb",
-          "uuid": "b1d8e8fb-667c-40e4-85dd-0605ab1108b2",
-          "name": "sgnice",
-          "node": "Singapore-01",
-          "checked_time": "2026-08-02 17:36:10",
-          "start_attempted": false,
-          "start_success": false,
-          "initial_state": "running",
-          "resources": {
-            "memory_bytes": 1135702016,
-            "cpu_absolute": 0.741,
-            "disk_bytes": 259196526,
-            "network_rx_bytes": 3718266,
-            "network_tx_bytes": 70516,
-            "uptime": 38784934
-          },
-          "state": "running",
-          "action": "already_running"
-        }
-      ]
-    },
-    {
-      "cycle_number": 1,
-      "check_time": "2026-08-02 19:25:45",
-      "server_count": 3,
-      "failures": 0,
-      "servers": [
-        {
-          "identifier": "6461f922",
-          "uuid": "6461f922-e0e0-4412-9ba8-02036e8462a8",
-          "name": "in02",
-          "node": "Mumbai-01",
-          "checked_time": "2026-08-02 19:25:44",
-          "start_attempted": false,
-          "start_success": false,
-          "initial_state": "running",
-          "resources": {
-            "memory_bytes": 337670144,
-            "cpu_absolute": 3.066,
-            "disk_bytes": 1136789043,
-            "network_rx_bytes": 46854724,
-            "network_tx_bytes": 16221675,
-            "uptime": 97802584
-          },
-          "state": "running",
-          "action": "already_running"
-        },
-        {
-          "identifier": "721e9bc3",
-          "uuid": "721e9bc3-e218-45eb-820e-2634a55c0bf0",
-          "name": "nice",
-          "node": "London-01",
-          "checked_time": "2026-08-02 19:25:44",
-          "start_attempted": false,
-          "start_success": false,
-          "initial_state": "running",
-          "resources": {
-            "memory_bytes": 930250752,
-            "cpu_absolute": 3.573,
-            "disk_bytes": 1133737240,
-            "network_rx_bytes": 52941672,
-            "network_tx_bytes": 21851642,
-            "uptime": 128394797
-          },
-          "state": "running",
-          "action": "already_running"
-        },
-        {
-          "identifier": "b1d8e8fb",
-          "uuid": "b1d8e8fb-667c-40e4-85dd-0605ab1108b2",
-          "name": "sgnice",
-          "node": "Singapore-01",
-          "checked_time": "2026-08-02 19:25:45",
-          "start_attempted": false,
-          "start_success": false,
-          "initial_state": "running",
-          "resources": {
-            "memory_bytes": 1135828992,
-            "cpu_absolute": 0.8,
-            "disk_bytes": 259197427,
-            "network_rx_bytes": 4361664,
-            "network_tx_bytes": 78866,
-            "uptime": 45356991
-          },
-          "state": "running",
-          "action": "already_running"
-        }
-      ]
-    },
-    {
-      "cycle_number": 2,
-      "check_time": "2026-08-02 20:25:49",
-      "server_count": 3,
-      "failures": 0,
-      "servers": [
-        {
-          "identifier": "6461f922",
-          "uuid": "6461f922-e0e0-4412-9ba8-02036e8462a8",
-          "name": "in02",
-          "node": "Mumbai-01",
-          "checked_time": "2026-08-02 20:25:46",
-          "start_attempted": false,
-          "start_success": false,
-          "initial_state": "running",
-          "resources": {
-            "memory_bytes": 315363328,
-            "cpu_absolute": 2.442,
-            "disk_bytes": 1136789953,
-            "network_rx_bytes": 47407841,
-            "network_tx_bytes": 16814415,
-            "uptime": 101403571
-          },
-          "state": "running",
-          "action": "already_running"
-        },
-        {
-          "identifier": "721e9bc3",
-          "uuid": "721e9bc3-e218-45eb-820e-2634a55c0bf0",
-          "name": "nice",
-          "node": "London-01",
-          "checked_time": "2026-08-02 20:25:47",
-          "start_attempted": false,
-          "start_success": false,
-          "initial_state": "running",
-          "resources": {
-            "memory_bytes": 930398208,
-            "cpu_absolute": 5.408,
-            "disk_bytes": 1133737232,
-            "network_rx_bytes": 53509146,
-            "network_tx_bytes": 22458416,
-            "uptime": 131997166
-          },
-          "state": "running",
-          "action": "already_running"
-        },
-        {
-          "identifier": "b1d8e8fb",
-          "uuid": "b1d8e8fb-667c-40e4-85dd-0605ab1108b2",
-          "name": "sgnice",
-          "node": "Singapore-01",
-          "checked_time": "2026-08-02 20:25:49",
-          "start_attempted": false,
-          "start_success": false,
-          "initial_state": "running",
-          "resources": {
-            "memory_bytes": 1148444672,
-            "cpu_absolute": 0.761,
-            "disk_bytes": 259197438,
-            "network_rx_bytes": 4751324,
-            "network_tx_bytes": 84456,
-            "uptime": 48958602
-          },
-          "state": "running",
-          "action": "already_running"
-        }
-      ]
-    },
     {
       "cycle_number": 3,
       "check_time": "2026-08-02 21:25:52",
@@ -617,12 +336,262 @@
           "action": "already_running"
         }
       ]
+    },
+    {
+      "cycle_number": 1,
+      "check_time": "2026-08-03 01:15:59",
+      "server_count": 3,
+      "failures": 0,
+      "servers": [
+        {
+          "identifier": "6461f922",
+          "uuid": "6461f922-e0e0-4412-9ba8-02036e8462a8",
+          "name": "in02",
+          "node": "Mumbai-01",
+          "checked_time": "2026-08-03 01:15:58",
+          "start_attempted": false,
+          "start_success": false,
+          "initial_state": "running",
+          "resources": {
+            "memory_bytes": 334569472,
+            "cpu_absolute": 2.593,
+            "disk_bytes": 1136816063,
+            "network_rx_bytes": 50117238,
+            "network_tx_bytes": 19625533,
+            "uptime": 118808295
+          },
+          "state": "running",
+          "action": "already_running"
+        },
+        {
+          "identifier": "721e9bc3",
+          "uuid": "721e9bc3-e218-45eb-820e-2634a55c0bf0",
+          "name": "nice",
+          "node": "London-01",
+          "checked_time": "2026-08-03 01:15:58",
+          "start_attempted": false,
+          "start_success": false,
+          "initial_state": "running",
+          "resources": {
+            "memory_bytes": 936640512,
+            "cpu_absolute": 5.389,
+            "disk_bytes": 1133739661,
+            "network_rx_bytes": 56354782,
+            "network_tx_bytes": 25404245,
+            "uptime": 149399696
+          },
+          "state": "running",
+          "action": "already_running"
+        },
+        {
+          "identifier": "b1d8e8fb",
+          "uuid": "b1d8e8fb-667c-40e4-85dd-0605ab1108b2",
+          "name": "sgnice",
+          "node": "Singapore-01",
+          "checked_time": "2026-08-03 01:15:59",
+          "start_attempted": false,
+          "start_success": false,
+          "initial_state": "running",
+          "resources": {
+            "memory_bytes": 1160376320,
+            "cpu_absolute": 0.789,
+            "disk_bytes": 259196519,
+            "network_rx_bytes": 7301974,
+            "network_tx_bytes": 115854,
+            "uptime": 66360202
+          },
+          "state": "running",
+          "action": "already_running"
+        }
+      ]
+    },
+    {
+      "cycle_number": 3,
+      "check_time": "2026-08-03 03:18:04",
+      "server_count": 3,
+      "failures": 0,
+      "servers": [
+        {
+          "identifier": "6461f922",
+          "uuid": "6461f922-e0e0-4412-9ba8-02036e8462a8",
+          "name": "in02",
+          "node": "Mumbai-01",
+          "checked_time": "2026-08-03 03:16:30",
+          "start_attempted": false,
+          "start_success": false,
+          "state": "suspended",
+          "action": "skip_suspended"
+        },
+        {
+          "identifier": "721e9bc3",
+          "uuid": "721e9bc3-e218-45eb-820e-2634a55c0bf0",
+          "name": "nice",
+          "node": "London-01",
+          "checked_time": "2026-08-03 03:16:30",
+          "start_attempted": true,
+          "start_success": true,
+          "initial_state": "offline",
+          "resources": {
+            "memory_bytes": 0,
+            "cpu_absolute": 0,
+            "disk_bytes": 1129837439,
+            "network_rx_bytes": 0,
+            "network_tx_bytes": 0,
+            "uptime": 0
+          },
+          "start_response": {
+            "http_status": 204,
+            "accepted": true
+          },
+          "state": "running",
+          "verify_polls": 6,
+          "action": "started"
+        },
+        {
+          "identifier": "b1d8e8fb",
+          "uuid": "b1d8e8fb-667c-40e4-85dd-0605ab1108b2",
+          "name": "sgnice",
+          "node": "Singapore-01",
+          "checked_time": "2026-08-03 03:18:04",
+          "start_attempted": false,
+          "start_success": false,
+          "initial_state": "running",
+          "resources": {
+            "memory_bytes": 1141096448,
+            "cpu_absolute": 0.565,
+            "disk_bytes": 259196531,
+            "network_rx_bytes": 8117096,
+            "network_tx_bytes": 127034,
+            "uptime": 73682178
+          },
+          "state": "running",
+          "action": "already_running"
+        }
+      ]
+    },
+    {
+      "cycle_number": 4,
+      "check_time": "2026-08-03 04:18:06",
+      "server_count": 3,
+      "failures": 0,
+      "servers": [
+        {
+          "identifier": "6461f922",
+          "uuid": "6461f922-e0e0-4412-9ba8-02036e8462a8",
+          "name": "in02",
+          "node": "Mumbai-01",
+          "checked_time": "2026-08-03 04:18:05",
+          "start_attempted": false,
+          "start_success": false,
+          "state": "suspended",
+          "action": "skip_suspended"
+        },
+        {
+          "identifier": "721e9bc3",
+          "uuid": "721e9bc3-e218-45eb-820e-2634a55c0bf0",
+          "name": "nice",
+          "node": "London-01",
+          "checked_time": "2026-08-03 04:18:05",
+          "start_attempted": false,
+          "start_success": false,
+          "initial_state": "running",
+          "resources": {
+            "memory_bytes": 1117724672,
+            "cpu_absolute": 5.786,
+            "disk_bytes": 1133824781,
+            "network_rx_bytes": 31239944,
+            "network_tx_bytes": 740104,
+            "uptime": 3688653
+          },
+          "state": "running",
+          "action": "already_running"
+        },
+        {
+          "identifier": "b1d8e8fb",
+          "uuid": "b1d8e8fb-667c-40e4-85dd-0605ab1108b2",
+          "name": "sgnice",
+          "node": "Singapore-01",
+          "checked_time": "2026-08-03 04:18:06",
+          "start_attempted": false,
+          "start_success": false,
+          "initial_state": "running",
+          "resources": {
+            "memory_bytes": 1141190656,
+            "cpu_absolute": 0.662,
+            "disk_bytes": 259196506,
+            "network_rx_bytes": 8440683,
+            "network_tx_bytes": 132624,
+            "uptime": 77282110
+          },
+          "state": "running",
+          "action": "already_running"
+        }
+      ]
+    },
+    {
+      "cycle_number": 6,
+      "check_time": "2026-08-03 06:18:38",
+      "server_count": 3,
+      "failures": 0,
+      "servers": [
+        {
+          "identifier": "6461f922",
+          "uuid": "6461f922-e0e0-4412-9ba8-02036e8462a8",
+          "name": "in02",
+          "node": "Mumbai-01",
+          "checked_time": "2026-08-03 06:18:37",
+          "start_attempted": false,
+          "start_success": false,
+          "state": "suspended",
+          "action": "skip_suspended"
+        },
+        {
+          "identifier": "721e9bc3",
+          "uuid": "721e9bc3-e218-45eb-820e-2634a55c0bf0",
+          "name": "nice",
+          "node": "London-01",
+          "checked_time": "2026-08-03 06:18:37",
+          "start_attempted": false,
+          "start_success": false,
+          "initial_state": "running",
+          "resources": {
+            "memory_bytes": 1123090432,
+            "cpu_absolute": 2.58,
+            "disk_bytes": 1133823870,
+            "network_rx_bytes": 32383119,
+            "network_tx_bytes": 1958369,
+            "uptime": 10917189
+          },
+          "state": "running",
+          "action": "already_running"
+        },
+        {
+          "identifier": "b1d8e8fb",
+          "uuid": "b1d8e8fb-667c-40e4-85dd-0605ab1108b2",
+          "name": "sgnice",
+          "node": "Singapore-01",
+          "checked_time": "2026-08-03 06:18:38",
+          "start_attempted": false,
+          "start_success": false,
+          "initial_state": "running",
+          "resources": {
+            "memory_bytes": 1141407744,
+            "cpu_absolute": 0.817,
+            "disk_bytes": 259196534,
+            "network_rx_bytes": 9112847,
+            "network_tx_bytes": 143762,
+            "uptime": 84510046
+          },
+          "state": "running",
+          "action": "already_running"
+        }
+      ]
     }
   ],
   "last_local_test_result": "success",
-  "last_start_time": "2026-08-02 19:25:43",
-  "last_end_time": "2026-08-03 01:15:43",
+  "last_start_time": "2026-08-03 01:15:57",
+  "last_end_time": "2026-08-03 07:05:57",
   "last_run_cycles": 6,
-  "last_run_successful_cycles": 6,
+  "last_run_successful_cycles": 4,
   "last_error": "ReadTimeout: HTTPSConnectionPool(host='panel.slicenodes.in', port=443): Read timed out. (read timeout=30)"
 }
