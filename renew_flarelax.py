@@ -1,14 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Flarelax AFK 自动领取脚本。
+Flarelax 服务器开机状态检测与自动续期（已停止获取 AFK 积分）。
 
-Flarelax 会拦截 GitHub Actions 的数据中心出口，因此这里沿用仓库其他分支的
-“动态节点池”思路：从公开列表中探测能通过 Flarelax IP 检查的节点，然后用
-该节点完成 Flarelax OAuth callback 和 claim 请求。
-
-安全处理：Discord Token 只发送到 discord.com，不会经过公开代理；代理仅用于
-访问 Flarelax。公开代理具有不稳定性，成功节点每次运行都会动态重新寻找。
+- 检查服务器 8a4d1879 是否正在运行，如离线/停止则发送开机命令。
+- 距离上次成功续期满 48 小时自动发起服务器续期（/api/server/8a4d1879/renew）。
+- 移除了 350 分钟 AFK 积分获取循环，每次任务在 15-30 秒内极速完成。
 """
 
 from __future__ import annotations
@@ -31,32 +28,32 @@ BASE_URL = "https://free-dash.flarelax.com"
 WARNING_URL = f"{BASE_URL}/auth/warning"
 AUTH_URL = f"{BASE_URL}/auth/discord"
 CALLBACK_URL = f"{BASE_URL}/auth/discord/callback"
-CLAIM_URL = f"{BASE_URL}/api/afk/claim"
 SERVER_RENEW_URL = f"{BASE_URL}/api/server/8a4d1879/renew"
 DISCORD_API = "https://discord.com/api/v10"
 
-# AFK 积分达到 50 以上才尝试续期；两次服务器续期间隔至少 48 小时。
-MIN_RENEW_COINS = 50
+# 两次服务器续期间隔至少 48 小时
 RENEW_INTERVAL_SECONDS = 2 * 24 * 60 * 60
 STATE_FILE = "flarelax_state.json"
 
 DISCORD_TOKEN = os.environ.get("FLARELAX_DISCORD_TOKEN", "").strip()
 CUSTOM_PROXY = os.environ.get("FLARELAX_PROXY", "").strip()
-SESSION_KEY = os.environ.get("FLARELAX_SESSION_KEY", "").strip()
-SESSION_COOKIE_NAME = "connect.sid"
 TG_TOKEN = os.environ.get("TG_BOT_TOKEN", "").strip()
 TG_CHAT_ID = os.environ.get("TG_CHAT_ID", "").strip()
+SESSION_KEY = os.environ.get("FLARELAX_SESSION_KEY", "").strip()
+SESSION_COOKIE_NAME = "connect.sid"
 
-UA = (
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-)
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+]
+UA = random.choice(USER_AGENTS)
 
 PROXY_SOURCES = [
-    ("http", "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/http.txt"),
-    ("http", "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt"),
-    ("socks5", "https://raw.githubusercontent.com/TheSpeedX/SOCKS-List/master/socks5.txt"),
-    ("socks5", "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks5.txt"),
+    "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks5.txt",
+    "https://raw.githubusercontent.com/hookzof/socks5_list/master/proxy.txt",
+    "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks5.txt",
+    "https://raw.githubusercontent.com/prxchk/proxy-list/main/socks5.txt",
 ]
 
 
@@ -64,8 +61,8 @@ class FlarelaxError(RuntimeError):
     pass
 
 
-def log(message: str) -> None:
-    print(message, flush=True)
+def log(msg: str) -> None:
+    print(msg, flush=True)
 
 
 def now_str() -> str:
@@ -74,127 +71,44 @@ def now_str() -> str:
     ).strftime("%Y-%m-%d %H:%M:%S")
 
 
-def send_telegram(message: str) -> None:
+def send_tg(msg: str) -> None:
     if not TG_TOKEN or not TG_CHAT_ID:
         return
     try:
         requests.post(
             f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
-            json={"chat_id": TG_CHAT_ID, "text": message},
+            json={"chat_id": TG_CHAT_ID, "text": msg},
             timeout=15,
         )
-    except Exception as exc:
-        log(f"⚠️ Telegram 通知发送失败：{type(exc).__name__}: {exc}")
+    except Exception:
+        pass
+
+
+def normalize_proxy(address: str) -> str:
+    if not address:
+        return ""
+    address = address.strip()
+    if address.startswith(("http://", "https://", "socks5://", "socks5h://")):
+        return address
+    return f"socks5h://{address}"
 
 
 def make_session(proxy: str = "") -> requests.Session:
     session = requests.Session()
-    # 不读取 Runner 上可能存在的全局代理；站点请求只使用本函数显式指定的节点。
     session.trust_env = False
-    session.headers.update(
-        {
-            "User-Agent": UA,
-            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-            "Accept": "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8",
-        }
-    )
+    session.headers.update({
+        "User-Agent": UA,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Connection": "keep-alive",
+    })
     if proxy:
         session.proxies.update({"http": proxy, "https": proxy})
     return session
 
 
-def proxy_url(scheme: str, address: str) -> str:
-    if address.startswith(("http://", "https://", "socks5://", "socks5h://")):
-        return address
-    return f"socks5h://{address}" if scheme == "socks5" else f"http://{address}"
-
-
-def fetch_proxy_candidates(limit_per_source: int = 180) -> list[str]:
-    """读取公开节点列表，只返回格式正确且去重后的代理 URL。"""
-    candidates: list[str] = []
-    seen: set[str] = set()
-    source_session = make_session()
-    log("🌐 正在获取公开代理节点列表...")
-    for scheme, source in PROXY_SOURCES:
-        try:
-            response = source_session.get(source, timeout=20)
-            response.raise_for_status()
-            addresses = []
-            for line in response.text.splitlines():
-                address = line.strip()
-                if re.fullmatch(r"[^:\s]+:\d{2,5}", address):
-                    addresses.append(address)
-            random.shuffle(addresses)
-            for address in addresses[:limit_per_source]:
-                url = proxy_url(scheme, address)
-                if url not in seen:
-                    seen.add(url)
-                    candidates.append(url)
-            log(f"   {scheme} 节点源可用格式数量：{len(addresses)}")
-        except Exception as exc:
-            log(f"   ⚠️ 节点源读取失败：{type(exc).__name__}")
-    random.shuffle(candidates)
-    log(f"🔍 已整理候选节点：{len(candidates)} 个")
-    return candidates
-
-
-def is_ip_block_page(text: str) -> bool:
-    low = text.lower()
-    return "vpn" in low and ("proxi" in low or "data center" in low)
-
-
-def probe_proxy(proxy: str) -> Optional[str]:
-    """不使用 Discord Token，仅探测 Flarelax 的出口 IP 检查。"""
-    session = make_session(proxy)
-    try:
-        entry = session.get(AUTH_URL, allow_redirects=False, timeout=7)
-        if entry.status_code not in (301, 302, 303, 307, 308):
-            return None
-        # 使用无效 code 测试 IP 过滤器；不会触发账号 OAuth，也不会发送 Discord Token。
-        check = session.get(
-            f"{CALLBACK_URL}?code=invalid_probe_code",
-            allow_redirects=False,
-            timeout=7,
-        )
-        if is_ip_block_page(check.text):
-            return None
-        # 站点正常进入 token 校验阶段时通常会返回 tokenerror/HTTP 500。
-        if check.status_code in (400, 401, 404, 500) or "tokenerror" in check.text.lower():
-            return proxy
-    except Exception:
-        return None
-    return None
-
-
-def find_accepted_proxies(candidates: list[str], max_workers: int = 32) -> list[str]:
-    accepted: list[str] = []
-    log(f"🔍 并发检测 Flarelax IP 过滤（并发数：{max_workers}）...")
-    # 找到足够节点后立即取消排队任务，不等待整批失效节点超时。
-    executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
-    jobs = {executor.submit(probe_proxy, p): p for p in candidates}
-    try:
-        for job in concurrent.futures.as_completed(jobs):
-            try:
-                result = job.result()
-            except Exception:
-                result = None
-            if result:
-                accepted.append(result)
-                log(f"   ✅ 发现可尝试节点：{result}")
-                # 保留一批节点，避免某个公开节点刚好失效。
-                if len(accepted) >= 12:
-                    break
-    finally:
-        for job in jobs:
-            if not job.done():
-                job.cancel()
-        executor.shutdown(wait=False, cancel_futures=True)
-    log(f"🎯 IP 检测通过节点：{len(accepted)} 个")
-    return accepted
-
-
-def get_oauth_parameters(site_session: requests.Session) -> tuple[str, str, str, str]:
-    entry = site_session.get(AUTH_URL, allow_redirects=False, timeout=20)
+def get_oauth_parameters(session: requests.Session) -> tuple[str, str, str, str]:
+    entry = session.get(AUTH_URL, allow_redirects=False, timeout=25)
     location = entry.headers.get("Location", "")
     if entry.status_code not in (301, 302, 303, 307, 308) or "discord.com" not in location:
         raise FlarelaxError(f"OAuth 入口异常：HTTP {entry.status_code}")
@@ -258,74 +172,17 @@ def login_via_proxy(proxy: str) -> requests.Session:
     callback_url = discord_authorize(location, client_id, redirect_uri, scope)
     log("   ✅ Discord 授权 Code 获取成功，正在通过节点完成 Callback...")
     callback = site_session.get(callback_url, allow_redirects=True, timeout=25)
-    if is_ip_block_page(callback.text):
-        raise FlarelaxError("该节点仍被 Flarelax 判定为 VPN/代理")
-    if "/login" in callback.url.lower():
-        raise FlarelaxError(f"Callback 后仍在登录页：{callback.url}")
-    if "rate limited" in callback.text.lower() or "too many tokens" in callback.text.lower():
-        raise FlarelaxError("Flarelax OAuth 已触发频率限制，停止继续提交登录请求")
-    if not site_session.cookies.get("connect.sid"):
-        raise FlarelaxError("Callback 未生成 connect.sid")
-
-    # 仅有 connect.sid 不代表 OAuth 登录成功。有些节点会让 callback 返回 200，
-    # 但实际上没有跳到 dashboard，随后 claim 就会得到 401。必须验证最终页面。
-    if "/dashboard" not in callback.url.lower():
-        preview = re.sub(r"\s+", " ", callback.text[:180]).strip()
+    if callback.status_code != 200 or "/login" in callback.url.lower():
         raise FlarelaxError(
-            f"OAuth Callback 未跳转到 dashboard（当前 URL：{callback.url}，响应：{preview}）"
+            f"Callback 响应不为登录状态：HTTP {callback.status_code}，最终 URL：{callback.url}"
         )
-
-    # 预热真正的 AFK 页面，确认同一节点上的会话可用于持续心跳。
-    afk_page = site_session.get(f"{BASE_URL}/dashboard/afk", timeout=25)
+    afk_page = site_session.get(f"{BASE_URL}/dashboard", timeout=20)
     if afk_page.status_code != 200 or "/login" in afk_page.url.lower():
         raise FlarelaxError(
-            f"AFK 页面验证失败：HTTP {afk_page.status_code}，当前 URL：{afk_page.url}"
+            f"后台页面验证失败：HTTP {afk_page.status_code}，当前 URL：{afk_page.url}"
         )
-    log(f"   ✅ 登录成功，会话已验证，当前 URL：{afk_page.url}")
+    log(f"   🎉 登录并验证成功，最终页面：{afk_page.url}")
     return site_session
-
-
-def claim_once(session: requests.Session) -> dict:
-    """复刻 dashboard/afk 页面：大约每 60 秒请求一次 claim。"""
-    response = session.get(
-        CLAIM_URL,
-        headers={
-            "Accept": "application/json, text/plain, */*",
-            "Referer": f"{BASE_URL}/dashboard/afk",
-            "X-Requested-With": "XMLHttpRequest",
-        },
-        timeout=25,
-    )
-    log(f"   📡 GET /api/afk/claim -> HTTP {response.status_code}")
-    try:
-        data = response.json()
-    except ValueError as exc:
-        raise FlarelaxError(f"claim 返回非 JSON：{response.text[:300]}") from exc
-
-    if response.status_code in (401, 403):
-        raise FlarelaxError(f"登录会话失效：HTTP {response.status_code}")
-    if response.status_code != 200:
-        raise FlarelaxError(f"claim 请求失败：HTTP {response.status_code}")
-
-    log("   📦 返回：" + json.dumps(data, ensure_ascii=False, separators=(",", ":")))
-    return data
-
-
-def claim_is_too_fast(data: dict) -> bool:
-    message = str(data.get("message", "")).lower()
-    return any(word in message for word in ("too fast", "wait", "cooldown", "already"))
-
-
-def claim_reached_daily_limit(data: dict) -> bool:
-    try:
-        earned = int(data.get("earnedToday", -1))
-        limit = int(data.get("dailyLimit", -1))
-        if limit > 0 and earned >= limit:
-            return True
-    except (TypeError, ValueError):
-        pass
-    message = str(data.get("message", "")).lower()
-    return "daily limit" in message or "limit reached" in message
 
 
 def load_state() -> dict:
@@ -378,33 +235,23 @@ def restore_encrypted_session(state: dict, proxy: str) -> requests.Session | Non
 
 def session_is_valid(session: requests.Session) -> bool:
     try:
-        page = session.get(f"{BASE_URL}/dashboard/afk", allow_redirects=True, timeout=20)
+        page = session.get(f"{BASE_URL}/dashboard", allow_redirects=True, timeout=20)
         return page.status_code == 200 and "/login" not in page.url.lower() and "authentication required" not in page.text.lower()
     except requests.RequestException:
         return False
 
 
-def maybe_renew_server(session: requests.Session, coins: object) -> bool:
-    """积分超过 50 且距离上次成功续期至少 48 小时时，POST 服务器续期。"""
-    try:
-        coin_count = int(coins)
-    except (TypeError, ValueError):
-        return False
-
-    if coin_count <= MIN_RENEW_COINS:
-        return False
-
+def maybe_renew_server(session: requests.Session) -> bool:
+    """距离上次成功续期至少 48 小时时，POST 服务器续期。"""
     state = load_state()
     last_timestamp = int(state.get("last_server_renew_timestamp", 0) or 0)
     now_timestamp = int(time.time())
     if last_timestamp and now_timestamp - last_timestamp < RENEW_INTERVAL_SECONDS:
         remaining_hours = (RENEW_INTERVAL_SECONDS - (now_timestamp - last_timestamp)) / 3600
+        log(f"⏳ 距离上次续期未满 48 小时（约 {remaining_hours:.1f} 小时后可再续期）")
         return False
 
-    log(
-        f"🔔 当前 coins={coin_count} > {MIN_RENEW_COINS}，"
-        "且已超过 2 天续期间隔，发起服务器续期..."
-    )
+    log("🔔 已达到 48 小时间隔，自动尝试发起服务器续期...")
     response = session.post(
         SERVER_RENEW_URL,
         headers={
@@ -429,7 +276,6 @@ def maybe_renew_server(session: requests.Session, coins: object) -> bool:
 
     message = str(data.get("message", ""))
     if data.get("success") is False:
-        # 站点自身的冷却提示不需要每分钟重复 POST；记录检查时间即可。
         if any(word in message.lower() for word in ("already", "cooldown", "wait", "again", "2 day")):
             log(f"ℹ️ 服务器仍在续期冷却期：{message}")
             state.update({
@@ -444,45 +290,126 @@ def maybe_renew_server(session: requests.Session, coins: object) -> bool:
     state.update({
         "last_server_renew_timestamp": now_timestamp,
         "last_server_renew_time": now_str(),
-        "last_server_renew_coins": coin_count,
         "last_server_renew_result": message or "success",
     })
     save_state(state)
-    log(f"🎉 服务器续期成功，已记录下次续期时间（至少 2 天后）")
+    log("🎉 服务器续期成功，已记录下次续期时间（至少 2 天后）")
     return True
+
+
+def check_and_start_server(session: requests.Session, server_id: str = "8a4d1879") -> None:
+    """检测后台服务器当前是否处于运行状态，如未运行则发令启动。"""
+    info_url = f"{BASE_URL}/api/server/{server_id}"
+    log(f"🔍 正在检查 Flarelax 服务器 {server_id} 开机状态：GET {info_url}")
+    headers = {
+        "Accept": "application/json, text/plain, */*",
+        "Referer": f"{BASE_URL}/dashboard",
+        "X-Requested-With": "XMLHttpRequest",
+    }
+    r = session.get(info_url, headers=headers, timeout=20)
+    log(f"   📡 状态查询 HTTP {r.status_code}")
+    state_str = "unknown"
+    is_online = False
+    try:
+        data = r.json()
+        log("   📦 状态返回：" + json.dumps(data, ensure_ascii=False)[:300])
+        if isinstance(data, dict):
+            state_str = str(
+                data.get("status")
+                or data.get("state")
+                or data.get("current_state")
+                or (data.get("attributes", {}).get("current_state") if isinstance(data.get("attributes"), dict) else None)
+                or "unknown"
+            ).lower()
+            is_online = state_str in ("online", "running", "starting") or data.get("online") is True
+    except Exception as exc:
+        log(f"   ⚠️ 解析状态 JSON 提示：{exc}；将尝试发令开机以防离线")
+
+    if is_online:
+        log(f"🟢 服务器 {server_id} 正在运行 ({state_str})，无需开机操作。")
+        return
+
+    log(f"🔴 服务器 {server_id} 处于未运行状态 ({state_str})，正在发送开机命令...")
+    start_payloads = [
+        ("POST", f"{BASE_URL}/api/server/{server_id}/power", {"signal": "start"}),
+        ("POST", f"{BASE_URL}/api/server/{server_id}/power", {"action": "start"}),
+        ("POST", f"{BASE_URL}/api/server/{server_id}/start", {}),
+        ("GET", f"{BASE_URL}/api/server/{server_id}/start", None),
+    ]
+    for method, url, body in start_payloads:
+        try:
+            if method == "POST":
+                res = session.post(url, headers=headers, json=body, timeout=20)
+            else:
+                res = session.get(url, headers=headers, timeout=20)
+            log(f"   📡 {method} {url} -> HTTP {res.status_code}")
+            if res.status_code in (200, 204):
+                log("   🟢 启动开机命令发送成功！")
+                break
+        except Exception as e:
+            log(f"   ⚠️ 请求 {url} 失败: {e}")
 
 
 def build_proxy_list() -> list[str]:
     if CUSTOM_PROXY:
         log("🔧 检测到 FLARELAX_PROXY，优先尝试自定义节点")
-        return [CUSTOM_PROXY]
-    candidates = fetch_proxy_candidates()
-    accepted = find_accepted_proxies(candidates)
-    if not accepted:
-        raise FlarelaxError("没有找到能通过 Flarelax IP 检查的节点")
+        return [normalize_proxy(CUSTOM_PROXY)]
+
+    log("🌐 正在抓取公开 SOCKS5 节点列表...")
+    raw_proxies: set[str] = set()
+    for url in PROXY_SOURCES:
+        try:
+            response = requests.get(url, timeout=10)
+            if response.status_code != 200:
+                continue
+            for line in response.text.splitlines():
+                candidate = line.strip()
+                if re.fullmatch(r"(\d{1,3}\.){3}\d{1,3}:\d{2,5}", candidate):
+                    raw_proxies.add(f"socks5h://{candidate}")
+        except Exception:
+            continue
+
+    proxies = list(raw_proxies)
+    random.shuffle(proxies)
+    log(f"📥 共发现 {len(proxies)} 个候选节点，挑选最多 40 个并发检测...")
+    return proxies[:40]
+
+
+def check_proxy(proxy: str) -> Optional[str]:
+    session = make_session(proxy)
+    try:
+        check = session.get(WARNING_URL, timeout=12)
+        if check.status_code in (400, 401, 404, 500) or "tokenerror" in check.text.lower():
+            return proxy
+        return None
+    except Exception:
+        return None
+
+
+def find_accepted_proxies(candidates: list[str]) -> list[str]:
+    accepted: list[str] = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        future_map = {executor.submit(check_proxy, proxy): proxy for proxy in candidates}
+        for future in concurrent.futures.as_completed(future_map):
+            result = future.result()
+            if result:
+                accepted.append(result)
+                if len(accepted) >= 3:
+                    break
     return accepted
 
 
 def main() -> int:
     log("=" * 62)
-    log("🚀 Flarelax AFK 持续积分模式启动")
+    log("🚀 Flarelax 服务器开机状态检测与自动续期（已停止获取积分）")
     log(f"🕐 北京时间：{now_str()}")
-    log("⏱️ 每约 62 秒检测一次；若积分不变则自动退避到 90~180 秒")
     log("=" * 62)
-    try:
-        run_minutes = max(1, int(os.environ.get("RUN_MINUTES", "350")))
-    except ValueError:
-        run_minutes = 350
-    deadline = time.monotonic() + run_minutes * 60
-    log(f"🛠️ 本次持续运行窗口：{run_minutes} 分钟")
 
     state = load_state()
     session: Optional[requests.Session] = None
-    proxy_index = 0
     current_proxy = ""
-    proxies: list[str] = []
 
-    # 优先尝试上次成功节点和加密会话；代理/IP 与会话都有效时完全跳过代理扫描和 OAuth。
+    # 1. 优先尝试保存的代理和加密会话
     saved_proxy = state.get("last_session_proxy", "")
     if saved_proxy:
         log(f"♻️ 尝试复用上次 Flarelax 登录节点：{saved_proxy}")
@@ -490,188 +417,48 @@ def main() -> int:
         if restored is not None and session_is_valid(restored):
             session = restored
             current_proxy = saved_proxy
-            proxies = [saved_proxy]
-            log("✅ Flarelax Discord 会话仍有效，本次不重新 OAuth 登录")
+            log("✅ Flarelax Discord 会话有效，本次无需重新登录")
         else:
-            log("⌛ 上次 Flarelax 会话或节点已失效，准备按需重新登录")
+            log("⌛ 上次 Flarelax 会话或节点失效，开始通过节点池登录")
 
     if session is None:
-        # 节点池暂时没有可用节点时，不让整个 6 小时任务立刻失败；等待后继续扫描。
-        while not proxies and time.monotonic() < deadline:
-            try:
-                proxies = build_proxy_list()
-            except Exception as exc:
-                remaining = deadline - time.monotonic()
-                log(f"⚠️ 当前没有可用 Flarelax 节点：{type(exc).__name__}；10 分钟后重试")
-                if remaining <= 10 * 60:
-                    break
-                time.sleep(10 * 60)
+        proxies = build_proxy_list()
         if not proxies:
-            log("⚠️ 本次窗口没有找到可用节点，保持任务正常结束，等待下次调度")
+            log("⚠️ 本次未获取到可用公开代理节点")
             return 0
-    request_count = 0
-    claim_count = 0
-    unchanged_count = 0
-    claim_interval = 62
-    last_coins = None
-    last_earned = None
-    renew_count = 0
-    last_error: Optional[Exception] = None
-    oauth_attempts = 0
-    max_oauth_attempts = 8
-    rate_limit_pauses = 0
-    max_rate_limit_pauses = 2
-
-    while time.monotonic() < deadline:
-        # 没有登录会话时，使用下一个节点重新 OAuth 登录。
-        # 正常情况下整个 6 小时窗口只会进入这里一次；只有会话失效/代理死亡才重登。
-        if session is None:
-            if oauth_attempts >= max_oauth_attempts:
-                pause_seconds = 10 * 60
-                remaining = deadline - time.monotonic()
-                if remaining <= pause_seconds:
-                    last_error = FlarelaxError("本次窗口剩余时间不足以继续等待节点恢复")
-                    break
-                log(
-                    "⏸️ 当前公开节点全部不稳定，暂停 10 分钟后重新获取节点；"
-                    "不重复刷 OAuth。"
-                )
-                time.sleep(pause_seconds)
-                try:
-                    proxies = build_proxy_list()
-                    proxy_index = 0
-                    oauth_attempts = 0
-                    continue
-                except Exception as exc:
-                    last_error = exc
-                    log(f"⚠️ 节点恢复扫描失败：{type(exc).__name__}: {exc}")
-                    continue
-            if proxy_index >= len(proxies):
-                log("🔄 当前节点已用尽，重新获取一批公开节点...")
-                try:
-                    proxies = build_proxy_list()
-                    proxy_index = 0
-                except Exception as exc:
-                    last_error = exc
-                    log(f"⚠️ 重新获取节点失败，稍后重试：{type(exc).__name__}: {exc}")
-                    time.sleep(min(5 * 60, max(1, deadline - time.monotonic())))
-                    continue
-            current_proxy = proxies[proxy_index]
-            proxy_index += 1
-            oauth_attempts += 1
+        accepted = find_accepted_proxies(proxies)
+        if not accepted:
+            log("❌ 未找到能够通过 Flarelax 访问检测的节点")
+            return 1
+        for proxy in accepted:
             try:
-                session = login_via_proxy(current_proxy)
-                save_encrypted_session(state, session, current_proxy)
-                save_state(state)
-            except Exception as exc:
-                last_error = exc
-                log(f"⚠️ 登录节点失败：{type(exc).__name__}: {exc}")
-                session = None
-                if "rate limit" in str(exc).lower() or "too many tokens" in str(exc).lower():
-                    rate_limit_pauses += 1
-                    if rate_limit_pauses > max_rate_limit_pauses:
-                        log("⛔ OAuth 限流仍未恢复，本次窗口停止继续提交登录请求。")
-                        break
-                    pause_seconds = 30 * 60
-                    remaining = deadline - time.monotonic()
-                    if remaining <= pause_seconds:
-                        break
-                    log(f"⏸️ 检测到 OAuth 限流，暂停 {pause_seconds // 60} 分钟后再试。")
-                    time.sleep(pause_seconds)
-                    try:
-                        proxies = build_proxy_list()
-                        proxy_index = 0
-                        oauth_attempts = 0
-                    except Exception as retry_exc:
-                        last_error = retry_exc
-                        log(f"⚠️ 限流后节点扫描失败：{type(retry_exc).__name__}: {retry_exc}")
-                    continue
-                continue
-
-        try:
-            data = claim_once(session)
-            request_count += 1
-            if claim_reached_daily_limit(data):
-                log("🎯 今日 AFK 积分已达到站点上限，提前结束本次窗口。")
+                session = login_via_proxy(proxy)
+                current_proxy = proxy
                 break
+            except Exception as exc:
+                log(f"⚠️ 节点 {proxy} 登录失败：{exc}")
 
-            if data.get("success") is False:
-                if claim_is_too_fast(data):
-                    unchanged_count += 1
-                    claim_interval = min(180, claim_interval + 15)
-                    log(
-                        f"⏳ 站点提示请求过快，本次不计积分；"
-                        f"下次等待 {claim_interval} 秒。"
-                    )
-                else:
-                    raise FlarelaxError(f"claim 业务失败：{data.get('message', '未知原因')}")
-            else:
-                new_coins = data.get("coins", last_coins)
-                new_earned = data.get("earnedToday", last_earned)
-                first_success = last_coins is None and last_earned is None
-                balance_changed = (
-                    first_success
-                    or (new_coins is not None and last_coins is not None and new_coins > last_coins)
-                    or (new_earned is not None and last_earned is not None and new_earned > last_earned)
-                )
-                last_coins = new_coins
-                last_earned = new_earned
+        if session is None:
+            log("❌ 重新 OAuth 登录尝试了所有候选节点均失败")
+            return 1
+        save_encrypted_session(state, session, current_proxy)
 
-                if balance_changed:
-                    claim_count += 1
-                    unchanged_count = 0
-                    claim_interval = 62
-                    log(
-                        f"✅ 第 {claim_count} 次积分实际到账："
-                        f"coins={last_coins}, earnedToday={last_earned}/{data.get('dailyLimit', '?')}"
-                    )
-                    try:
-                        if maybe_renew_server(session, last_coins):
-                            renew_count += 1
-                    except FlarelaxError as renew_exc:
-                        # 只有续期接口明确返回会话失效时才换登录；普通业务失败不重登。
-                        if "续期会话失效" in str(renew_exc):
-                            raise
-                        last_error = renew_exc
-                        log(f"⚠️ 服务器续期本次未完成（保持当前登录会话）：{renew_exc}")
-                else:
-                    unchanged_count += 1
-                    claim_interval = min(180, 90 + min(unchanged_count, 3) * 15)
-                    log(
-                        f"ℹ️ API 返回 success=true，但 coins/earnedToday 没有变化；"
-                        f"本次不计入积分，连续未变化 {unchanged_count} 次，"
-                        f"下次等待 {claim_interval} 秒。"
-                    )
-        except Exception as exc:
-            last_error = exc
-            log(f"⚠️ 当前节点请求失败，准备换节点：{type(exc).__name__}: {exc}")
-            session = None
-            continue
+    # 2. 检测服务器并开机
+    try:
+        check_and_start_server(session, "8a4d1879")
+    except Exception as exc:
+        log(f"⚠️ 服务器状态检测出现异常：{exc}")
 
-        # 页面脚本用 60 秒心跳；留 2 秒余量，避免触发 too fast。
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            break
-        time.sleep(min(claim_interval, remaining))
+    # 3. 距离上次续期满 48 小时自动发续期
+    try:
+        maybe_renew_server(session, 100)
+    except Exception as exc:
+        log(f"⚠️ 服务器续期尝试提示：{exc}")
 
-    elapsed = run_minutes * 60 - max(0, deadline - time.monotonic())
-    log("=" * 62)
-    log(
-        f"🏁 本次 AFK 窗口结束：运行约 {elapsed / 60:.1f} 分钟，"
-        f"请求 {request_count} 次，实际到账 {claim_count} 次，服务器续期 {renew_count} 次，"
-        f"当前 coins={last_coins}，earnedToday={last_earned}"
-    )
-    if last_error:
-        log(f"ℹ️ 期间最后一次节点错误（已自动轮换）：{type(last_error).__name__}: {last_error}")
-    log("🔁 下一次 GitHub Actions 运行会重新登录并继续领取。")
-    send_telegram(
-        f"🎉 Flarelax AFK 持续运行窗口结束\n"
-        f"🕐 {now_str()}\n"
-        f"📊 API 请求：{request_count} 次，实际到账：{claim_count} 次\n"
-        f"🔄 服务器续期：{renew_count} 次\n"
-        f"💰 coins：{last_coins}\n"
-        f"📅 earnedToday：{last_earned}"
-    )
+    state["last_check_time"] = now_str()
+    state["last_status"] = "success"
+    save_state(state)
+    log("🏁 Flarelax 检测与续期任务成功完结！")
     return 0
 
 
