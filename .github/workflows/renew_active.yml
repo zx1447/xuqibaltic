@@ -1,13 +1,13 @@
-name: Enzonic Two Accounts Every 2 Days
+name: Active Panel Auto Renew & Phenix Server Monitor
 
 on:
-  # 每天检查一次；两个账号分别按 2 天间隔执行。
+  # 每天检查一次；Phenix 每 1 天执行，Active 两个独立账号每 2 天执行。
   schedule:
     - cron: "20 2 * * *"
   workflow_dispatch:
     inputs:
       force:
-        description: "是否忽略 2 天间隔并立即执行两个账号（true/false）"
+        description: "是否立刻忽略间隔执行检测与登录（true/false）"
         required: false
         default: "false"
 
@@ -15,7 +15,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: enzonic-two-accounts
+  group: active-auto-renew
   cancel-in-progress: true
 
 jobs:
@@ -23,10 +23,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
-      - name: Checkout Enzonic branch
+      - name: Checkout Active branch
         uses: actions/checkout@v4
         with:
-          ref: enzonic
+          ref: Active
           fetch-depth: 0
 
       - uses: actions/setup-python@v5
@@ -45,28 +45,30 @@ jobs:
           pip install --upgrade pip seleniumbase requests "requests[socks]"
           seleniumbase install chromedriver
 
-      - name: Run Enzonic two-account task
+      - name: Run Active & Phenix tasks
         env:
-          ENZONIC_USER: ${{ secrets.ENZONIC_USER }}
-          ENZONIC_PASS: ${{ secrets.ENZONIC_PASS }}
-          ENZONIC_COOKIE: ${{ secrets.ENZONIC_COOKIE }}
-          ENZONIC_SERVER_ID: ${{ secrets.ENZONIC_SERVER_ID || '2d24e7a5' }}
-          ENZONIC_PROXY: ${{ secrets.ENZONIC_PROXY }}
-          ENZONIC_API_KEY: ${{ secrets.ENZONIC_API_KEY }}
+          ACTIVE_USER: ${{ secrets.ACTIVE_USER || secrets.ENZONIC_USER }}
+          ACTIVE_PASS: ${{ secrets.ACTIVE_PASS || secrets.ENZONIC_PASS }}
+          ACTIVE_COOKIE: ${{ secrets.ACTIVE_COOKIE || secrets.ENZONIC_COOKIE }}
+          ACTIVE_SERVER_ID: ${{ secrets.ACTIVE_SERVER_ID || secrets.ENZONIC_SERVER_ID || '2d24e7a5' }}
+          ACTIVE_PROXY: ${{ secrets.ACTIVE_PROXY || secrets.ENZONIC_PROXY }}
+          ACTIVE_API_KEY: ${{ secrets.ACTIVE_API_KEY || secrets.ENZONIC_API_KEY }}
+          PHENIX_API_KEY: ${{ secrets.PHENIX_API_KEY }}
+          PHENIX_SERVER_UUID: "c0fbebc6"
           FORCE_RUN: ${{ github.event.inputs.force || 'false' }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-        run: xvfb-run --auto-servernum python3 renew_enzonic.py
+        run: xvfb-run --auto-servernum python3 renew_active.py
 
-      - name: Save Enzonic two-account state
+      - name: Save Active & Phenix state
         if: always()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add enzonic_state.json || true
+          git add active_state.json || true
           if git diff --cached --quiet; then
-            echo "No Enzonic state change."
+            echo "No Active state change."
             exit 0
           fi
-          git commit -m "Update Enzonic two-account state [skip ci]"
-          git push origin HEAD:enzonic
+          git commit -m "Update Active & Phenix state [skip ci]"
+          git push origin HEAD:Active
