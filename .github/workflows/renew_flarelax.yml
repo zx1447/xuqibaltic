@@ -67,6 +67,7 @@ jobs:
           else
             echo "ℹ️ 未配置 VLESS 代理，使用默认出口"
           fi
+          echo "104.18.94.41 challenges.cloudflare.com" | sudo tee -a /etc/hosts
           xvfb-run -a python3 renew_flarelax.py
 
       - name: Save Flarelax state

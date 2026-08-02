@@ -195,6 +195,7 @@ def get_session_with_browser() -> requests.Session:
         "headless": False,
         "locale": "en",
         "window_size": "1280,720",
+        "host_resolver_rules": "MAP *.challenges.cloudflare.com 104.18.94.41, EXCLUDE localhost",
     }
     if CUSTOM_PROXY:
         options["proxy"] = CUSTOM_PROXY
