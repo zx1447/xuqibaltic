@@ -156,18 +156,17 @@ def turnstile_solved(browser) -> bool:
 
 def solve_turnstile(browser) -> None:
     log("🛡️ 检查并处理 Flarelax Turnstile 验证...")
-    for attempt in range(1, 28):
+    for attempt in range(1, 35):
         if turnstile_solved(browser):
             log("   ✅ 当前页面非人机校验页或 Token 已生成")
             return
-        if attempt in (1, 4, 8, 12, 16, 20):
+        if attempt in (1, 5, 10, 15, 20):
             log(f"   🖱️ 尝试点击 Turnstile 人机验证框 (第 {attempt} 秒)...")
             for clicker in (
+                lambda: browser.driver.uc_gui_click_cf(frame="iframe[src*='challenges.cloudflare.com']"),
+                lambda: browser.driver.uc_gui_click_cf(),
+                lambda: browser.driver.uc_gui_click_captcha(),
                 lambda: browser.driver.uc_gui_click_cf(frame="iframe"),
-                lambda: browser.driver.uc_gui_click_cf(frame="div.g-recaptcha iframe"),
-                lambda: browser.driver.uc_gui_click_x_y(520, 425),
-                lambda: browser.driver.uc_gui_click_x_y(515, 415),
-                lambda: browser.driver.uc_gui_click_x_y(525, 435),
             ):
                 try:
                     clicker()
@@ -175,6 +174,14 @@ def solve_turnstile(browser) -> None:
                 except Exception:
                     pass
         time.sleep(1)
+
+    log("⚠️ 无法自动通过 Turnstile，输出调试信息：")
+    try:
+        log(f"URL: {browser.get_current_url()} Title: {browser.get_title()}")
+        for i, f in enumerate(browser.find_elements("iframe")):
+            log(f"  iframe {i}: src={f.get_attribute('src')[:100]} title={f.get_attribute('title')}")
+    except Exception:
+        pass
     raise FlarelaxError("Cloudflare Turnstile 验证超时 (页面始终未跳转)")
 
 
@@ -193,7 +200,13 @@ def get_session_with_browser() -> requests.Session:
         options["proxy"] = CUSTOM_PROXY
         log(f"   🔗 浏览器将通过代理：{CUSTOM_PROXY}")
     with SB(**options) as sb:
-        sb.uc_open_with_reconnect(AUTH_URL, 6)
+        log("   1. 访问 Flarelax 首页解动人机验证...")
+        sb.uc_open_with_reconnect(BASE_URL, 6)
+        time.sleep(4)
+        solve_turnstile(sb)
+        time.sleep(2)
+        log("   2. 访问 Discord 授权入口...")
+        sb.open(AUTH_URL)
         time.sleep(4)
         solve_turnstile(sb)
         time.sleep(3)
