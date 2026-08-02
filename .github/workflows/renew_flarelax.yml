@@ -30,6 +30,8 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies & Xray
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           sudo apt-get update
           sudo apt-get install -y xvfb unzip
@@ -37,8 +39,11 @@ jobs:
           pip install --upgrade pip seleniumbase requests cryptography
           seleniumbase install chromedriver
           mkdir -p /tmp/flarelax-xray
-          XRAY_TAG=$(curl -fsSL -H "User-Agent: flarelax-renew" https://api.github.com/repos/XTLS/Xray-core/releases/latest | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag_name"])')
-          curl -fsSL "https://github.com/XTLS/Xray-core/releases/download/${XRAY_TAG}/Xray-linux-64.zip" -o /tmp/flarelax-xray/xray.zip
+          curl -fsSL "https://github.com/XTLS/Xray-core/releases/download/v26.3.27/Xray-linux-64.zip" -o /tmp/flarelax-xray/xray.zip || \
+          {
+            XRAY_TAG=$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" https://api.github.com/repos/XTLS/Xray-core/releases/latest | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag_name"])')
+            curl -fsSL "https://github.com/XTLS/Xray-core/releases/download/${XRAY_TAG}/Xray-linux-64.zip" -o /tmp/flarelax-xray/xray.zip
+          }
           unzip -q /tmp/flarelax-xray/xray.zip -d /tmp/flarelax-xray
           chmod +x /tmp/flarelax-xray/xray
 
