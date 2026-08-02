@@ -228,6 +228,22 @@ def add_cookie_header(sb) -> None:
             pass
 
 
+def do_login(sb) -> None:
+    log("🔄 需账号密码登录，开始输入凭据...")
+    if not USER or not PASSWORD:
+        raise ActiveError("未配置 ACTIVE_USER/ENZONIC_USER 和 ACTIVE_PASS/ENZONIC_PASS")
+    sb.open(LOGIN_URL)
+    time.sleep(3)
+    sb.type("input[name='username'], input[type='text'], input[id*='user'], input[id*='email']", USER)
+    sb.type("input[name='password'], input[type='password']", PASSWORD)
+    sb.click("button[type='submit'], input[type='submit']")
+    time.sleep(6)
+    cur = sb.get_current_url()
+    if "/login" in cur.lower():
+        raise ActiveError(f"登录提交后仍停留在：{cur}")
+    log(f"✅ 账号密码登录成功，最终页面：{cur}")
+
+
 def login_if_needed(sb) -> None:
     sb.open(f"{BASE}/dashboard")
     time.sleep(4)
@@ -235,17 +251,7 @@ def login_if_needed(sb) -> None:
     if "/login" not in cur.lower():
         log(f"✅ 会话直接访问后台成功：{cur}")
         return
-    log("🔄 跳转了登录页，使用账号密码重新登录")
-    if not USER or not PASSWORD:
-        raise ActiveError("到达登录页但未配置 ACTIVE_USER 和 ACTIVE_PASS")
-    sb.type("input[name='username'], input[type='text'], input[id*='user'], input[id*='email']", USER)
-    sb.type("input[name='password'], input[type='password']", PASSWORD)
-    sb.click("button[type='submit'], input[type='submit']")
-    time.sleep(5)
-    cur = sb.get_current_url()
-    if "/login" in cur.lower():
-        raise ActiveError(f"登录提交后停留在：{cur}")
-    log(f"✅ 账号密码登录成功，最终页面：{cur}")
+    do_login(sb)
 
 
 def visit_files_page(sb) -> str:
@@ -254,13 +260,19 @@ def visit_files_page(sb) -> str:
     sb.open(target)
     time.sleep(6)
     cur = sb.get_current_url()
+    if "/login" in cur.lower():
+        log("ℹ️ 访问管理子页被重定向到登录页，执行重新登录后重试...")
+        do_login(sb)
+        sb.open(target)
+        time.sleep(6)
+        cur = sb.get_current_url()
     try:
         title = sb.get_title()
     except Exception:
         title = ""
     log(f"✅ Active 页面访问完成：{cur} title={title[:120]}")
     if "/login" in cur.lower():
-        raise ActiveError("访问 Active 页面时被重定向到登录页")
+        raise ActiveError("访问 Active 页面时仍被重定向到登录页")
     return cur
 
 
