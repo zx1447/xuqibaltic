@@ -162,6 +162,19 @@ def turnstile_token(browser) -> str:
         return ""
 
 
+def turnstile_solved(browser) -> bool:
+    try:
+        title = browser.get_title()
+        if "checking" not in title.lower() and "just a moment" not in title.lower():
+            return True
+        for c in browser.get_cookies():
+            if c.get("name") == "TOKEN" and c.get("value"):
+                return True
+    except Exception:
+        pass
+    return False
+
+
 def solve_turnstile(browser) -> None:
     log("🛡️ 检查并处理 Flarelax Turnstile 验证...")
     for attempt in range(1, 35):
