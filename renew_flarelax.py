@@ -142,24 +142,26 @@ def turnstile_token(browser) -> str:
 
 
 def solve_turnstile(browser) -> None:
-    if turnstile_token(browser):
-        return
-    log("🛡️ 正在使用 SeleniumBase UC 自动处理 Cloudflare Turnstile...")
-    methods = (
-        lambda: browser.driver.uc_gui_click_cf(frame="#cf-turnstile", retry=False),
-        lambda: browser.driver.uc_gui_click_captcha(),
-        lambda: browser.driver.uc_gui_handle_cf(frame="#cf-turnstile"),
-    )
-    for index, method in enumerate(methods, 1):
+    log("🛡️ 检查并处理 Flarelax Turnstile 验证...")
+    for attempt in range(1, 25):
         try:
-            method()
-        except Exception as exc:
-            log(f"   ⚠️ Turnstile 第 {index} 种方式跳过：{type(exc).__name__}")
-        for _ in range(15):
-            if turnstile_token(browser):
-                log("   ✅ Turnstile 验证通过，Token 已生成")
-                return
-            time.sleep(1)
+            title = browser.get_title()
+        except Exception:
+            title = ""
+        if "checking" not in title.lower() and "just a moment" not in title.lower():
+            log(f"   ✅ 当前页面非人机校验页 (title={title[:50]})")
+            return
+        if attempt in (1, 5, 10):
+            log(f"   🖱️ 尝试点击 Turnstile 人机验证框 (第 {attempt} 秒)...")
+            try:
+                browser.driver.uc_gui_click_cf()
+            except Exception:
+                try:
+                    browser.driver.uc_gui_click_captcha()
+                except Exception:
+                    pass
+        time.sleep(1)
+    raise FlarelaxError("Cloudflare Turnstile 验证超时 (页面始终未跳转)")
 
 
 def get_session_with_browser() -> requests.Session:
