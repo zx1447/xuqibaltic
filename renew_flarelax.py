@@ -141,23 +141,32 @@ def turnstile_token(browser) -> str:
         return ""
 
 
+def turnstile_solved(browser) -> bool:
+    try:
+        title = browser.get_title()
+        if "checking" not in title.lower() and "just a moment" not in title.lower():
+            return True
+        for c in browser.get_cookies():
+            if c.get("name") == "TOKEN" and c.get("value"):
+                return True
+    except Exception:
+        pass
+    return False
+
+
 def solve_turnstile(browser) -> None:
     log("🛡️ 检查并处理 Flarelax Turnstile 验证...")
-    for attempt in range(1, 25):
-        try:
-            title = browser.get_title()
-        except Exception:
-            title = ""
-        if "checking" not in title.lower() and "just a moment" not in title.lower():
-            log(f"   ✅ 当前页面非人机校验页 (title={title[:50]})")
+    for attempt in range(1, 30):
+        if turnstile_solved(browser):
+            log("   ✅ 当前页面非人机校验页或 Token 已生成")
             return
-        if attempt in (1, 4, 8, 12):
+        if attempt in (1, 4, 8, 12, 16, 20):
             log(f"   🖱️ 尝试点击 Turnstile 人机验证框 (第 {attempt} 秒)...")
             for clicker in (
                 lambda: browser.driver.uc_gui_click_cf(),
-                lambda: browser.driver.uc_gui_click_cf(frame="div.g-recaptcha iframe"),
                 lambda: browser.driver.uc_gui_click_captcha(),
-                lambda: browser.driver.uc_gui_click_cf(frame="iframe"),
+                lambda: browser.driver.uc_gui_click_x_y(640, 420),
+                lambda: browser.driver.uc_gui_click_x_y(540, 400),
             ):
                 try:
                     clicker()
