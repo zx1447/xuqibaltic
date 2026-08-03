@@ -37,10 +37,10 @@ jobs:
 
       - name: Start xray proxy (VLESS)
         env:
-          VLESS_URL: ${{ secrets.WITCHLY_VLESS_URL }}
+          VLESS_URL: ${{ secrets.DP_VLESS_URL }}
         run: |
           if [ -z "$VLESS_URL" ]; then
-            echo "⚠️ WITCHLY_VLESS_URL not set, trying direct (may fail on datacenter IP)"
+            echo "⚠️ DP_VLESS_URL not set, trying direct (may fail on datacenter IP)"
             exit 0
           fi
           # 解析 VLESS URL
@@ -83,5 +83,5 @@ jobs:
       - name: Run Witchly AFK
         env:
           DISCORD_TOKEN: ${{ secrets.WITCHLY_DISCORD_TOKEN }}
-          WITCHLY_PROXY: ${{ secrets.WITCHLY_VLESS_URL && 'http://127.0.0.1:10809' }}
+          WITCHLY_PROXY: ${{ secrets.DP_VLESS_URL && 'http://127.0.0.1:10809' }}
         run: python3 witchly_afk.py
