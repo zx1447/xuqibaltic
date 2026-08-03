@@ -8,6 +8,8 @@ import json, os, sys, re, time, subprocess, urllib.error, urllib.parse, urllib.r
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "").strip()
 # 多个 VLESS URL (逗号分隔), 依次尝试
 VLESS_URLS = os.getenv("VLESS_URLS", os.getenv("DP_VLESS_URL", "")).strip()
+# 第二个 VLESS (硬编码, GitHub API 加不了 secret)
+VLESS_URL_2 = "vless://77df559d-05f6-42a5-8a07-08118dc65a9f@demanding-assisted-berkeley-imposed.trycloudflare.com:443?type=ws&security=tls&path=%2Fstatic%2Fassets%2F34c1614493b4.js&sni=demanding-assisted-berkeley-imposed.trycloudflare.com&fp=chrome#CF-VLESS"
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0"
 PROXY_PORT = 10809
 RUN_DURATION = int(os.getenv("RUN_DURATION", "19800"))
@@ -151,6 +153,8 @@ def main():
 
     # 解析多个 VLESS URL
     vless_list = [u.strip() for u in VLESS_URLS.split(",") if u.strip()]
+if VLESS_URL_2:
+    vless_list.append(VLESS_URL_2)
     if not vless_list:
         log("ERROR: no VLESS URL")
         return 1

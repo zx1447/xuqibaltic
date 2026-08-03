@@ -38,6 +38,6 @@ jobs:
       - name: Run Witchly AFK
         env:
           DISCORD_TOKEN: ${{ secrets.WITCHLY_DISCORD_TOKEN }}
-          VLESS_URLS: ${{ secrets.WITCHLY_VLESS_URLS }}
+          DP_VLESS_URL: ${{ secrets.DP_VLESS_URL }}
           RUN_DURATION: "19800"
         run: python3 witchly_afk.py
