@@ -2,8 +2,8 @@ name: Witchly AFK
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "0 */6 * * *"
+  # schedule: (stopped - Anti-Alt IP issue)
+  #   - cron: "0 /6 * * *"
 
 permissions:
   contents: read
