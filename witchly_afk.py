@@ -1,17 +1,12 @@
 #!/usr/bin/env python3
 """
 Witchly.host AFK 挂机赚金币
-流程:
-1. 用 Discord token 走 OAuth 登录 witchly (拿 session cookie)
-2. 访问 /earn/afk 页面 (保持活跃, 每 120 秒 1 金币)
-3. 收益每 5 分钟自动同步
-
-环境变量:
-  DISCORD_TOKEN  - Discord 用户 token (MTM... 格式)
+用 Discord token 走 OAuth 登录, 通过 VLESS 代理绕过数据中心 IP 检测
 """
 import json
 import os
 import sys
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -22,6 +17,9 @@ CLIENT_ID = "1463750742786572443"
 REDIRECT_URI = "https://dash.witchly.host/api/auth/callback/discord"
 SCOPE = "identify email guilds.join"
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0"
+
+# 代理 (VLESS via xray, 本地 http 代理)
+PROXY = os.getenv("WITCHLY_PROXY", "")
 
 
 def log(msg):
@@ -35,10 +33,15 @@ def main():
         log("ERROR: missing DISCORD_TOKEN")
         return 1
 
+    # 设置 opener (可选代理)
     cj = http.cookiejar.CookieJar()
-    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
+    handlers = [urllib.request.HTTPCookieProcessor(cj)]
+    if PROXY:
+        log(f"使用代理: {PROXY}")
+        handlers.append(urllib.request.ProxyHandler({"http": PROXY, "https": PROXY}))
+    opener = urllib.request.build_opener(*handlers)
 
-    # 1. 获取 CSRF token
+    # 1. CSRF
     log("1. 获取 CSRF token...")
     req = urllib.request.Request("https://dash.witchly.host/api/auth/csrf")
     req.add_header("User-Agent", UA)
@@ -50,7 +53,7 @@ def main():
         log(f"  ❌ 获取 CSRF 失败: {e}")
         return 1
 
-    # 2. 发起 Discord OAuth signin
+    # 2. signin
     log("2. 发起 Discord OAuth...")
     signin_data = urllib.parse.urlencode({
         "csrfToken": csrf_token,
@@ -74,7 +77,7 @@ def main():
         log(f"  ❌ signin 失败: {e}")
         return 1
 
-    # 3. 用 Discord token 自动授权
+    # 3. Discord authorize (用 token)
     log("3. Discord OAuth authorize...")
     auth_url = (f"https://discord.com/api/v9/oauth2/authorize"
         f"?client_id={CLIENT_ID}"
@@ -99,7 +102,7 @@ def main():
         log(f"  ❌ authorize 失败: {e}")
         return 1
 
-    # 4. 访问 callback 完成登录
+    # 4. callback
     log("4. 完成 callback...")
     req = urllib.request.Request(location)
     req.add_header("User-Agent", UA)
@@ -107,7 +110,6 @@ def main():
         with opener.open(req, timeout=30) as resp:
             final_url = resp.url
         if "error=" in final_url:
-            import re
             m = re.search(r"error=(\w+)", final_url)
             err = m.group(1) if m else "unknown"
             log(f"  ❌ 登录被拒: {err}")
@@ -130,7 +132,7 @@ def main():
         log("  ❌ 没拿到 session token")
         return 1
 
-    # 6. 访问 /earn/afk 页面
+    # 6. 访问 /earn/afk
     log("5. 访问 /earn/afk...")
     req = urllib.request.Request("https://dash.witchly.host/earn/afk")
     req.add_header("User-Agent", UA)
@@ -141,28 +143,25 @@ def main():
                 log("  ❌ 还是登录页 (session 无效)")
                 return 1
             log("  ✅ AFK 页面已打开")
-            # 看金币信息
-            import re
-            for m in re.finditer(r"[^<>]{0,60}(?:coin|point|reward|earn|siphon)[^<>]{0,60}", body, re.I):
+            # 找金币信息
+            for m in re.finditer(r"[^<>]{0,60}(?:coin|point|reward|earn|siphon|progress)[^<>]{0,60}", body, re.I):
                 t = m.group().strip()
-                if t and len(t) > 10 and "<" not in t:
+                if t and len(t) > 10 and "<" not in t and "{" not in t:
                     log(f"  📊 {t[:80]}")
     except Exception as e:
         log(f"  ❌ 访问 AFK 页面失败: {e}")
         return 1
 
-    # 7. 看 API 有没有 claim/sync endpoint
+    # 7. 探测 AFK API
     log("6. 查找 AFK API...")
-    # Next.js 通常有 /api/ 开头的 API
-    for path in ["/api/earn/afk", "/api/afk", "/api/earn", "/api/coins", "/api/earn/claim"]:
+    for path in ["/api/earn/afk", "/api/afk", "/api/earn", "/api/coins", "/api/earn/claim", "/api/earn/status"]:
         req = urllib.request.Request(f"https://dash.witchly.host{path}")
         req.add_header("User-Agent", UA)
         try:
             with opener.open(req, timeout=10) as resp:
-                body = resp.read().decode()[:500]
-                log(f"  GET {path} → HTTP {resp.status}: {body[:200]}")
+                body = resp.read().decode()[:300]
+                log(f"  GET {path} → HTTP {resp.status}: {body[:150]}")
         except urllib.error.HTTPError as e:
-            body = e.read().decode()[:200] if e.code < 500 else ""
             log(f"  GET {path} → HTTP {e.code}")
         except:
             pass
