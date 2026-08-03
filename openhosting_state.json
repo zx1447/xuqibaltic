@@ -4,6 +4,6 @@
   "last_start_time": "2026-08-03 10:26:02",
   "last_reconnects": 254,
   "last_end_time": "2026-08-03 16:06:09",
-  "last_error": "ConnectTimeout: HTTPSConnectionPool(host='dash.openhosting.site', port=443): Max retries exceeded with url: /login (Caused by ConnectTimeoutError(<HTTPSConnection(host='dash.openhosting.site', port=443) at 0x7f1b9d214830>, 'Connection to dash.openhosting.site timed out. (connect timeout=25)'))",
-  "last_error_time": "2026-08-03 19:20:02"
+  "last_error": "ConnectTimeout: HTTPSConnectionPool(host='dash.openhosting.site', port=443): Max retries exceeded with url: /login (Caused by ConnectTimeoutError(<HTTPSConnection(host='dash.openhosting.site', port=443) at 0x7f163ef10980>, 'Connection to dash.openhosting.site timed out. (connect timeout=25)'))",
+  "last_error_time": "2026-08-03 19:21:57"
 }
