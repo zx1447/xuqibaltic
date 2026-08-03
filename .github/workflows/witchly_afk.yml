@@ -3,8 +3,8 @@ name: Witchly AFK
 on:
   workflow_dispatch:
   schedule:
-    # 每 5 分钟跑一次 (收益每 5 分钟同步)
-    - cron: "*/5 * * * *"
+    # 每 6 小时跑一次 (每次持续 5.5 小时, 无缝衔接)
+    - cron: "0 */6 * * *"
 
 permissions:
   contents: read
@@ -16,7 +16,7 @@ concurrency:
 jobs:
   afk:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 360
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -43,7 +43,6 @@ jobs:
             echo "⚠️ DP_VLESS_URL not set, trying direct (may fail on datacenter IP)"
             exit 0
           fi
-          # 解析 VLESS URL
           UUID=$(echo "$VLESS_URL" | sed -E 's|^vless://([^@]+)@.*|\1|')
           HOST_PORT=$(echo "$VLESS_URL" | sed -E 's|^vless://[^@]+@([^/?]+).*|\1|')
           HOST=$(echo "$HOST_PORT" | cut -d: -f1)
@@ -51,7 +50,6 @@ jobs:
           PATH_VAL=$(echo "$QUERY" | tr '&' '\n' | grep '^path=' | cut -d= -f2- | sed 's|%2F|/|g')
           [ -z "$PATH_VAL" ] && PATH_VAL="/"
           echo "VLESS: host=$HOST uuid=$UUID path=$PATH_VAL"
-          # 生成 xray config
           cat > /tmp/xray-config.json << XEOF
           {
             "log": {"loglevel": "warning"},
@@ -74,14 +72,13 @@ jobs:
             "routing":{"rules":[{"type":"field","outboundTag":"direct","ip":["127.0.0.0/8","10.0.0.0/8","172.16.0.0/12","192.168.0.0/16"]}]}
           }
           XEOF
-          # 启动 xray
           setsid /tmp/xray run -c /tmp/xray-config.json &
           sleep 3
-          # 验证
           curl -s -x http://127.0.0.1:10809 --max-time 10 https://api.ipify.org && echo " ✅ proxy working"
 
-      - name: Run Witchly AFK
+      - name: Run Witchly AFK (持续 5.5 小时)
         env:
           DISCORD_TOKEN: ${{ secrets.WITCHLY_DISCORD_TOKEN }}
           WITCHLY_PROXY: ${{ secrets.DP_VLESS_URL && 'http://127.0.0.1:10809' }}
+          RUN_DURATION: "19800"
         run: python3 witchly_afk.py
