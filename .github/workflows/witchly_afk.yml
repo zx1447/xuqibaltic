@@ -3,7 +3,6 @@ name: Witchly AFK
 on:
   workflow_dispatch:
   schedule:
-    # 每 6 小时跑一次 (每次持续 5.5 小时, 无缝衔接)
     - cron: "0 */6 * * *"
 
 permissions:
@@ -28,57 +27,17 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install system deps (xray)
+      - name: Install xray
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq unzip
           curl -sL https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip -o /tmp/xray.zip
           unzip -o /tmp/xray.zip xray -d /tmp/
+          chmod +x /tmp/xray
 
-      - name: Start xray proxy (VLESS)
-        env:
-          VLESS_URL: ${{ secrets.DP_VLESS_URL }}
-        run: |
-          if [ -z "$VLESS_URL" ]; then
-            echo "⚠️ DP_VLESS_URL not set, trying direct (may fail on datacenter IP)"
-            exit 0
-          fi
-          UUID=$(echo "$VLESS_URL" | sed -E 's|^vless://([^@]+)@.*|\1|')
-          HOST_PORT=$(echo "$VLESS_URL" | sed -E 's|^vless://[^@]+@([^/?]+).*|\1|')
-          HOST=$(echo "$HOST_PORT" | cut -d: -f1)
-          QUERY=$(echo "$VLESS_URL" | sed -E 's|.*\?([^#]*)#?.*|\1|')
-          PATH_VAL=$(echo "$QUERY" | tr '&' '\n' | grep '^path=' | cut -d= -f2- | sed 's|%2F|/|g')
-          [ -z "$PATH_VAL" ] && PATH_VAL="/"
-          echo "VLESS: host=$HOST uuid=$UUID path=$PATH_VAL"
-          cat > /tmp/xray-config.json << XEOF
-          {
-            "log": {"loglevel": "warning"},
-            "inbounds": [
-              {"tag":"socks","port":10808,"listen":"127.0.0.1","protocol":"socks","settings":{"udp":true}},
-              {"tag":"http","port":10809,"listen":"127.0.0.1","protocol":"http","settings":{}}
-            ],
-            "outbounds": [
-              {
-                "tag":"vless","protocol":"vless",
-                "settings":{"vnext":[{"address":"$HOST","port":443,"users":[{"id":"$UUID","encryption":"none","flow":""}]}]},
-                "streamSettings":{
-                  "network":"ws","security":"tls",
-                  "tlsSettings":{"serverName":"$HOST","fingerprint":"chrome","allowInsecure":false},
-                  "wsSettings":{"path":"$PATH_VAL","headers":{"Host":"$HOST"}}
-                }
-              },
-              {"tag":"direct","protocol":"freedom","settings":{}}
-            ],
-            "routing":{"rules":[{"type":"field","outboundTag":"direct","ip":["127.0.0.0/8","10.0.0.0/8","172.16.0.0/12","192.168.0.0/16"]}]}
-          }
-          XEOF
-          setsid /tmp/xray run -c /tmp/xray-config.json &
-          sleep 3
-          curl -s -x http://127.0.0.1:10809 --max-time 10 https://api.ipify.org && echo " ✅ proxy working"
-
-      - name: Run Witchly AFK (持续 5.5 小时)
+      - name: Run Witchly AFK
         env:
           DISCORD_TOKEN: ${{ secrets.WITCHLY_DISCORD_TOKEN }}
-          WITCHLY_PROXY: ${{ secrets.DP_VLESS_URL && 'http://127.0.0.1:10809' }}
+          VLESS_URLS: ${{ secrets.WITCHLY_VLESS_URLS }}
           RUN_DURATION: "19800"
         run: python3 witchly_afk.py
