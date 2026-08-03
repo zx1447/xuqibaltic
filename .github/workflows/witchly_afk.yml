@@ -1,0 +1,34 @@
+name: Witchly AFK
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 每 5 分钟跑一次 (收益每 5 分钟同步)
+    - cron: "*/5 * * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: witchly-afk
+  cancel-in-progress: false
+
+jobs:
+  afk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: witchly
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run Witchly AFK
+        env:
+          DISCORD_TOKEN: ${{ secrets.WITCHLY_DISCORD_TOKEN }}
+        run: python3 witchly_afk.py
