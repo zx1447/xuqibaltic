@@ -153,8 +153,8 @@ def main():
 
     # 解析多个 VLESS URL
     vless_list = [u.strip() for u in VLESS_URLS.split(",") if u.strip()]
-if VLESS_URL_2:
-    vless_list.append(VLESS_URL_2)
+    if VLESS_URL_2:
+        vless_list.append(VLESS_URL_2)
     if not vless_list:
         log("ERROR: no VLESS URL")
         return 1
