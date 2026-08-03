@@ -17,24 +17,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 360
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           ref: witchly
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
-      - name: Install xray
+      - name: Install deps
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq unzip
+          sudo apt-get update -qq && sudo apt-get install -y -qq unzip
           curl -sL https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip -o /tmp/xray.zip
-          unzip -o /tmp/xray.zip xray -d /tmp/
-          chmod +x /tmp/xray
-
+          unzip -o /tmp/xray.zip xray -d /tmp/ && chmod +x /tmp/xray
+          pip install playwright && python -m playwright install chromium --with-deps
       - name: Run Witchly AFK
         env:
           DISCORD_TOKEN: ${{ secrets.WITCHLY_DISCORD_TOKEN }}
