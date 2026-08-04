@@ -1,7 +1,7 @@
 {
   "last_check_timestamp": 1785685801,
-  "last_check_time": "2026-08-03 13:53:32",
-  "last_status": "ERROR: 登录失败：{'raw': '<!DOCTYPE html>\\n<html lang=\"en\">\\n\\n<head>\\n\\n    <meta charset=\"UTF-8\">\\n\\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\\n\\n    <title>Cloudflare</title>\\n\\n\\n    <!-- Favicon -->\\n    <link rel=\"icon\" href=\"/favicon.ico\" type=\"image/x-icon\">\\n    <link rel=\"s",
+  "last_check_time": "2026-08-04 13:25:43",
+  "last_status": "ERROR: 登录失败：{'ok': False, 'error': 'Login and password are required.'}",
   "server_state": {
     "state": "running",
     "state_key": "online",
