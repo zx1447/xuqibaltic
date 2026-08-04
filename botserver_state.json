@@ -1,5 +1,5 @@
 {
-  "last_status": "waiting_for_cooldown",
+  "last_status": "ERROR: RuntimeError: OAuth entry HTTP 200",
   "daily_url": "https://bot-server.site/dashboard/daily",
   "cooldown_policy": "respect_server_24_hour_cooldown",
   "encrypted_cookies": "gAAAAABqcFESu7xkR9I00Lgmy9waNH0NuAwhFh3vGmOc3Xkt6UHaGuX3VDtY2T3e4M9faJWoXxizVpXJoXQ9TUJmlyCUom060HeeQehjp_nP0t62Rj4TbCS9qLZFL-IMLrzPLFu8rdnorTu34ytq3cay6_K43XaJBEOTqBAPsvtcwbVuIxBtvGmQ9pYJMEGRd1VqWcrck37p8NDiLCcnNVgdi45wJP1tGimpuy2zXdX7OX-PXFErmzXrrOpzk2UR-nBd4t8QcgfVgaOBqTelxFUyC2lP1y-CHg==",
@@ -11,7 +11,7 @@
   "observed_times_claimed": 6,
   "next_claim_timestamp": 1785753071,
   "next_claim_time": "2026-08-03 18:31:11",
-  "last_check_time": "2026-08-03 16:28:02",
+  "last_check_time": "2026-08-04 15:39:09",
   "before": {
     "balance": 110,
     "times_claimed": 7,
