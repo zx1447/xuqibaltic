@@ -29,12 +29,12 @@
   "api_status": "success",
   "next_api_login_timestamp": 1786080500,
   "next_api_login_time": "2026-08-07 13:28:20",
-  "last_check_time": "2026-08-05 13:28:20",
+  "last_check_time": "2026-08-06 13:29:52",
   "browser_error": "访问 Active 页面时被重定向到登录页",
-  "next_phenix_check_timestamp": 1785907671,
-  "next_phenix_check_time": "2026-08-05 13:27:51",
-  "last_phenix_check_timestamp": 1785821271,
-  "last_phenix_check_time": "2026-08-04 13:27:51",
+  "next_phenix_check_timestamp": 1786080592,
+  "next_phenix_check_time": "2026-08-07 13:29:52",
+  "last_phenix_check_timestamp": 1785994192,
+  "last_phenix_check_time": "2026-08-06 13:29:52",
   "last_phenix_server_state": "starting",
   "last_phenix_action": "running_starting"
 }
