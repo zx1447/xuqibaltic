@@ -1,15 +1,14 @@
 {
-  "last_status": "server_says_too_early",
+  "last_status": "renewed",
   "game_id": "328",
-  "expires_timestamp": 1786222800,
-  "expires_time": "2026-08-09 05:00:00",
-  "last_check_time": "2026-08-09 03:09:33",
+  "expires_timestamp": 1786654800,
+  "expires_time": "2026-08-14 05:00:00",
+  "last_check_time": "2026-08-09 10:37:08",
   "encrypted_cookies": "gAAAAABqaqQSIkoU385VppQYUsPjRtUZRgTw0PnBxsfyWPB9ZoTwedX4Sfx9cU_dQWZ-esIqkLHA8HfD56mSg_on5gQAwLOktf1m170UEz6M6PKz7Qf-7g_ieaNCVIRfxK3aUEUPHntYBtdXA5aPEy4r-dKY8X4mXy2GSIFuw1c8RE1qbZ-0X40t6CQNiYOSRxfgjUa8zmHiuxcRcGDlHrdSAS-p8ldpD1uoyjJT7rmgLTpXzRR9rKofJX3WL8jh0aFLNFCZ0lhiFbyV8PFfSjYitAzsNe_Dr28pFPkCJAiApno-sDPdFf9Nc_RVxjeEn2sAx1A02_12jFPTegyrHCC74B-eQ5hW_an83nhBcr-shY5zADHLTSaMcurh5Wo1JhUFqCrtC2dNgF3EBkgzP7R-ac-6XBzQeN7tql7ez4GhcxFboFXddH730metjbagE2lf1eXGNIFaTDOJ2z7awQfe26mGRcHVbmrW3bvxenhA3l7me3pfRHidN2KSINgEoQgdnVU0PrtKqgVvOW2EcVpEHfRESD0TDsype_QRmE3hdSYDUcB4vHH_KoyVNzxRSDT3rOfL1nGiadO8gj78eYt7r6hYFR346tBFcxDZ6fYmkW6Gq1Q5jNq07GuqMGyoMmJ0F13KMXDibswVSRQjMBee8e4qhYyL_ZFOpCAfDTTYpZ8n91cNURa50z5Ytjxx2b3yI7H6OcJgpYCiwu7JTxajLdLevWNPz0XwniNJre6-A1IE45w61wTryfPmawARMPvZlc-dZgbp4-U-vb_yjwc3_1Odjh9h4rJmXCMlS4B6cicAkk_s2WWukXUwtLCUan1V1xW_fvEdU5G2_K8mL92__a3f0EhNIc3erLUkK8zx2QHVngfgeLQcBh8dckA6RUSr4O9aqHiR2MKT4LUSalMGn4WRvbFPEq1bEyyeePmu4D2vQpH4FcvsVwBuj3I91t2UcVE4J-k3dZJXC_kynX8i2adc2Ug7J_7mKnB1QoSpW9372wT4L9rrIKq0IQqFxk9d8Tz4vFDvGwXww4k9MWt9HP2HsmeWw9H4kM2lDQIriQbTDw9zHmHYCpf6swNNHkmqpf87aFUdUKymwlsOqDUvmszWOqmRKg==",
   "session_saved_time": "2026-07-30 09:08:34",
   "server_status": "active",
-  "remaining_seconds": 6626,
-  "last_renew_time": "2026-08-04 11:51:36",
-  "old_expires_time": "2026-08-04 05:00:00",
-  "total_renew_success": 1,
-  "last_error": "You can only renew on the last day of the server's validity period"
+  "remaining_seconds": -20230,
+  "last_renew_time": "2026-08-09 10:37:12",
+  "old_expires_time": "2026-08-09 05:00:00",
+  "total_renew_success": 2
 }
