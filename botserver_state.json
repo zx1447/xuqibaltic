@@ -1,35 +1,35 @@
 {
-  "last_status": "waiting_for_cooldown",
+  "last_status": "claim_success",
   "daily_url": "https://bot-server.site/dashboard/daily",
   "cooldown_policy": "respect_server_24_hour_cooldown",
-  "encrypted_cookies": "gAAAAABqfrH9KowbfgUl9qEQ1r3mgKr5F4PVQlT3qU3IGZM7oMufqgF3WlHQT5aOC5oF5tBGy3nBso6Mye9VbmeJNN1GLvlbTE8cPs9xuhYWeCdmRNe9UwKeN0NYTaz_qAtcX0R-55ZnQz9L8dO-37V-90JRlTfLr-_qw19lBb0ffCHPiVkwOuoaq0qOvBHrb2RAND1mxIBqk4BsdhXJofOoUznU8xMm35mk-LT4Dki9C0arvbNlcO6gfY8bed8OcbJ0tZf_l4HeUytCUtMCtq7Jz514ky3jhw==",
-  "session_saved_time": "2026-08-14 14:13:17",
+  "encrypted_cookies": "gAAAAABqf_fAsMCCqDkLttDuNjXANq4qemErN3GXTanObqZLbOvVwCNFZnGC15f5ouheDqW5fwaxEX36F7b-6MXgWu4o5KZVHogxN76wVGOw8Tqh1M5kOIIc2ajo94hvd_I2sWhg2a_U5_9dsy3FUAiwuf6iODSE_01Esqo-egO4CC4IsPQATZQgVSYVtQQ7B45u2jdMYJyEup9yf_fjSG_izSBrySaTUTcA02m1JsClPATAG2n6ImKqb5dsd4me2EKJ8HjHCH6UN4_Ok28KDFH_Yb3NA_XpAg==",
+  "session_saved_time": "2026-08-15 13:23:12",
   "last_login_source": "encrypted_session",
   "account_username": "ajkvip",
   "account_discord_id": "1438491113576202260",
   "observed_balance": 80,
   "observed_times_claimed": 6,
-  "next_claim_timestamp": 1786698957,
-  "next_claim_time": "2026-08-14 17:15:57",
-  "last_check_time": "2026-08-14 14:13:17",
+  "next_claim_timestamp": 1786868591,
+  "next_claim_time": "2026-08-16 16:23:11",
+  "last_check_time": "2026-08-15 13:23:11",
   "before": {
     "balance": 180,
     "times_claimed": 12,
     "total_earned": 120,
-    "next_claim_timestamp": 1786698957,
-    "next_claim_time": "2026-08-14 17:15:57",
-    "cooldown_active": true,
-    "page_says_already_claimed": true
+    "next_claim_timestamp": 0,
+    "next_claim_time": null,
+    "cooldown_active": false,
+    "page_says_already_claimed": false
   },
   "after": {
-    "balance": 180,
-    "times_claimed": 12,
-    "total_earned": 120,
-    "next_claim_timestamp": 1786698957,
-    "next_claim_time": "2026-08-14 17:15:57",
+    "balance": 190,
+    "times_claimed": 13,
+    "total_earned": 130,
+    "next_claim_timestamp": 1786868591,
+    "next_claim_time": "2026-08-16 16:23:11",
     "cooldown_active": true,
     "page_says_already_claimed": true
   },
-  "last_claim_time": "2026-08-13 14:15:58",
-  "total_claim_success": 6
+  "last_claim_time": "2026-08-15 13:23:12",
+  "total_claim_success": 7
 }
