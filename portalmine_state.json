@@ -1,7 +1,7 @@
 {
   "last_check_timestamp": 1785685801,
-  "last_check_time": "2026-08-15 11:06:09",
-  "last_status": "ERROR: HTTPSConnectionPool(host='portalmine.com', port=443): Max retries exceeded with url: /api/auth.php?action=me (Caused by NewConnectionError(\"HTTPSConnection(host='portalmine.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused\"))",
+  "last_check_time": "2026-08-16 11:13:50",
+  "last_status": "ERROR: 登录失败：{'ok': False, 'error': 'Login and password are required.'}",
   "server_state": {
     "state": "running",
     "state_key": "online",
