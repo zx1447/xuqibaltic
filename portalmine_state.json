@@ -1,6 +1,6 @@
 {
   "last_check_timestamp": 1785685801,
-  "last_check_time": "2026-08-22 11:08:34",
+  "last_check_time": "2026-08-23 11:16:43",
   "last_status": "ERROR: 登录失败：{'ok': False, 'error': 'Login and password are required.'}",
   "server_state": {
     "state": "running",
