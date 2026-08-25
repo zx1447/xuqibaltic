@@ -11,6 +11,6 @@
   "captcha_pending": false,
   "last_end_time": "2026-08-25 14:31:02",
   "last_run_coins": 66.4000000000004,
-  "last_error": "ReadTimeout: HTTPSConnectionPool(host='dash.volyxhost.com', port=443): Read timed out. (read timeout=35)",
-  "last_error_time": "2026-08-25 19:59:19"
+  "last_error": "VolyxError: GET /login 失败：HTTP 500",
+  "last_error_time": "2026-08-25 19:59:43"
 }
