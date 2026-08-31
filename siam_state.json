@@ -6,28 +6,7 @@
   "last_checkin_timestamp": 1785478433,
   "last_checkin_time": "2026-08-30T03:33:28.620Z",
   "last_checkin_count": 6,
-  "cookies": [
-    {
-      "name": "PHPSESSID",
-      "value": "sk5kg5s47p4c7okq2e7alk20a7",
-      "domain": "my.siam-node.cloud",
-      "path": "/",
-      "expires": -1,
-      "httpOnly": false,
-      "secure": true,
-      "sameSite": "Lax"
-    },
-    {
-      "name": "csu",
-      "value": "456315618618764@23@1785478931",
-      "domain": "ukankingwithea.com",
-      "path": "/",
-      "expires": 1818119024.184513,
-      "httpOnly": false,
-      "secure": true,
-      "sameSite": "None"
-    }
-  ],
+  "cookies": null,
   "current_workflow_target": 6,
   "checkin_mode": "six_times_every_14_seconds_daily",
   "checkin_interval_seconds": 14,
