@@ -4,12 +4,47 @@
   "phpsessid": "43miccquoruaai7ht9l94gmobk",
   "session_saved_time": "2026-07-31 14:13:53",
   "last_checkin_timestamp": 1785478433,
-  "last_checkin_time": "2026-08-30T03:33:28.620Z",
-  "last_checkin_count": 6,
-  "cookies": null,
+  "last_checkin_time": "2026-09-01T03:29:22.140Z",
+  "last_checkin_count": 0,
+  "cookies": [
+    {
+      "name": "__cf_ob",
+      "value": "%7B%22cb%22%3A%7B%22cC%22%3A0%2C%22xC%22%3A0%2C%22pC%22%3A0%2C%22sC%22%3A0%2C%22cL%22%3A%5B%5D%7D%2C%22f%22%3A%7B%22t%22%3A%5B%5D%7D%2C%22k%22%3A%7B%22t%22%3A%5B%5D%7D%2C%22n%22%3A%7B%22t%22%3A%5B%7B%22p%22%3A%22%2FDISCORDOAUTH2%2Fprocess-oauth.php%22%2C%22t%22%3A%22f40a853e58a18759e1f7321d266d6349%22%2C%22nT%22%3A%22navigate%22%2C%22r%22%3A%22%22%2C%22ts%22%3A1081.5000000000146%2C%22dw%22%3A0.29999999998835847%7D%5D%7D%2C%22ptr%22%3A%7B%22pt%22%3A0%2C%22l%22%3A%5B%5D%2C%22tr%22%3Afalse%7D%2C%22v%22%3A%7B%22vH%22%3A0%2C%22vV%22%3A93.70000000001164%2C%22vC%22%3A0%2C%22fO%22%3A0%2C%22fI%22%3A0%7D%2C%22_to%22%3A1788233357235.8%2C%22_ti%22%3A%22b67ea668-dfdf-4df4-983d-32b8d759fe39%22%2C%22_tsrc%22%3A%22new%22%7D",
+      "domain": "my.siam-node.cloud",
+      "path": "/cdn-cgi/challenge-platform",
+      "expires": -1,
+      "httpOnly": false,
+      "secure": true,
+      "sameSite": "None",
+      "partitionKey": "https://siam-node.cloud",
+      "_crHasCrossSiteAncestor": false
+    },
+    {
+      "name": "cf_clearance",
+      "value": "XBkd4..jGd7iE71_LCz68xd7faUaYW_z2oWtCRuYUMY-1788233358-1.2.1.1-.kzuf5c.rMO2RRfByz1SGDedExps.hprb9l8C1mXhR7Vh8VBgG_vpbeV16BLq66V80kY5SbLvO0EVx_IZzCgBKibLPI1ITyh1mHBfTK7osqhJpBOjJq9LPPGSVmkgQMQtJ91j7fzUg2xXXViw8z.56sZTZuNIsh7bGV8WLwZ8bz4W.Q8PcAnHMKE0e7.M60de3XN0qqOOm_svtxSlk38y.eWLbOm7ZkCXjMYERBu8zGz3WhrbPUPOb0ZsJ89.zRbesJYG3NkA4MO2Vjd9VtktpeceEqVVWDPtxN8rN836R31l7FUwzkx8IiUdEi_r1X_evRn1xWq8u6wt0llRh3AysudS.AvktjA_fHJvRgqE1CcKMvLupNF4uPXBu1e6zEmpz_oWGYWorFBDpMm4mUuYlftxiGhOtM85YTBFS0mZ2WsDTq2eDJRgnM6zcuuGYOsdiuQnHnanw18tskkrrVVs1TZbGi0f5XzaWmsRZJx01s",
+      "domain": ".siam-node.cloud",
+      "path": "/",
+      "expires": 1819769358.31626,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "None",
+      "partitionKey": "https://siam-node.cloud",
+      "_crHasCrossSiteAncestor": false
+    },
+    {
+      "name": "PHPSESSID",
+      "value": "4i3mkste28k9h7gcran7o0nhha",
+      "domain": "my.siam-node.cloud",
+      "path": "/",
+      "expires": -1,
+      "httpOnly": false,
+      "secure": true,
+      "sameSite": "Lax"
+    }
+  ],
   "current_workflow_target": 6,
   "checkin_mode": "six_times_every_14_seconds_daily",
   "checkin_interval_seconds": 14,
   "next_scheduled_run_note": "GitHub Actions runs once daily at 00:00 UTC",
-  "last_workflow_end_time": "2026-08-30T03:33:28.620Z"
+  "last_workflow_end_time": "2026-09-01T03:29:22.140Z"
 }
