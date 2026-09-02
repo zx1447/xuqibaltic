@@ -1,9 +1,9 @@
 {
-  "last_status": "claim_success",
+  "last_status": "waiting_for_cooldown",
   "daily_url": "https://bot-server.site/dashboard/daily",
   "cooldown_policy": "respect_server_24_hour_cooldown",
-  "encrypted_cookies": "gAAAAABqlp7gaYp88RgieOSZfDrMdcfEVDn0xxHJUrJJ2QVBaIRl7nQhk9-TP_PmKWyj3x18SGMVV73p-ah9_2AqL_ZLlmTynbLG-MBO9IuLvMV5SPJZZFjslU8coDUnCOwZhs_LpADXBgkpV2TCYJck3FyS2asOuFTOhb0WrSdbM-0goRrasWww1GwWzaesymr03V_Jx3hkdBeC4k8JPHbcYV55oktaQSoz4zxauYOoPUGB2g0aZrWa06gtDKOI5GpjWPj3GreHw9MKxR5D0Mio3C93hojpbQ==",
-  "session_saved_time": "2026-09-01 17:46:08",
+  "encrypted_cookies": "gAAAAABql-oBVZXJpiIEtKKW0RXYuB0e7-b1xm73qg4P3QPNQuV-2hraAzbn3Jky__6vYEnj9jluLTSr4Qib2ff2GwK1OaobHQRzfrAR2OZMBSxY9s8kxU6u9HqRjyvq5d7wphJlBN6ROYBUrgfqhaS6TGGYzgQor3PiY-7-qG4PzhP0ryf0FvX1ECp4Kd3nQ_ZCeuQikTIHRwfKSGGA1Z64wBw9tw8nrIg96RKxuVCYvg6CjMIeDOHGTIllGyCIFUuFRnfEZnEQVuVSkNzZX0q914X9evQa8g==",
+  "session_saved_time": "2026-09-02 17:18:57",
   "last_login_source": "encrypted_session",
   "account_username": "ajkvip",
   "account_discord_id": "1438491113576202260",
@@ -11,15 +11,15 @@
   "observed_times_claimed": 6,
   "next_claim_timestamp": 1788353167,
   "next_claim_time": "2026-09-02 20:46:07",
-  "last_check_time": "2026-09-01 17:46:07",
+  "last_check_time": "2026-09-02 17:18:57",
   "before": {
-    "balance": 250,
-    "times_claimed": 19,
-    "total_earned": 190,
-    "next_claim_timestamp": 0,
-    "next_claim_time": null,
-    "cooldown_active": false,
-    "page_says_already_claimed": false
+    "balance": 260,
+    "times_claimed": 20,
+    "total_earned": 200,
+    "next_claim_timestamp": 1788353167,
+    "next_claim_time": "2026-09-02 20:46:07",
+    "cooldown_active": true,
+    "page_says_already_claimed": true
   },
   "after": {
     "balance": 260,
