@@ -11,6 +11,6 @@
   "captcha_pending": false,
   "last_end_time": "2026-08-31 01:48:11",
   "last_run_coins": 66.4000000000004,
-  "last_error": "ConnectTimeout: HTTPSConnectionPool(host='dash.volyxhost.com', port=443): Max retries exceeded with url: /login (Caused by ConnectTimeoutError(<HTTPSConnection(host='dash.volyxhost.com', port=443) at 0x7f6e1d847980>, 'Connection to dash.volyxhost.com timed out. (connect timeout=30)'))",
-  "last_error_time": "2026-09-05 12:50:57"
+  "last_error": "ConnectTimeout: HTTPSConnectionPool(host='dash.volyxhost.com', port=443): Max retries exceeded with url: /login (Caused by ConnectTimeoutError(<HTTPSConnection(host='dash.volyxhost.com', port=443) at 0x7fd95ddaf800>, 'Connection to dash.volyxhost.com timed out. (connect timeout=30)'))",
+  "last_error_time": "2026-09-05 18:51:28"
 }
