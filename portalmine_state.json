@@ -1,7 +1,7 @@
 {
   "last_check_timestamp": 1788784138,
-  "last_check_time": "2026-09-08 15:15:57",
-  "last_status": "ERROR: 登录失败：{'raw': ''}",
+  "last_check_time": "2026-09-09 15:24:21",
+  "last_status": "ERROR: server_state 失败：{'ok': False, 'error': 'SERVER_API_FATAL', 'msg': 'PortalMine could not complete this server request safely.', 'support_code': 'PM-SERVER-85B12CCF44', 'action': 'server_state'}",
   "server_state": {
     "state": "unknown",
     "state_key": "offline",
