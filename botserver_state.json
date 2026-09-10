@@ -1,5 +1,5 @@
 {
-  "last_status": "claim_success",
+  "last_status": "ERROR: RuntimeError: OAuth entry HTTP 523",
   "daily_url": "https://bot-server.site/dashboard/daily",
   "cooldown_policy": "respect_server_24_hour_cooldown",
   "encrypted_cookies": "gAAAAABqoSXbUVWqWhTJIzsnDyMkQcLY24IQPH9szhbb0EpUFG_KvJREmgxZ08Sl-fUqq-jdkF5DLDRjXKN2PVd9SRBd2swFOC_gBN1vagAHyMb7QyqnqhmDjXnsrgwIhUG9k6e9fvcUxe233OovErWn0bmh4tUMLwU5fpEzDWU3Y5L0i_9u_E2I22NQW6Va83jNlSH6P-RXZRD6kQx9AtxP_-OMrbat7Jv1cCGPwLTHeFQiCnOCbybxhUH6STfc22qzxuxfbHt4abnOnGTbkT51QhCKFHyHwg==",
@@ -11,7 +11,7 @@
   "observed_times_claimed": 6,
   "next_claim_timestamp": 1789043082,
   "next_claim_time": "2026-09-10 20:24:42",
-  "last_check_time": "2026-09-09 17:24:42",
+  "last_check_time": "2026-09-10 17:25:23",
   "before": {
     "balance": 280,
     "times_claimed": 22,
