@@ -1,7 +1,7 @@
 {
   "last_check_timestamp": 1789042852,
-  "last_check_time": "2026-09-10 20:20:52",
-  "last_status": "success",
+  "last_check_time": "2026-09-11 15:18:26",
+  "last_status": "ERROR: 登录失败：{'ok': False, 'error': 'MAINTENANCE_MODE', 'msg': 'We are applying improvements. Please check again shortly.', 'title': 'PortalMine is being updated', 'maintenance': True, 'redirect': '/maintenance.php'}",
   "server_state": {
     "state": "running",
     "state_key": "online",
