@@ -1,14 +1,14 @@
 {
-  "last_status": "success",
+  "last_status": "partial_failure",
   "last_login_timestamp": 1785392846,
   "last_login_time": "2026-07-30 14:27:26",
   "interval_days": 2,
   "server_count": 1,
   "server_identifier": "f4e28bcb",
   "server_name": "nice",
-  "last_browser_visit_timestamp": 1786335089,
-  "last_browser_visit_time": "2026-08-10 12:11:29",
-  "last_browser_url": "https://cloud.panel.enzonic.com/server/2d24e7a5/files/edit/server.properties/",
+  "last_browser_visit_timestamp": 1790063266,
+  "last_browser_visit_time": "2026-09-22 15:47:46",
+  "last_browser_url": "chrome-error://chromewebdata/",
   "browser_server_id": "2d24e7a5",
   "browser_visit_urls_count": 3,
   "browser_visit_urls": [
@@ -17,8 +17,8 @@
     "https://cloud.panel.enzonic.com/server/2d24e7a5/files/edit/eula.txt/"
   ],
   "browser_status": "success",
-  "next_browser_visit_timestamp": 1786507889,
-  "next_browser_visit_time": "2026-08-12 12:11:29",
+  "next_browser_visit_timestamp": 1790236066,
+  "next_browser_visit_time": "2026-09-24 15:47:46",
   "last_api_login_timestamp": 1786335089,
   "last_api_login_time": "2026-08-10 12:11:29",
   "last_api_login_result": {
@@ -26,15 +26,16 @@
     "first_server_id": null,
     "first_server_name": null
   },
-  "api_status": "success",
+  "api_status": "failed",
   "next_api_login_timestamp": 1786507889,
   "next_api_login_time": "2026-08-12 12:11:29",
-  "last_check_time": "2026-08-11 11:57:44",
+  "last_check_time": "2026-09-22 15:47:46",
   "browser_error": "访问 Active 页面时被重定向到登录页",
-  "next_phenix_check_timestamp": 1786421450,
-  "next_phenix_check_time": "2026-08-11 12:10:50",
-  "last_phenix_check_timestamp": 1786335050,
-  "last_phenix_check_time": "2026-08-10 12:10:50",
+  "next_phenix_check_timestamp": 1790149648,
+  "next_phenix_check_time": "2026-09-23 15:47:28",
+  "last_phenix_check_timestamp": 1790063248,
+  "last_phenix_check_time": "2026-09-22 15:47:28",
   "last_phenix_server_state": "starting",
-  "last_phenix_action": "running_starting"
+  "last_phenix_action": "running_starting",
+  "api_error": "HTTPSConnectionPool(host='cloud.panel.enzonic.com', port=443): Max retries exceeded with url: /api/client (Caused by NewConnectionError(\"HTTPSConnection(host='cloud.panel.enzonic.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused\"))"
 }
