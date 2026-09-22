@@ -2,7 +2,7 @@
   "last_status": "failed",
   "session_earned": 8,
   "max_earn": 8,
-  "last_start_time": "2026-09-22 20:01:55",
+  "last_start_time": "2026-09-23 01:15:33",
   "encrypted_cookies": "gAAAAABqpxBp26FBuA7vNprQbs1Lshj5xv6HVUSPNDi6tsxkS1PwzmV1WIXFR2WwKd4b3BIdOHG4v4gtGBYZy8k3t232YzJylzJ6MnsMgOMXpcntzLSMU7nKwgw7Ix0rAOvQPvYi-ZKEF2NLmxdux0ECvbYCGujU3l4UxkOQNoBxEBdNY8_J3jXCg7ZqxU-b6gAjEGuLViURxc83Cv-Iz7mol14p1PyzSs7_PvtCKBiWQAY85bjCcMvEYDCQTJv07awTBQJhWMG1dJSiyBQDA_DUbH7UJ46qeQOL6MDVYE1ufhaGnx8Tz6W9hOc05F_3ni0_isGCxcgL3Ruuupf6dRkDhoB9fXGNtOJyIvO1ov2Gwxdu3XBC8l2l8C6xFdYLZVcwvoncAxuK9yWL6DMm3XUDiSqFrk8nX8ujMQo0Nkz-BEexR3aCQOaIg24MDLmzM_FbuNmuEwaZSm-3rnAEWiqhi7txaEY4PWm9-8tzGiNqaZqkUaLQ88DXVA4gpLTRSrURMz5lSm39QFBSGeNoSsaxU6s1NWBY5gPjN0vyrZKNATiomwQoE4gbZHI9wyoR9HusTCYyex8ErAriY-MWeXcOzBbmRKAV2ozI71UiytHwD7tF-f1wY0zS-H5yc0BR9TD9wb9a9uEDYZRoYSnXzFZOB-6HJt79Qw==",
   "session_saved_time": "2026-09-14 05:06:49",
   "username": "vip01",
@@ -16,7 +16,7 @@
   "last_run_messages": 4,
   "last_run_activity_responses": 3,
   "last_run_reconnects": 0,
-  "last_error_time": "2026-09-22 20:01:59",
+  "last_error_time": "2026-09-23 01:15:37",
   "reconnects": 1,
   "last_error": "BoxMineWorldError: Callback 后 /auth/me 仍未登录"
 }
