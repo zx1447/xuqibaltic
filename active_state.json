@@ -29,7 +29,7 @@
   "api_status": "failed",
   "next_api_login_timestamp": 1786507889,
   "next_api_login_time": "2026-08-12 12:11:29",
-  "last_check_time": "2026-09-23 15:50:52",
+  "last_check_time": "2026-09-24 15:40:32",
   "browser_error": "访问 Active 页面时被重定向到登录页",
   "next_phenix_check_timestamp": 1790236227,
   "next_phenix_check_time": "2026-09-24 15:50:27",
@@ -37,5 +37,5 @@
   "last_phenix_check_time": "2026-09-23 15:50:27",
   "last_phenix_server_state": "starting",
   "last_phenix_action": "running_starting",
-  "api_error": "HTTPSConnectionPool(host='cloud.panel.enzonic.com', port=443): Max retries exceeded with url: /api/client (Caused by ConnectTimeoutError(<HTTPSConnection(host='cloud.panel.enzonic.com', port=443) at 0x7f0005929550>, 'Connection to cloud.panel.enzonic.com timed out. (connect timeout=25)'))"
+  "api_error": "HTTPSConnectionPool(host='cloud.panel.enzonic.com', port=443): Max retries exceeded with url: /api/client (Caused by NewConnectionError(\"HTTPSConnection(host='cloud.panel.enzonic.com', port=443): Failed to establish a new connection: [Errno 111] Connection refused\"))"
 }
