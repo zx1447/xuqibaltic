@@ -1,7 +1,7 @@
 {
   "last_check_timestamp": 1791033032,
-  "last_check_time": "2026-10-30 16:41:10",
-  "last_status": "ERROR: HTTPSConnectionPool(host='portalmine.com', port=443): Max retries exceeded with url: /api/auth.php?action=me (Caused by ConnectTimeoutError(<HTTPSConnection(host='portalmine.com', port=443) at 0x7fc3fc420da0>, 'Connection to portalmine.com timed out. (connect timeout=20)'))",
+  "last_check_time": "2026-10-31 16:28:08",
+  "last_status": "ERROR: HTTPSConnectionPool(host='portalmine.com', port=443): Max retries exceeded with url: /api/auth.php?action=me (Caused by ConnectTimeoutError(<HTTPSConnection(host='portalmine.com', port=443) at 0x7fbfc4861610>, 'Connection to portalmine.com timed out. (connect timeout=20)'))",
   "server_state": {
     "state": "running",
     "state_key": "online",
