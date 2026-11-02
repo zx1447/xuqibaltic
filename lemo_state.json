@@ -1,3 +1,5 @@
 {
-  "last_status": "never_run"
+  "last_error": "need LEMONHOST_API_KEY (preferred) or LEMONHOST_SESSION_COOKIE",
+  "last_status": "auth_failed",
+  "updated_at": "2026-11-02 08:53:55"
 }
