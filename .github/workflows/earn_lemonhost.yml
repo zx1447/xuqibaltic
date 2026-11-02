@@ -44,11 +44,9 @@ jobs:
       - name: Run LemonHost AFK claim
         env:
           LEMONHOST_API_KEY: ${{ secrets.LEMONHOST_API_KEY }}
-          LEMONHOST_SESSION_COOKIE: ${{ secrets.LEMONHOST_SESSION_COOKIE }}
-          LEMONHOST_SESSION_KEY: ${{ secrets.LEMONHOST_SESSION_KEY }}
           RUN_MINUTES: ${{ github.event.inputs.run_minutes || '340' }}
           DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
-          TICK_SECONDS: "300"
+          TICK_SECONDS: "70"
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
         run: python earn_lemonhost.py

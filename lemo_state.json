@@ -1,5 +1,13 @@
 {
-  "last_error": "need LEMONHOST_API_KEY (preferred) or LEMONHOST_SESSION_COOKIE",
-  "last_status": "auth_failed",
-  "updated_at": "2026-11-02 08:53:55"
+  "afk_credits": 5,
+  "claimed_today": 5,
+  "credits": 5,
+  "daily_limit": 1000,
+  "last_claim_time": "2026-11-02 08:59:59",
+  "last_claim_timestamp": 1793581199,
+  "last_status": "cooldown",
+  "session_id": "afk-b5aa092e19a946a2886051597cdba532",
+  "total_claims": 2,
+  "updated_at": "2026-11-02 09:00:59",
+  "username": "alejandro"
 }
