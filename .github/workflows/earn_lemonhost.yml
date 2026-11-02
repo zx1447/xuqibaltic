@@ -65,21 +65,26 @@ jobs:
           git push origin HEAD:lemo
 
       - name: Re-trigger next round
+        # 可选步骤：领取本身成功就不该让整次运行变红。
+        # 优先用 GH_PAT；没有/失效时退回 GITHUB_TOKEN（同仓库 dispatch 可用）。
+        # 两者都失败也不报错，等 6 小时兜底 cron 接手。
         if: success()
+        continue-on-error: true
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
         run: |
           sleep 45
+          token="${GH_PAT:-${{ secrets.GITHUB_TOKEN }}}"
           code=$(curl -sS -o /tmp/lemo-dispatch.json -w '%{http_code}' \
             -X POST \
-            -H "Authorization: token ${GH_PAT}" \
+            -H "Authorization: token ${token}" \
             -H "Accept: application/vnd.github+json" \
             -H "Content-Type: application/json" \
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/earn_lemonhost.yml/dispatches" \
-            -d '{"ref":"lemo","inputs":{"run_minutes":"340"}}')
-          if [ "$code" != "204" ]; then
-            echo "Re-dispatch failed: HTTP $code"
-            cat /tmp/lemo-dispatch.json
-            exit 1
+            -d '{"ref":"lemo","inputs":{"run_minutes":"340"}}' || echo 000)
+          if [ "$code" = "204" ]; then
+            echo "Next LemonHost round dispatched."
+          else
+            echo "::warning::Re-dispatch skipped (HTTP $code). Cron fallback will start the next round."
+            head -c 300 /tmp/lemo-dispatch.json 2>/dev/null || true
           fi
-          echo "Next LemonHost round dispatched."
