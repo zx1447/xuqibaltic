@@ -17,6 +17,7 @@ on:
 
 permissions:
   contents: write
+  actions: write   # 自派发下一轮需要，否则只能用 PAT
 
 concurrency:
   group: lemonhost-afk-claim
