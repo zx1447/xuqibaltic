@@ -55,8 +55,8 @@ ACCOUNT_URL = f"{BASE_URL}/api/client/account"
 API_KEY = os.environ.get("LEMONHOST_API_KEY", "").strip()
 DRY_RUN = os.environ.get("DRY_RUN", "false").lower() == "true"
 
-RUN_MINUTES = max(1, min(345, int(os.environ.get("RUN_MINUTES", "340"))))
-TICK_SECONDS = max(30, int(os.environ.get("TICK_SECONDS", "70")))
+RUN_MINUTES = max(1, min(355, int(os.environ.get("RUN_MINUTES", "355"))))
+TICK_SECONDS = max(30, int(os.environ.get("TICK_SECONDS", "65")))
 
 TG_TOKEN = os.environ.get("TG_BOT_TOKEN", "").strip()
 TG_CHAT_ID = os.environ.get("TG_CHAT_ID", "").strip()
@@ -70,6 +70,10 @@ UA = (
 
 # The panel replies 429 while the timer is still running; that is not an error.
 COOLDOWN_RETRY_SECONDS = 25
+
+# If 429 persists this long the day is treated as capped, so the round stops
+# instead of burning the remaining runner minutes for nothing.
+CAP_STALL_MINUTES = int(os.environ.get("CAP_STALL_MINUTES", "30"))
 
 
 class LemonHostError(RuntimeError):
@@ -252,6 +256,7 @@ def main() -> int:
     cooldowns = 0
     errors = 0
     daily = None
+    cooldown_since = None  # first 429 of the current streak
 
     while True:
         try:
@@ -259,6 +264,7 @@ def main() -> int:
 
             if outcome == "credited":
                 credited += 1
+                cooldown_since = None
                 daily = body.get("claimed_today")
                 state.update(
                     {
@@ -280,6 +286,22 @@ def main() -> int:
             elif outcome == "cooldown":
                 cooldowns += 1
                 state["last_status"] = "cooldown"
+                if cooldown_since is None:
+                    cooldown_since = time.time()
+                stalled = (time.time() - cooldown_since) / 60
+                if stalled >= CAP_STALL_MINUTES:
+                    state["last_status"] = "daily_cap_reached"
+                    state["cap_detected_at"] = now_text()
+                    log(
+                        f"429 for {stalled:.0f} min straight -- treating the day as "
+                        f"capped, stopping this round"
+                    )
+                    save_state(state)
+                    notify(
+                        f"LemonHost AFK: 冷却已持续 {stalled:.0f} 分钟，判定今日已满额，本轮停止\n"
+                        f"今日已领 {daily}"
+                    )
+                    break
                 log(f"cooldown, waiting {COOLDOWN_RETRY_SECONDS}s")
                 save_state(state)
                 remaining = deadline - time.time()
