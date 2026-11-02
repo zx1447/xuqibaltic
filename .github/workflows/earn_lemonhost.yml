@@ -66,26 +66,43 @@ jobs:
           git push origin HEAD:lemo
 
       - name: Re-trigger next round
-        # 可选步骤：领取本身成功就不该让整次运行变红。
-        # 优先用 GH_PAT；没有/失效时退回 GITHUB_TOKEN（同仓库 dispatch 可用）。
-        # 两者都失败也不报错，等 6 小时兜底 cron 接手。
+        # 可选步骤：领取成功就不该因为派发失败让整次运行变红。
+        # 先试 GH_PAT（可能已过期），再退回 GITHUB_TOKEN，两者都失败只告警，
+        # 由 6 小时兜底 cron 接手。
         if: success()
         continue-on-error: true
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
         run: |
           sleep 45
-          token="${GH_PAT:-${{ secrets.GITHUB_TOKEN }}}"
-          code=$(curl -sS -o /tmp/lemo-dispatch.json -w '%{http_code}' \
-            -X POST \
-            -H "Authorization: token ${token}" \
-            -H "Accept: application/vnd.github+json" \
-            -H "Content-Type: application/json" \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/earn_lemonhost.yml/dispatches" \
-            -d '{"ref":"lemo","inputs":{"run_minutes":"340"}}' || echo 000)
-          if [ "$code" = "204" ]; then
-            echo "Next LemonHost round dispatched."
+          url="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/earn_lemonhost.yml/dispatches"
+          body='{"ref":"lemo","inputs":{"run_minutes":"340"}}'
+
+          try_dispatch() {
+            curl -sS -o /tmp/lemo-dispatch.json -w '%{http_code}' \
+              -X POST \
+              -H "Authorization: token $1" \
+              -H "Accept: application/vnd.github+json" \
+              -H "Content-Type: application/json" \
+              "$url" -d "$body" 2>/dev/null || echo 000
+          }
+
+          ok=""
+          if [ -n "${GH_PAT}" ]; then
+            code=$(try_dispatch "${GH_PAT}")
+            echo "GH_PAT dispatch -> HTTP $code"
+            [ "$code" = "204" ] && ok="GH_PAT"
+          fi
+
+          if [ -z "$ok" ]; then
+            code=$(try_dispatch "${GITHUB_TOKEN}")
+            echo "GITHUB_TOKEN dispatch -> HTTP $code"
+            [ "$code" = "204" ] && ok="GITHUB_TOKEN"
+          fi
+
+          if [ -n "$ok" ]; then
+            echo "Next LemonHost round dispatched via $ok."
           else
-            echo "::warning::Re-dispatch skipped (HTTP $code). Cron fallback will start the next round."
+            echo "::warning::Re-dispatch skipped (both tokens failed). Cron fallback will start the next round."
             head -c 300 /tmp/lemo-dispatch.json 2>/dev/null || true
           fi
