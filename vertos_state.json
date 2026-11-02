@@ -1,1 +1,17 @@
-{"last_status":"never_run"}
+{
+  "email": "450144yy@gmail.com",
+  "finished_reason": "time",
+  "last_status": "finished",
+  "lifetime_credits": 0,
+  "lifetime_seconds": 333,
+  "seconds_to_next_credit": null,
+  "session_id": "ac74fd5a-1e3a-4331-8c8f-384837da6a7c",
+  "session_seconds": 151,
+  "today_credits": 0,
+  "today_earned": 0.1,
+  "today_seconds": 333,
+  "total_beats": 6,
+  "updated_at": "2026-11-02 17:38:31",
+  "user_id": 20,
+  "username": "nice"
+}
