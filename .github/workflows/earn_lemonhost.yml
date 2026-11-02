@@ -1,0 +1,87 @@
+name: LemonHost AFK Claim
+
+on:
+  # 兜底触发；正常情况下每轮结束会自动派发下一轮。
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      run_minutes:
+        description: "本轮运行分钟数"
+        required: false
+        default: "340"
+      dry_run:
+        description: "只探测接口不实际领取 (true/false)"
+        required: false
+        default: "false"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: lemonhost-afk-claim
+  cancel-in-progress: false
+
+jobs:
+  claim:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    steps:
+      - name: Checkout clean lemo branch
+        uses: actions/checkout@v4
+        with:
+          ref: lemo
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install --upgrade requests
+
+      - name: Run LemonHost AFK claim
+        env:
+          LEMONHOST_API_KEY: ${{ secrets.LEMONHOST_API_KEY }}
+          LEMONHOST_SESSION_COOKIE: ${{ secrets.LEMONHOST_SESSION_COOKIE }}
+          LEMONHOST_SESSION_KEY: ${{ secrets.LEMONHOST_SESSION_KEY }}
+          RUN_MINUTES: ${{ github.event.inputs.run_minutes || '340' }}
+          DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+          TICK_SECONDS: "300"
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: python earn_lemonhost.py
+
+      - name: Save LemonHost state
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add lemo_state.json || true
+          if git diff --cached --quiet; then
+            echo "No LemonHost state change."
+            exit 0
+          fi
+          git commit -m "Update LemonHost state [skip ci]"
+          git push origin HEAD:lemo
+
+      - name: Re-trigger next round
+        if: success()
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+        run: |
+          sleep 45
+          code=$(curl -sS -o /tmp/lemo-dispatch.json -w '%{http_code}' \
+            -X POST \
+            -H "Authorization: token ${GH_PAT}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "Content-Type: application/json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/earn_lemonhost.yml/dispatches" \
+            -d '{"ref":"lemo","inputs":{"run_minutes":"340"}}')
+          if [ "$code" != "204" ]; then
+            echo "Re-dispatch failed: HTTP $code"
+            cat /tmp/lemo-dispatch.json
+            exit 1
+          fi
+          echo "Next LemonHost round dispatched."
