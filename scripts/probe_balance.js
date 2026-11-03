@@ -37,7 +37,12 @@ const CANDIDATES = [
     const code = (j.location || '').match(/code=([^&]+)/);
     if (!code) { console.log('OAuth fail', JSON.stringify(j).slice(0, 200)); process.exit(1); }
     await page.goto(j.location, { waitUntil: 'domcontentloaded', timeout: 60000 });
-    await page.waitForTimeout(4000);
+    // 等 OAuth 回调自己跳转到站点首页
+    for (let i = 0; i < 20; i++) {
+      await page.waitForTimeout(1500);
+      if (!page.url().includes('process-oauth')) break;
+    }
+    await page.waitForTimeout(2000);
     console.log('LOGIN URL:', page.url());
 
     // 1) 逐个试候选接口
