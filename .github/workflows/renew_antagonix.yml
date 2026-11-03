@@ -1,0 +1,71 @@
+name: Antagonix Renew
+
+# 每 4 天点一次 Discord 面板上的「Renouveler」，把到期时间重置为 现在 + 5 天。
+# 判定不只看 cron：脚本还会读面板 embed 里的真实到期时间，
+# 剩余 ≤ 4.5 天就点，所以漏跑一天第二天会自动补上。
+on:
+  schedule:
+    # 每天跑一次（UTC 04:17），由脚本自己判断「距上次点击是否满 4 天」。
+    # 之所以每天跑而不是每 4 天跑一次 cron：GitHub 的 schedule 经常延迟甚至跳过，
+    # 每天检查 + 按真实到期时间判定，才不会漏续期把服务器跑没。
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "true = 无视间隔立即点一次"
+        required: false
+        default: "false"
+      dry_run:
+        description: "true = 只看不点"
+        required: false
+        default: "false"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: antagonix-renew
+  cancel-in-progress: false
+
+jobs:
+  renew:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: antagonix
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Run Antagonix renew
+        env:
+          ANTAGONIX_DISCORD_TOKEN: ${{ secrets.ANTAGONIX_DISCORD_TOKEN }}
+          ANTAGONIX_FORCE: ${{ inputs.force == 'true' && '1' || '0' }}
+          ANTAGONIX_DRY_RUN: ${{ inputs.dry_run == 'true' && '1' || '0' }}
+          ANTAGONIX_INTERVAL_DAYS: "4"
+          ANTAGONIX_THRESHOLD_DAYS: "4.5"
+        run: node renew_antagonix.js
+
+      - name: Save state
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add antagonix_state.json || true
+          if git diff --cached --quiet; then
+            echo "No state change."
+            exit 0
+          fi
+          git commit -m "Update Antagonix state [skip ci]"
+          for i in 1 2 3; do
+            git fetch origin antagonix
+            if git rebase origin/antagonix && git push origin HEAD:antagonix; then
+              echo "✅ state 已推送"; break
+            fi
+            git rebase --abort 2>/dev/null || true
+            sleep 3
+          done
