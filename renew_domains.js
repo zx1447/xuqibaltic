@@ -152,66 +152,115 @@ async function readCodeFile() {
     // 3. 访问 domains 页面
     log('visiting domains page...');
     await page.goto(`${BASE}/domains`, { waitUntil: 'networkidle', timeout: 30000 }).catch(() => {});
-    await page.waitForTimeout(3000);
+    await page.waitForTimeout(5000);
     log(`domains page URL: ${page.url()}`);
 
-    // 4. 用 API 列出所有域名
-    log('fetching domains via API...');
-    const domainsData = await page.evaluate(async () => {
-      const r = await fetch('/_panel_api/api/domains', {
-        headers: { 'Accept': 'application/json' },
+    // 4. 从页面抓取域名信息 + 查找 Renew 按钮
+    const pageInfo = await page.evaluate(() => {
+      const bodyText = document.body ? document.body.innerText : '';
+      // 找所有可交互元素 (button/a/[wire:click]) 含 renew/续期 文字
+      const els = [...document.querySelectorAll('button, a, [wire\\:click], input[type="submit"], [role="button"]')];
+      const renewEls = els.map((el, i) => ({
+        idx: i,
+        tag: el.tagName,
+        text: (el.textContent || '').trim().slice(0, 60),
+        href: el.getAttribute('href') || '',
+        wireClick: el.getAttribute('wire:click') || '',
+        classes: el.className || '',
+      })).filter(x => {
+        const t = (x.text + ' ' + x.href + ' ' + x.wireClick + ' ' + x.classes).toLowerCase();
+        return t.includes('renew') || t.includes('续期') || t.includes('extend');
       });
-      const txt = await r.text();
-      try { return JSON.parse(txt); } catch (e) { return { error: 'HTTP ' + r.status + ' non-JSON: ' + txt.slice(0, 120) }; }
+      // 提取页面中所有看起来像域名的字符串
+      const domainMatches = bodyText.match(/[a-z0-9][-a-z0-9]*\.(dpdns\.org|us\.kg|is-a\.dev|github\.dev)/gi) || [];
+      return {
+        title: document.title,
+        bodyTextHead: bodyText.slice(0, 4000),
+        domains: [...new Set(domainMatches)],
+        renewEls: renewEls,
+        totalEls: els.length,
+      };
     }).catch(e => ({ error: e.message }));
 
-    if (domainsData.error) {
-      log(`❌ API error: ${domainsData.error}`);
+    if (pageInfo.error) {
+      log(`❌ page scrape error: ${pageInfo.error}`);
       process.exit(1);
     }
 
-    // 解析域名列表
-    let domains = [];
-    if (Array.isArray(domainsData)) domains = domainsData;
-    else if (domainsData.domains) domains = domainsData.domains;
-    else if (domainsData.data) domains = domainsData.data;
+    log(`PAGE TITLE: ${pageInfo.title}`);
+    log(`Found ${pageInfo.domains.length} domain(s) in page text: ${pageInfo.domains.join(', ')}`);
+    log(`Found ${pageInfo.renewEls.length} renew-related element(s):`);
+    for (const el of pageInfo.renewEls) {
+      log(`  [${el.idx}] <${el.tag}> text="${el.text}" href="${el.href}" wire:click="${el.wireClick}" class="${el.classes.slice(0,60)}"`);
+    }
+    // dump body text for debugging (first 2000 chars)
+    log('BODY TEXT (first 2000): ' + pageInfo.bodyTextHead.slice(0, 2000));
 
-    log(`found ${domains.length} domains`);
-
-    // 5. 对每个域名调 renew API
+    // 5. 逐个点击 Renew 按钮
     let renewed = 0;
-    for (const dom of domains) {
-      const domainName = dom.domain || dom.name || dom.domain_name || '?';
-      const expiry = dom.expiry || dom.expires || dom.expire || dom.expiry_date || '?';
-      log(`  ${domainName} | expires: ${expiry}`);
-
-      try {
-        const result = await page.evaluate(async (domain) => {
-          const csrf = document.cookie.match(/panel_csrf_token=([^;]+)/)?.[1] || '';
-          const r = await fetch(`/_panel_api/api/domains/${domain}/renew`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'x-csrf-token': csrf,
-            },
-            body: JSON.stringify({}),
-          });
-          return { status: r.status, body: await r.text() };
-        }, domainName);
-
-        if (result.status === 200) {
-          log(`  ✅ ${domainName} renewed`);
-          renewed++;
-        } else {
-          log(`  ⚠️ ${domainName} renew: HTTP ${result.status} ${result.body.slice(0, 100)}`);
+    if (pageInfo.renewEls.length > 0) {
+      for (const el of pageInfo.renewEls) {
+        log(`clicking renew element [${el.idx}] "${el.text}"...`);
+        try {
+          const selector = `[wire\\:click="${el.wireClick}"]`;
+          let locator;
+          if (el.wireClick) {
+            locator = page.locator(`[wire\\:click="${el.wireClick}"]`).first();
+          } else {
+            // 用文本定位
+            locator = page.locator(`${el.tag}:has-text("${el.text}")`).first();
+          }
+          if (await locator.isVisible({ timeout: 5000 }).catch(() => false)) {
+            await locator.click({ timeout: 10000 });
+            await page.waitForTimeout(3000);
+            // 处理可能的确认对话框 (Filament modal)
+            const confirmBtn = page.locator('button:has-text("Confirm"), button:has-text("Renew"), button:has-text("OK"), button:has-text("Yes")').first();
+            if (await confirmBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+              log('  confirmation dialog detected, clicking confirm...');
+              await confirmBtn.click();
+              await page.waitForTimeout(5000);
+            }
+            log(`  ✅ clicked renew [${el.idx}] "${el.text}"`);
+            renewed++;
+          } else {
+            log(`  ⚠️ element [${el.idx}] not visible, trying JS click`);
+            await page.evaluate((idx) => {
+              const els = document.querySelectorAll('button, a, [wire\\:click], input[type="submit"], [role="button"]');
+              if (els[idx]) els[idx].click();
+            }, el.idx);
+            await page.waitForTimeout(3000);
+            log(`  ✅ JS-clicked renew [${el.idx}]`);
+            renewed++;
+          }
+        } catch (e) {
+          log(`  ❌ renew [${el.idx}] error: ${e.message}`);
         }
-      } catch (e) {
-        log(`  ❌ ${domainName} error: ${e.message}`);
+        await page.waitForTimeout(2000);
       }
-      await page.waitForTimeout(2000);
+    } else {
+      // 备用: 尝试原 API 路径 (万一 CF 这次没挡)
+      log('no renew buttons found, trying API fallback...');
+      for (const dom of pageInfo.domains) {
+        log(`  trying API renew for ${dom}...`);
+        try {
+          const result = await page.evaluate(async (domain) => {
+            const csrf = document.cookie.match(/panel_csrf_token=([^;]+)/)?.[1] || '';
+            const r = await fetch(`/_panel_api/api/domains/${domain}/renew`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrf },
+              body: JSON.stringify({}),
+            });
+            return { status: r.status, body: await r.text() };
+          }, dom);
+          if (result.status === 200) { log(`  ✅ ${dom} renewed`); renewed++; }
+          else { log(`  ⚠️ ${dom} renew: HTTP ${result.status} ${result.body.slice(0, 100)}`); }
+        } catch (e) { log(`  ❌ ${dom} error: ${e.message}`); }
+        await page.waitForTimeout(2000);
+      }
     }
 
-    log(`🎉 Renewed ${renewed}/${domains.length} domains`);
+    const totalCount = pageInfo.renewEls.length || pageInfo.domains.length;
+    log(`🎉 Renewed ${renewed}/${totalCount} domains`);
     process.exit(0);
   } catch (e) {
     log(`❌ error: ${e.message}`);
