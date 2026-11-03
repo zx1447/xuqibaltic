@@ -174,6 +174,11 @@ async function gotoWithChallenge(page, url, label) {
   };
 
   const summary = () => {
+    // 本次拿不到余额（例如今日额度已用完、接口直接报错）时，用上次记录顶上
+    if (balanceTotal === null && state.last_balance !== undefined && state.last_balance !== null) {
+      balanceTotal = state.last_balance;
+      log(`ℹ️ 本次接口未返回余额，显示上次记录的总积分 ${balanceTotal} ฿`);
+    }
     log(`📊 今日汇总: 成功 ${count} 次, 共 +${earned} ฿, 当前总积分 ${balanceTotal !== null ? balanceTotal + ' ฿' : '未知'}`);
     if (blockReason) log(`⛔ 失败原因: ${blockReason}`);
   };
@@ -343,7 +348,7 @@ async function gotoWithChallenge(page, url, label) {
 
       state.last_checkin_time = new Date().toISOString();
       state.last_checkin_count = count;
-      state.last_balance = balanceTotal;
+      if (count > 0 && balanceTotal !== null) state.last_balance = balanceTotal;
       state.checkin_mode = 'six_times_every_14_seconds_daily';
       state.checkin_interval_seconds = CHECKIN_INTERVAL_SECONDS;
       state.last_workflow_end_time = new Date().toISOString();
