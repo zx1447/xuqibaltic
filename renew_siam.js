@@ -159,6 +159,19 @@ async function gotoWithChallenge(page, url, label) {
   let earned = 0;
   let balanceTotal = null;
   let blockReason = '';
+  let quotaDone = false;
+
+  const persistCookies = async () => {
+    try {
+      const cookies = await context.cookies();
+      if (cookies && cookies.length) {
+        state.cookies = cookies;
+        state.last_workflow_end_time = new Date().toISOString();
+        saveState(state);
+        log(`💾 Session 已保存 (${cookies.length} cookies: ${cookies.map(c => c.name).join(',')})`);
+      }
+    } catch { /* ignore */ }
+  };
 
   const summary = () => {
     log(`📊 今日汇总: 成功 ${count} 次, 共 +${earned} ฿, 当前总积分 ${balanceTotal !== null ? balanceTotal + ' ฿' : '未知'}`);
@@ -258,6 +271,7 @@ async function gotoWithChallenge(page, url, label) {
       balanceTotal = await readBalance(page, '钱包页');
       if (balanceTotal !== null) log(`💰 当前总积分: ${balanceTotal} ฿`);
       log('❌ 未能登录，本次不进行签到');
+      await persistCookies();
     } else {
       balanceTotal = await readBalance(page, '钱包页');
       if (balanceTotal !== null) log(`💰 签到前总积分: ${balanceTotal} ฿`);
@@ -286,7 +300,14 @@ async function gotoWithChallenge(page, url, label) {
         log(`📡 ${JSON.stringify(result).slice(0, 200)}`);
 
         if (result.status !== 'success') {
-          log(`⚠️ #${i + 1} 未成功: ${result.message || result.status}`);
+          const msg = String(result.message || result.status);
+          log(`⚠️ #${i + 1} 未成功: ${msg}`);
+          // 今日 6 次额度用完 / 已经签到过，属于正常结束，不是故障
+          if (/ครบแล้ว|ครบ\s*\d+\s*ครั้ง|already|额度|上限|used up|limit/i.test(msg)) {
+            quotaDone = true;
+            log('ℹ️ 判定为今日额度已用完，正常结束');
+            break;
+          }
           continue;
         }
 
@@ -331,7 +352,12 @@ async function gotoWithChallenge(page, url, label) {
     }
 
     summary();
+    await persistCookies();
     if (count === 0) {
+      if (quotaDone) {
+        log('ℹ️ 今日签到额度已经用完 —— 不算失败');
+        process.exit(0);
+      }
       log('❌ 本次运行 0 次签到成功 —— 标记为失败，避免继续假装正常');
       process.exit(1);
     }
@@ -344,16 +370,6 @@ async function gotoWithChallenge(page, url, label) {
     summary();
     process.exit(1);
   } finally {
-    try {
-      const cookies = await context.cookies();
-      if (cookies && cookies.length) {
-        state.cookies = cookies;
-        state.last_workflow_end_time = new Date().toISOString();
-        saveState(state);
-        const names = cookies.map(c => c.name);
-        log(`💾 Session 已保存 (${cookies.length} cookies: ${names.join(',')})`);
-      }
-    } catch { /* ignore */ }
     await browser.close();
   }
 })();

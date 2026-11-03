@@ -41,3 +41,27 @@ Siam-Node Cloud 自动签到 - Playwright 浏览器、复用 session、Discord t
 5. 保存新 cookie 和签到进度到 siam_state.json
 6. Workflow 结束，等待到下一天定时任务再启动
 ```
+
+## Cloudflare 绕过（关键）
+
+`my.siam-node.cloud` 对机房 IP 一律下发 Cloudflare JS 挑战（`cf-mitigated: challenge`），
+表现为接口返回 `<!DOCTYPE html> Just a moment...`，旧版脚本因此 107 次运行全部 0 签到。
+
+现在的做法（移植自本仓库 `domainvip` 分支）：workflow 里先用 `wgcf` + `wireproxy`
+拉起一个 **Cloudflare WARP SOCKS5 代理（127.0.0.1:40000）**，Playwright 通过它出网。
+
+实测同一台 runner：
+
+| 出口 | Siam 响应 |
+|---|---|
+| 直连（Azure IP） | `403` + `cf-mitigated: challenge` |
+| WARP（`warp=on`） | `302`，无挑战 ✅ |
+
+## 输出样例
+
+```
+[siam] ✅ 本次 +35 ฿ | 今日累计 +35 ฿ | 总积分 1506 ฿ | 剩余次数 5
+[siam] ✅ 本次 +2 ฿ | 今日累计 +37 ฿ | 总积分 1508 ฿ | 剩余次数 4
+...
+[siam] 📊 今日汇总: 成功 6 次, 共 +45 ฿, 当前总积分 1516 ฿
+```
