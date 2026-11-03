@@ -34,29 +34,40 @@ jobs:
           npm install playwright
           npx playwright install chromium --with-deps
 
-      # 关键一步：my.siam-node.cloud 对机房 IP 一律下发 Cloudflare JS 挑战，
+      # 关键一步：my.siam-node.cloud 对机房 IP 一律下发 Cloudflare JS 挑战。
       # 换到 Cloudflare WARP 出口后挑战不再触发（实测 direct=403 challenge / warp=302 无挑战）。
       # 方案移植自本仓库 domainvip 分支。
+      #
+      # 优先用 secret SIAM_WARP_PROFILE 里已注册好的 WARP 配置（避免每次 register 撞上
+      # Cloudflare 的 429 限流）；只有配置缺失时才现场注册一份。
       - name: Start Cloudflare WARP SOCKS5 proxy
+        env:
+          WARP_PROFILE: ${{ secrets.SIAM_WARP_PROFILE }}
         run: |
           set -e
           mkdir -p /tmp/warp && cd /tmp/warp
           curl -fsSL -o wgcf https://github.com/ViRb3/wgcf/releases/download/v2.2.32/wgcf_2.2.32_linux_amd64
           chmod +x wgcf
           curl -fsSL -o wireproxy.tar.gz https://github.com/windtf/wireproxy/releases/download/v1.1.3/wireproxy_linux_amd64.tar.gz
-          tar -xzf wireproxy.tar.gz
-          chmod +x wireproxy
-          ./wgcf register --accept-tos
-          ./wgcf generate
-          printf '\n[Socks5]\nBindAddress = 127.0.0.1:40000\n' >> wgcf-profile.conf
+          tar -xzf wireproxy.tar.gz && chmod +x wireproxy
+
+          if [ -n "$WARP_PROFILE" ]; then
+            echo "♻️ 使用已保存的 WARP 配置"
+            printf '%s\n[Socks5]\nBindAddress = 127.0.0.1:40000\n' "$WARP_PROFILE" > wgcf-profile.conf
+          else
+            echo "ℹ️ 没有保存的配置，现场注册 WARP（可能遇到 429）"
+            ./wgcf register --accept-tos
+            ./wgcf generate
+            printf '\n[Socks5]\nBindAddress = 127.0.0.1:40000\n' >> wgcf-profile.conf
+          fi
+
           nohup ./wireproxy -c wgcf-profile.conf > /tmp/warp/wireproxy.log 2>&1 &
-          echo "WARP_PID=$!" >> $GITHUB_ENV
           for i in $(seq 1 20); do
             if curl -fsS --max-time 5 -x socks5h://127.0.0.1:40000 https://www.cloudflare.com/cdn-cgi/trace > /tmp/warp/trace; then break; fi
             sleep 1
           done
           echo "=== WARP trace ==="
-          grep -E '^(ip|loc|warp)=' /tmp/warp/trace || echo "⚠️ WARP 未连上"
+          grep -E '^(ip|loc|warp)=' /tmp/warp/trace || { echo "⚠️ WARP 未连上"; tail -10 /tmp/warp/wireproxy.log; }
 
       - name: Verify Siam is reachable through WARP
         run: |
