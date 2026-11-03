@@ -38,9 +38,11 @@ jobs:
         env:
           SIAM_DISCORD_TOKEN: ${{ secrets.SIAM_DISCORD_TOKEN }}
           SIAM_CF_CLEARANCE: ${{ secrets.SIAM_CF_CLEARANCE }}
+          SIAM_HEADFUL: "1"
+          SIAM_CF_WAIT_MS: "45000"
           SIAM_CHECKIN_TARGET: "6"
           SIAM_CHECKIN_INTERVAL_SECONDS: "14"
-        run: node renew_siam.js
+        run: xvfb-run -a node renew_siam.js
 
       - name: Save Siam state
         if: always()
