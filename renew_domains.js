@@ -55,10 +55,24 @@ async function readCodeFile() {
   try {
     log('=== DigitalPlat Domain renew start ===');
 
+    // CF 等待函数: 页面标题含 'Just a moment' 或 'Performing security' 时持续等待+重载
+    const waitForCF = async (label, maxSecs = 120) => {
+      for (let i = 0; i < Math.floor(maxSecs / 10); i++) {
+        const title = await page.title().catch(() => '');
+        if (!title.includes('Just a moment') && !title.includes('Performing security')) {
+          log(`CF passed on ${label} (title: ${title.slice(0, 40)})`);
+          return true;
+        }
+        if (i % 3 === 0) log(`⏳ CF challenge on ${label}, waiting... (${i * 10}s)`);
+        await page.waitForTimeout(10000);
+      }
+      return false;
+    };
+
     // 1. 先访问 dash (触发 CF challenge)
     log('visiting dash (CF challenge)...');
-    await page.goto(`${BASE}/auth/login`, { waitUntil: 'networkidle', timeout: 60000 }).catch(() => {});
-    await page.waitForTimeout(5000);
+    await page.goto(`${BASE}/auth/login`, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
+    await waitForCF('auth/login', 90);
 
     let url = page.url();
     const onDash = () => page.url().includes('digitalplat.org') && !page.url().includes('login');
@@ -149,9 +163,11 @@ async function readCodeFile() {
       log('⚠️ login status unclear, trying to continue...');
     }
 
-    // 3. 访问 domains 页面
+    // 3. 访问 domains 页面 (等 CF 通过)
     log('visiting domains page...');
-    await page.goto(`${BASE}/domains`, { waitUntil: 'networkidle', timeout: 30000 }).catch(() => {});
+    await page.goto(`${BASE}/domains`, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+    await waitForCF('domains', 120);
+    // CF 通过后再等页面 JS 渲染
     await page.waitForTimeout(5000);
     log(`domains page URL: ${page.url()}`);
 
