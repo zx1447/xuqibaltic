@@ -1,0 +1,63 @@
+name: DomainVIP Login Probe
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: domainvip
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-0 libdbus-glib-1-2 libxt6 libasound2t64 \
+            libnss3 libnspr4 libatk1.0-0t64 libatk-bridge2.0-0t64 libcups2t64 libdrm2 \
+            libxcb1 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
+            libgbm1 libpango-1.0-0 libcairo2 libatspi2.0-0t64 xvfb
+
+      - name: Install camoufox
+        run: |
+          pip install --upgrade pip
+          pip install "camoufox[geoip]"
+          python3 -m camoufox fetch
+
+      - name: Start WARP
+        env:
+          WARP_PROFILE: ${{ secrets.SIAM_WARP_PROFILE }}
+        run: |
+          set -uo pipefail
+          mkdir -p /tmp/warp && cd /tmp/warp
+          curl -fsSL -o wgcf https://github.com/ViRb3/wgcf/releases/download/v2.2.32/wgcf_2.2.32_linux_amd64
+          chmod +x wgcf
+          curl -fsSL -o wp.tar.gz https://github.com/windtf/wireproxy/releases/download/v1.1.3/wireproxy_linux_amd64.tar.gz
+          tar -xzf wp.tar.gz && chmod +x wireproxy
+          if [ -n "${WARP_PROFILE:-}" ]; then
+            printf '%s\n[Socks5]\nBindAddress = 127.0.0.1:40000\n' "$WARP_PROFILE" > wgcf-profile.conf
+          else
+            ./wgcf register --accept-tos && ./wgcf generate
+            printf '\n[Socks5]\nBindAddress = 127.0.0.1:40000\n' >> wgcf-profile.conf
+          fi
+          nohup ./wireproxy -c wgcf-profile.conf > /tmp/warp/wireproxy.log 2>&1 &
+          for i in $(seq 1 20); do
+            curl -fsS --max-time 5 -x socks5h://127.0.0.1:40000 https://www.cloudflare.com/cdn-cgi/trace >/tmp/warp/trace && break
+            sleep 1
+          done
+          grep -E '^(ip|warp)=' /tmp/warp/trace || echo "WARP 未连上"
+
+      - name: Probe login flow
+        env:
+          DP_GH_USER: ${{ secrets.DP_GH_USER }}
+          DP_GH_PASS: ${{ secrets.DP_GH_PASS }}
+        run: xvfb-run -a python3 scripts/probe_login.py
