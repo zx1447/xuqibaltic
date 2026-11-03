@@ -107,20 +107,32 @@ async function readCodeFile() {
     }
 
     // 如果有 Authorize 按钮
-    url = page.url();
-    if (url.includes('github.com/login/oauth/authorize') || url.includes('github.com/apps/')) {
-      log('authorizing DigitalPlat...');
-      const authBtn = page.locator('button:has-text("Authorize")').first();
-      if (await authBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
-        await authBtn.click();
-        await page.waitForTimeout(10000);
-      }
-    }
+    // 等待回调处理完毕 (dash 回调 URL 含 iss=...github.com 的查询参数, 不能用 includes 判断)
+    await page.waitForURL(u => {
+      const s = u.toString();
+      return s.includes('dash.domain.digitalplat.org') && !s.includes('/auth/login') && !s.includes('/auth/kyc/');
+    }, { timeout: 30000 }).catch(() => {});
+    await page.waitForTimeout(3000);
 
-    // 检查是否登录成功 (回到 dash)
     url = page.url();
     log(`after OAuth, URL: ${url}`);
-    if (onDash()) {
+    // 只检查 HOST 是 github.com (不是查询参数里出现 github.com)
+    if (url.startsWith('https://github.com')) {
+      // 还在 authorize 页? 试点 Authorize
+      if (url.includes('github.com/login/oauth/authorize') || url.includes('github.com/apps/')) {
+        log('authorizing DigitalPlat...');
+        const authBtn = page.locator('button:has-text("Authorize")').first();
+        if (await authBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
+          await authBtn.click();
+          await page.waitForTimeout(10000);
+        }
+      }
+      url = page.url();
+      log(`after authorize attempt, URL: ${url}`);
+    }
+
+    // 只要 URL 含 dash.domain.digitalplat.org 且不在 login 页 = 成功
+    if (url.includes('dash.domain.digitalplat.org') && !url.includes('/auth/login')) {
       log('✅ logged in to dash');
       // 缓存会话供下次使用
       try {
@@ -130,8 +142,8 @@ async function readCodeFile() {
     } else if (url.includes('Performing security verification')) {
       log('❌ CF still blocking');
       process.exit(1);
-    } else if (url.includes('github.com')) {
-      log('❌ still stuck on github.com, login incomplete');
+    } else if (url.startsWith('https://github.com')) {
+      log('❌ still on github.com host, login incomplete: ' + url);
       process.exit(1);
     } else {
       log('⚠️ login status unclear, trying to continue...');
