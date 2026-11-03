@@ -39,16 +39,6 @@
       "sameSite": "Lax"
     },
     {
-      "name": "_cfuvid",
-      "value": "83HRCU2ox0ljuCgJ6GFPWDVsW.Ws93Lz_mEKeHNVzE0-1793673609.9250064-1.0.1.1-IdVM4f3w40NIPA3i9z.ndMXzzRGa53s1VJvqR8GGs1A",
-      "domain": ".discord.com",
-      "path": "/",
-      "expires": -1,
-      "httpOnly": true,
-      "secure": true,
-      "sameSite": "None"
-    },
-    {
       "name": "PHPSESSID",
       "value": "6g31vhtls78lbmi08lknlo3o3k",
       "domain": "my.siam-node.cloud",
@@ -99,16 +89,6 @@
       "sameSite": "Lax"
     },
     {
-      "name": "pp_main_5ba115064332f1d40092e8bff1b66809",
-      "value": "1",
-      "domain": "my.siam-node.cloud",
-      "path": "/",
-      "expires": 1793680815,
-      "httpOnly": false,
-      "secure": false,
-      "sameSite": "Lax"
-    },
-    {
       "name": "uid_id2",
       "value": "01a19f47-5926-7e23-8f15-741c02514a2a:1:1",
       "domain": "realizationnewestfangs.com",
@@ -135,16 +115,6 @@
       "path": "/",
       "expires": 1793760016.33814,
       "httpOnly": false,
-      "secure": true,
-      "sameSite": "None"
-    },
-    {
-      "name": "__cf_bm",
-      "value": "X9Fex1gnhwctnkNZDqxGCetZAhmQTJoZmducoD14Zwc-1793673616.0292826-1.0.1.1-Ns3jXY2HMRAVwZpsNZ.AAIeYMJp806GWftjl9uGkqpF4gIPSgyVkyiSHuDS5l6RVAxXguR.xCmh_CqcoRBrlN888xyNAP3pEwNG7TAvsvIKC_RGv8g1ZC5.idWXy_Q1t",
-      "domain": ".aqml.org",
-      "path": "/",
-      "expires": 1793675416.338158,
-      "httpOnly": true,
       "secure": true,
       "sameSite": "None"
     },
@@ -209,12 +179,22 @@
       "sameSite": "None",
       "partitionKey": "https://siam-node.cloud",
       "_crHasCrossSiteAncestor": false
+    },
+    {
+      "name": "_cfuvid",
+      "value": "CoixKkmnRxrX6HwEblI0GmHwDSLtzWH.pjODmMH_tFY-1793683050.3426924-1.0.1.1-Hb5oSHXugCFRb7seqZsOxQiipMC0FS8wXbOoccqINQs",
+      "domain": ".discord.com",
+      "path": "/",
+      "expires": -1,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "None"
     }
   ],
   "current_workflow_target": 6,
   "checkin_mode": "six_times_every_14_seconds_daily",
   "checkin_interval_seconds": 14,
   "next_scheduled_run_note": "GitHub Actions runs once daily at 00:00 UTC",
-  "last_workflow_end_time": "2026-11-03T02:47:32.796Z",
+  "last_workflow_end_time": "2026-11-03T05:19:01.245Z",
   "last_balance": 1516
 }
