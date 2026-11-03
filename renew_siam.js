@@ -23,6 +23,7 @@ const fs = require('fs');
 const DISCORD_TOKEN = process.env.SIAM_DISCORD_TOKEN;
 const CF_CLEARANCE = (process.env.SIAM_CF_CLEARANCE || '').trim();
 const HEADFUL = process.env.SIAM_HEADFUL === '1';
+const PROXY = (process.env.SIAM_PROXY || '').trim();   // 例如 socks5://127.0.0.1:40000 (Cloudflare WARP)
 const CF_WAIT_MS = Math.max(5000, parseInt(process.env.SIAM_CF_WAIT_MS || '45000', 10));
 const STATE_FILE = 'siam_state.json';
 const BASE = 'https://my.siam-node.cloud';
@@ -122,7 +123,7 @@ async function gotoWithChallenge(page, url, label) {
 }
 
 (async () => {
-  const browser = await chromium.launch({
+  const launchOpts = {
     headless: !HEADFUL,
     args: [
       '--disable-blink-features=AutomationControlled',
@@ -130,7 +131,9 @@ async function gotoWithChallenge(page, url, label) {
       '--disable-dev-shm-usage',
       '--disable-features=IsolateOrigins,site-per-process',
     ],
-  });
+  };
+  if (PROXY) launchOpts.proxy = { server: PROXY };
+  const browser = await chromium.launch(launchOpts);
   const context = await browser.newContext({
     userAgent: UA,
     viewport: { width: 1366, height: 900 },
@@ -163,7 +166,7 @@ async function gotoWithChallenge(page, url, label) {
   };
 
   try {
-    log(`=== Siam check-in start (headful=${HEADFUL}) ===`);
+    log(`=== Siam check-in start (headful=${HEADFUL}, proxy=${PROXY || '直接连接'}) ===`);
 
     if (CF_CLEARANCE) {
       log('🍪 使用提供的 cf_clearance');
