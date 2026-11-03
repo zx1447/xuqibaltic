@@ -273,9 +273,8 @@ async function gotoWithChallenge(page, url, label) {
       log('❌ 未能登录，本次不进行签到');
       await persistCookies();
     } else {
-      balanceTotal = await readBalance(page, '钱包页');
-      if (balanceTotal !== null) log(`💰 签到前总积分: ${balanceTotal} ฿`);
-
+      // 注意：不在这里抓钱包页余额。页面文案里的 "฿" 不一定是账户总额，
+      // 签到接口返回的 balance 才是权威值，只在接口没给时才兜底抓取。
       // 3. 签到
       for (let i = 0; i < CHECKIN_TARGET; i++) {
         log(`🖱️ 每日签到 #${i + 1}/${CHECKIN_TARGET}...`);
