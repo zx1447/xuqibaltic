@@ -196,8 +196,19 @@ async function gotoWithChallenge(page, url, label) {
           log('⚠️ 挑战已过但接口仍返回挑战页，稍后重试');
         }
       } else if (probe.json) {
-        log('✅ Session 有效（接口返回 JSON）');
-        loggedIn = true;
+        // 返回 JSON 不等于已登录：未登录时接口也回 JSON，只是内容是
+        // {"status":"error","message":"กรุณาเข้าสู่ระบบก่อน"}（请先登录）
+        const msg = String(probe.json.message || '');
+        const needLogin = /เข้าสู่ระบบ|login|sign in|unauthor/i.test(msg)
+          || probe.json.status === 'unauthorized';
+        if (needLogin) {
+          log(`⚠️ Session 已失效（接口提示: ${msg || probe.json.status}），改走 Discord OAuth`);
+          await context.clearCookies({ name: 'PHPSESSID' }).catch(() => {});
+          state.cookies = null;
+        } else {
+          log('✅ Session 有效（接口返回正常 JSON）');
+          loggedIn = true;
+        }
       } else if ((await page.url()).includes('login')) {
         log('⚠️ Session 失效（被重定向到登录页）');
       } else {
