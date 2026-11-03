@@ -37,6 +37,7 @@ jobs:
       - name: Run Siam six check-ins
         env:
           SIAM_DISCORD_TOKEN: ${{ secrets.SIAM_DISCORD_TOKEN }}
+          SIAM_CF_CLEARANCE: ${{ secrets.SIAM_CF_CLEARANCE }}
           SIAM_CHECKIN_TARGET: "6"
           SIAM_CHECKIN_INTERVAL_SECONDS: "14"
         run: node renew_siam.js
