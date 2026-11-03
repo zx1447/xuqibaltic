@@ -1,0 +1,14 @@
+name: DomainVIP Renew Probe
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Try real renew via dev API
+        env:
+          DIGITALPLAT_API_TOKEN: ${{ secrets.DIGITALPLAT_API_TOKEN }}
+        run: python3 scripts/probe_renew.py
