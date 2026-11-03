@@ -243,7 +243,6 @@ async function gotoWithChallenge(page, url, label) {
       // 读一次余额（若挑战已过就顺手拿到总积分）然后收尾
       balanceTotal = await readBalance(page, '钱包页');
       if (balanceTotal !== null) log(`💰 当前总积分: ${balanceTotal} ฿`);
-      summary();
       log('❌ 未能登录，本次不进行签到');
     } else {
       balanceTotal = await readBalance(page, '钱包页');
