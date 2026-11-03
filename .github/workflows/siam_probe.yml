@@ -29,6 +29,34 @@ jobs:
           chmod +x wireproxy
           ls -la /tmp/tun | head
 
+      - name: Start Cloudflare WARP SOCKS5 proxy
+        run: |
+          set -e
+          mkdir -p /tmp/warp && cd /tmp/warp
+          cp /tmp/tun/wgcf . && cp /tmp/tun/wireproxy .
+          ./wgcf register --accept-tos
+          ./wgcf generate
+          printf '\n[Socks5]\nBindAddress = 127.0.0.1:40000\n' >> wgcf-profile.conf
+          nohup ./wireproxy -c wgcf-profile.conf > /tmp/warp/wireproxy.log 2>&1 &
+          for i in $(seq 1 20); do
+            if curl -fsS --max-time 5 -x socks5h://127.0.0.1:40000 https://www.cloudflare.com/cdn-cgi/trace >/tmp/warp/trace; then break; fi
+            sleep 1
+          done
+          grep -E '^(ip|warp)=' /tmp/warp/trace || true
+
+      - name: Install Playwright
+        run: |
+          npm init -y
+          npm install playwright
+          npx playwright install chromium --with-deps
+
+      - name: Balance endpoint probe
+        env:
+          SIAM_DISCORD_TOKEN: ${{ secrets.SIAM_DISCORD_TOKEN }}
+        run: |
+          nohup /tmp/warp/wireproxy -c /tmp/warp/wgcf-profile.conf > /tmp/warp/wireproxy.log 2>&1 || true
+          node scripts/probe_balance.js
+
       - name: Route test
         env:
           VLESS_A: ${{ secrets.DP_VLESS_URL }}
