@@ -1,8 +1,10 @@
-// DigitalPlat Domain auto-renew via GitHub OAuth + Playwright
-// 策略: GitHub OAuth 登录 dash -> 列出域名 -> 对每个域名调 renew API
-// v2: 支持设备验证码(轮询 dp_code.txt via GitHub API) + 会话缓存(dp-session.json via actions/cache)
-const { chromium } = require('playwright');
+// DigitalPlat Domain auto-renew via GitHub OAuth + Playwright (stealth)
+// v3: playwright-extra + stealth 绕 CF, CF 等待循环, 设话缓存
+const { chromium } = require('playwright-extra');
+const stealth = require('puppeteer-extra-plugin-stealth');
 const fs = require('fs');
+
+chromium.use(stealth());
 
 const GH_USER = process.env.DP_GH_USER || 'zx1447';
 const GH_PASS = process.env.DP_GH_PASS || '';
