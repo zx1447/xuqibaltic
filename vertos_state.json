@@ -1,26 +1,19 @@
 {
   "email": "450144yy@gmail.com",
   "finished_reason": "time",
+  "last_error": "HTTPSConnectionPool(host='hub.vertos.in', port=443): Max retries exceeded with url: /api/afk/heartbeat (Caused by NewConnectionError(\"HTTPSConnection(host='hub.vertos.in', port=443): Failed to establish a new connection: [Errno 111] Connection refused\"))",
   "last_status": "finished",
-  "lifetime_credits": 32,
-  "lifetime_seconds": 42955,
-  "pending_session": {
-    "expiresAt": "2026-11-02 15:37:29",
-    "prev": null,
-    "saved_at": "2026-11-02 23:35:59",
-    "sessionId": "310a4c2d-b920-44e6-984b-b046cbf51892",
-    "sessionToken": "839d94e72a84555ad7cc4b47a7fd60937d68ec0ad17a1058493edbebbffd1c8b",
-    "startedAt": "2026-11-02 15:35:59"
-  },
+  "lifetime_credits": 50,
+  "lifetime_seconds": 64118,
   "seconds_to_next_credit": null,
-  "session_id": "310a4c2d-b920-44e6-984b-b046cbf51892",
-  "session_seconds": 21271,
-  "today_credits": 32,
-  "today_earned": 35.75,
-  "today_seconds": 42955,
-  "total_beats": 1414,
-  "updated_at": "2026-11-03 05:31:50",
+  "session_id": "a98a1e3c-f202-490b-8157-52cfaa9975a2",
+  "session_seconds": 17741,
+  "today_credits": 10,
+  "today_earned": 10.35,
+  "today_seconds": 12473,
+  "total_beats": 2115,
+  "updated_at": "2026-11-03 11:28:00",
   "user_id": 20,
   "username": "nice",
-  "wallet_balance": 62.0
+  "wallet_balance": 80.0
 }
