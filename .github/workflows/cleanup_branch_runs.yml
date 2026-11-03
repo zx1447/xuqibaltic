@@ -1,0 +1,58 @@
+name: Cleanup Branch Workflow Runs
+
+# 每 7 天清理一次：删除所有「非默认分支」上、创建时间超过 14 天的 workflow 运行记录。
+# 只删运行记录（runs），不删分支、不删日志归档之外的东西。
+on:
+  schedule:
+    # 每周一 UTC 03:00（北京时间 11:00）
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "删除多少天前的运行记录"
+        required: false
+        default: "14"
+      apply:
+        description: "true = 真删；false = 只干跑"
+        required: false
+        default: "true"
+      keep_workflows:
+        description: "额外保护的工作流名（逗号分隔）"
+        required: false
+        default: ""
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: cleanup-branch-runs
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Dry run first
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          CLEANUP_DAYS: ${{ inputs.days || '14' }}
+          KEEP_WORKFLOWS: ${{ inputs.keep_workflows }}
+        run: python scripts/cleanup_old_runs.py
+
+      - name: Apply deletion
+        if: ${{ inputs.apply != 'false' }}
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          CLEANUP_DAYS: ${{ inputs.days || '14' }}
+          KEEP_WORKFLOWS: ${{ inputs.keep_workflows }}
+        run: python scripts/cleanup_old_runs.py --apply
