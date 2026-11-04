@@ -1,31 +1,48 @@
 #!/usr/bin/env node
-// Torchlite 守护 —— 双职责：① 停了就开 ② 快到期就续
+// Torchlite 免费服务器守护 —— 关机就自动启动
 //
-// 两件事互相独立，每轮都检查：
-//   状态 != running            -> 过 ad-gate，POST start-queue
-//   剩余 <= window_seconds     -> 过 ad-gate，POST renewal
+// 策略（按需求简化）
+// ----------------
+// 只做一件事：服务器处于「停止」状态就过广告闸门把它启动。
+// 不做窗口内续期——每次 start 都会重新发放 40 分钟，到期自然下线后
+// 下一轮再拉起来，等效于持续保活，且逻辑简单、不受 5 分钟窗口约束。
 //
-// 广告闸门的真相：后端只校验 ad_token 有效 + 等够 count×wait_seconds，
-// 不看广告本身。所以纯 HTTP + 会话 cookie 即可，不需要浏览器。
+// 广告闸门的真相（实测）
+// --------------------
+// 后端只校验 ad_token 是 /ad-gate 真签发的 + 从签发起过了
+// count × wait_seconds 秒，**不看广告本身**。所以纯 HTTP 即可。
 //
-// 调度：GitHub 的 */5 cron 本仓库实测不触发，改用长驻 job
-// （一次跑 5.5 小时，内部每 50 秒一轮），cron 每 6 小时接力。
+//   假 token            -> 403 ad_gate_required
+//   真 token, 0 秒      -> 403 ad_gate_required
+//   真 token, 等 72 秒  -> 200 ✅
+//
+// 三轮状态判断
+// -----------
+//   offline / stopped / crashed  -> 过闸门 -> start-queue
+//   starting                     -> 什么都不做（过渡态，启动要几十秒）
+//   running                      -> 什么都不做
+//
+// 超时与自愈
+// ---------
+//   - 每个 HTTP 请求 20s 超时（AbortSignal.timeout）
+//   - 连续 8 次异常 -> 退出让 GitHub 重启
+//   - cookie 失效 -> 退出码 3
 const BASE = (process.env.TORCHLITE_BASE || 'https://game.torchlite.host').replace(/\/$/, '');
 const UUID = process.env.TORCHLITE_UUID || 'be89843c-8e77-4ce7-9fc4-c4d78a2b4ea1';
 const COOKIE = process.env.TORCHLITE_COOKIE || '';
 const LOOP_MIN = Number(process.env.TORCHLITE_LOOP_MINUTES || '330');
-const TICK_SEC = Number(process.env.TORCHLITE_TICK_SEC || '50');
-// 请求超时：单个 HTTP 请求最多等这么久，超时算失败进入下一轮
-const ENABLE_START = process.env.TORCHLITE_DO_START !== '0';
-const ENABLE_RENEW = process.env.TORCHLITE_DO_RENEW !== '0';
+const TICK_SEC = Number(process.env.TORCHLITE_TICK_SEC || '60');
+const REQ_TIMEOUT_MS = Number(process.env.TORCHLITE_REQ_TIMEOUT_MS || '20000');
 const DRY = process.env.TORCHLITE_DRY_RUN === '1';
 
-const UA = 'torchlite-watchdog/3.0';
+const UA = 'torchlite-watchdog/4.0';
 const log = (m) => console.log(`[${new Date().toISOString().slice(11, 19)}] [tl] ${m}`);
 const sleep = (s) => new Promise((r) => setTimeout(r, s * 1000));
 const S = (p) => `/api/client/servers/${UUID}/${p}`;
 
-// ---- cookie jar：服务端每轮都轮换 session，必须收下新的 ----
+const NEED_START = ['offline', 'stopped', 'crashed'];
+
+// ---- cookie jar：服务端每次响应都会轮换 session ----
 const jar = (() => {
   const m = {};
   for (const part of COOKIE.split(';')) {
@@ -59,15 +76,10 @@ function H() {
   if (x) h['X-XSRF-TOKEN'] = decodeURIComponent(x);
   return h;
 }
-const REQ_TIMEOUT_MS = Number(process.env.TORCHLITE_REQ_TIMEOUT_MS || '20000');
 
 async function req(method, path, body) {
-  // 关键：必须设超时。否则对方一旦挂起不响应，fetch 会永远 await 下去，
-  // 整个守护循环被阻塞——实测出现过 job 卡 40 分钟、服务器到期没人管的情况。
   const res = await fetch(`${BASE}${path}`, {
-    method,
-    headers: H(),
-    body: body ? JSON.stringify(body) : undefined,
+    method, headers: H(), body: body ? JSON.stringify(body) : undefined,
     signal: AbortSignal.timeout(REQ_TIMEOUT_MS),
   });
   absorb(res);
@@ -76,7 +88,7 @@ async function req(method, path, body) {
   return { status: res.status, data };
 }
 
-// ---- 过广告闸门：拿 token -> 等冷却 -> 返回 token ----
+// ---- 过广告闸门 ----
 async function gate(action) {
   const g = await req('POST', S('ad-gate'), { action });
   if (g.status !== 200 || !g.data?.data?.token) {
@@ -91,36 +103,18 @@ async function gate(action) {
   return token;
 }
 
-async function doRenew() {
-  log('🔄 续期流程开始');
-  const t = await gate('renew');
-  if (!t) return false;
-  const r = await req('POST', S('renewal'), { ad_token: t });
-  log(`  📡 renewal HTTP ${r.status} ${JSON.stringify(r.data).slice(0, 200)}`);
-  if (r.status === 200) {
-    await sleep(3000);
-    const a = (await req('GET', S('renewal'))).data?.data;
-    if (a) log(`  ✅ 续期成功，新到期 ${a.expires_at}（剩余 ${(a.seconds_left / 60).toFixed(1)} 分钟）`);
-    else log('  ✅ 续期成功');
-    return true;
-  }
-  return false;
-}
-
 async function doStart() {
-  log('▶️ 开机流程开始');
+  log('▶️ 开机流程');
   const t = await gate('start');
   if (!t) return false;
   const r = await req('POST', S('start-queue'), { ad_token: t });
   log(`  📡 start-queue HTTP ${r.status} ${JSON.stringify(r.data).slice(0, 200)}`);
-  if (r.status === 200) {
-    const d = r.data?.data || {};
-    if (d.in_queue) log(`  ✅ 已入队，#${d.position}/${d.queue_length}`);
-    else if (d.moving) log('  ✅ 正在迁移启动');
-    else log(`  ✅ 开机请求已接受（state=${d.state || '?'}）`);
-    return true;
-  }
-  return false;
+  if (r.status !== 200) return false;
+  const d = r.data?.data || {};
+  if (d.in_queue) log(`  ✅ 已入队 #${d.position}/${d.queue_length}（节点满，等其他服务器让出）`);
+  else if (d.moving) log('  ✅ 正在迁移并启动');
+  else log(`  ✅ 启动请求已接受（state=${d.state || '?'}）`);
+  return true;
 }
 
 async function tick() {
@@ -129,38 +123,25 @@ async function tick() {
     if (hasRemember()) {
       log(`会话 ${me.status}，有 remember_web，重试…`);
       await sleep(2000);
-      if ((await req('GET', '/api/client/account')).status === 200) {
-        log('✅ remember_web 恢复会话');
-      } else { log('❌ cookie 彻底失效，需要重新导出'); return 'auth-fail'; }
+      if ((await req('GET', '/api/client/account')).status === 200) log('✅ remember_web 恢复会话');
+      else { log('❌ cookie 彻底失效'); return 'auth-fail'; }
     } else { log('❌ cookie 失效'); return 'auth-fail'; }
   }
 
   const res = (await req('GET', S('resources'))).data?.attributes;
-  const ren = (await req('GET', S('renewal'))).data?.data;
   const state = res?.current_state || '?';
-  if (!ren) { log('读不到 renewal 状态'); return 'err'; }
-
-  const left = ren.seconds_left, win = ren.window_seconds, eta = ren.renewable_in;
-  log(`state=${state} 剩余=${(left / 60).toFixed(1)}分 需等=${eta}s 窗口=${win}s`);
+  const ren = (await req('GET', S('renewal'))).data?.data;
+  const left = ren ? `${(ren.seconds_left / 60).toFixed(1)}分` : '?';
+  log(`state=${state} 剩余=${left}`);
 
   if (DRY) return 'dry';
 
-  // ① 停了就开 —— 只对真正停下的状态动作。
-  // starting / stopping 是过渡态，此时再发 start-queue 是浪费一次广告冷却。
-  const NEED_START = ['offline', 'stopped', 'crashed'];
-  if (ENABLE_START && NEED_START.includes(state)) {
-    log(`⚠️ 服务器 ${state}，需要开机`);
-    await doStart();
-    return 'started';
+  if (NEED_START.includes(state)) {
+    log(`⚠️ 服务器 ${state}，启动`);
+    return (await doStart()) ? 'started' : 'err';
   }
-  if (state === 'starting') log('⏳ 正在启动中，等待…');
-
-  // ② 快到期就续（窗口内）
-  if (ENABLE_RENEW && (eta <= 0 || left <= win)) {
-    await doRenew();
-    return 'renewed';
-  }
-
+  if (state === 'starting') log('⏳ 启动中，等待');
+  else if (state === 'stopping') log('⏳ 停止中，等待');
   return 'ok';
 }
 
@@ -168,21 +149,8 @@ async function tick() {
   if (!COOKIE) { console.error('缺少 TORCHLITE_COOKIE'); process.exit(2); }
   const endAt = Date.now() + LOOP_MIN * 60000;
   log(`守护启动：${LOOP_MIN} 分钟，每 ${TICK_SEC}s 一轮`);
-  log(`职责: 开机=${ENABLE_START ? '开' : '关'} 续期=${ENABLE_RENEW ? '开' : '关'}`);
+  log('职责：关机就启动（不做窗口续期）');
   log(`cookie: ${Object.keys(jar).length} 项` + (hasRemember() ? '（含 remember_web ✅）' : '（无 remember_web ⚠️）'));
-
-  // 看门狗：如果超过 STALL_MS 没有完成过一轮，说明卡死了，
-  // 主动退出让 GitHub 重启 job（比卡住不动强）。
-  const STALL_MS = Number(process.env.TORCHLITE_STALL_MS || '300000');
-  let lastOk = Date.now();
-  const stallTimer = setInterval(() => {
-    const idle = Date.now() - lastOk;
-    if (idle > STALL_MS) {
-      log(`🚨 ${Math.round(idle / 1000)}s 无进展，判定卡死，主动退出`);
-      process.exit(9);
-    }
-  }, 30000);
-  stallTimer.unref?.();
 
   let errs = 0;
   while (Date.now() < endAt) {
@@ -194,14 +162,12 @@ async function tick() {
       if (errs >= 8) { log('连续失败过多，退出'); process.exit(1); }
     } catch (e) {
       log(`异常: ${e.message}`);
-      if (++errs >= 8) process.exit(1);
+      if (++errs >= 8) { log('连续失败过多，退出'); process.exit(1); }
     }
-    lastOk = Date.now();
+    // 本轮已耗时（比如跑了 75s 冷却），就不再额外睡满一轮
     const spent = Date.now() - started;
-    // 续期时要等 72s 冷却，别再多睡一整轮
-    const pause = spent > TICK_SEC * 1000 ? 0 : Math.max(0, TICK_SEC * 1000 - spent);
-    if (pause) await sleep(pause / 1000);
+    const pause = Math.max(0, TICK_SEC * 1000 - spent);
+    if (pause > 0) await sleep(pause / 1000);
   }
-  clearInterval(stallTimer);
   log('本次计划时长结束，正常退出（等下一次 cron 接力）');
 })();
