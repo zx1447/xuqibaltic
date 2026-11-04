@@ -24,16 +24,55 @@ const log = (m) => console.log(`[${new Date().toISOString().slice(11, 19)}] [tl]
 const sleep = (s) => new Promise((r) => setTimeout(r, s * 1000));
 const S = (p) => `/api/client/servers/${UUID}/${p}`;
 
+// cookie 放在可变 jar 里：服务器每次响应都会 Set-Cookie 下发新的
+// pterodactyl_session / XSRF-TOKEN，必须收下来替换掉旧的，否则会一直用
+// 一个已经被轮换掉的 session。
+const jar = (() => {
+  const m = {};
+  for (const part of COOKIE.split(';')) {
+    const t = part.trim();
+    if (!t) continue;
+    const i = t.indexOf('=');
+    m[t.slice(0, i)] = t.slice(i + 1);
+  }
+  return m;
+})();
+
+function absorb(res) {
+  const sc = typeof res.headers.getSetCookie === 'function' ? res.headers.getSetCookie() : [];
+  let n = 0;
+  for (const c of sc) {
+    const kv = c.split(';')[0];
+    const i = kv.indexOf('=');
+    if (i < 0) continue;
+    const name = kv.slice(0, i).trim();
+    const val = kv.slice(i + 1);
+    if (val === 'deleted' || val === '' || /expires=Thu, 01 Jan 1970/i.test(c)) {
+      if (jar[name]) { delete jar[name]; n++; }
+    } else if (jar[name] !== val) { jar[name] = val; n++; }
+  }
+  return n;
+}
+
+function cookieHeader() {
+  return Object.entries(jar).map(([k, v]) => `${k}=${v}`).join('; ');
+}
+
 function xsrf() {
-  const m = COOKIE.match(/XSRF-TOKEN=([^;]+)/);
-  return m ? decodeURIComponent(m[1]) : null;
+  const v = jar['XSRF-TOKEN'];
+  return v ? decodeURIComponent(v) : null;
+}
+
+// remember_web 是长期凭证；session 失效时 Laravel 会用它自动重建会话。
+function hasRemember() {
+  return Object.keys(jar).some((k) => k.startsWith('remember_'));
 }
 function H() {
   const h = {
     Accept: 'application/json',
     'Content-Type': 'application/json',
     'User-Agent': UA,
-    Cookie: COOKIE,
+    Cookie: cookieHeader(),
     'X-Requested-With': 'XMLHttpRequest',
     Origin: BASE,
     Referer: `${BASE}/server/${UUID.slice(0, 8)}`,
@@ -42,10 +81,13 @@ function H() {
   if (x) h['X-XSRF-TOKEN'] = x;
   return h;
 }
+
 async function req(method, path, body) {
   const res = await fetch(`${BASE}${path}`, {
     method, headers: H(), body: body ? JSON.stringify(body) : undefined,
   });
+  const rotated = absorb(res);           // 收下轮换后的新 cookie
+  if (rotated) log(`  🔄 服务端轮换了 ${rotated} 个 cookie（已更新内存 jar）`);
   const text = await res.text();
   let data; try { data = JSON.parse(text); } catch { data = text.slice(0, 300); }
   return { status: res.status, data };
@@ -71,9 +113,25 @@ async function passGate(action) {
 async function tick() {
   const me = await req('GET', '/api/client/account');
   if (me.status !== 200) {
-    log(`❌ 会话无效 HTTP ${me.status} —— cookie 过期`);
+    // session 挂了但还有 remember_web：Laravel 本该自动恢复，
+    // 这里再试一次（有时第一次请求只负责下发新 session）。
+    if (hasRemember()) {
+      log(`会话 ${me.status}，但有 remember_web，重试一次…`);
+      await sleep(2000);
+      const retry = await req('GET', '/api/client/account');
+      if (retry.status === 200) {
+        log('✅ remember_web 自动恢复了会话');
+        return tickInner();
+      }
+      log(`❌ remember_web 也没救回来（${retry.status}）`);
+    }
+    log(`❌ 会话无效 HTTP ${me.status} —— 需要重新导出 cookie`);
     return 'auth-fail';
   }
+  return tickInner();
+}
+
+async function tickInner() {
   const ren = (await req('GET', S('renewal'))).data?.data;
   const res = (await req('GET', S('resources'))).data?.attributes;
   const state = res?.current_state || '?';
@@ -118,6 +176,7 @@ async function tick() {
   if (!COOKIE) { console.error('缺少 TORCHLITE_COOKIE'); process.exit(2); }
   const endAt = Date.now() + MINUTES * 60000;
   log(`守护启动，计划运行 ${MINUTES} 分钟`);
+  log(`cookie: ${Object.keys(jar).length} 项` + (hasRemember() ? '（含 remember_web ✅ 可自动续命）' : '（无 remember_web，session 过期需手动换）'));
   let streak = 0;
   while (Date.now() < endAt) {
     try {
