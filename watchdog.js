@@ -15,6 +15,7 @@ const UUID = process.env.TORCHLITE_UUID || 'be89843c-8e77-4ce7-9fc4-c4d78a2b4ea1
 const COOKIE = process.env.TORCHLITE_COOKIE || '';
 const LOOP_MIN = Number(process.env.TORCHLITE_LOOP_MINUTES || '330');
 const TICK_SEC = Number(process.env.TORCHLITE_TICK_SEC || '50');
+// 请求超时：单个 HTTP 请求最多等这么久，超时算失败进入下一轮
 const ENABLE_START = process.env.TORCHLITE_DO_START !== '0';
 const ENABLE_RENEW = process.env.TORCHLITE_DO_RENEW !== '0';
 const DRY = process.env.TORCHLITE_DRY_RUN === '1';
@@ -58,8 +59,17 @@ function H() {
   if (x) h['X-XSRF-TOKEN'] = decodeURIComponent(x);
   return h;
 }
+const REQ_TIMEOUT_MS = Number(process.env.TORCHLITE_REQ_TIMEOUT_MS || '20000');
+
 async function req(method, path, body) {
-  const res = await fetch(`${BASE}${path}`, { method, headers: H(), body: body ? JSON.stringify(body) : undefined });
+  // 关键：必须设超时。否则对方一旦挂起不响应，fetch 会永远 await 下去，
+  // 整个守护循环被阻塞——实测出现过 job 卡 40 分钟、服务器到期没人管的情况。
+  const res = await fetch(`${BASE}${path}`, {
+    method,
+    headers: H(),
+    body: body ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(REQ_TIMEOUT_MS),
+  });
   absorb(res);
   const text = await res.text();
   let data; try { data = JSON.parse(text); } catch { data = text.slice(0, 300); }
@@ -135,12 +145,15 @@ async function tick() {
 
   if (DRY) return 'dry';
 
-  // ① 停了就开
-  if (ENABLE_START && state !== 'running') {
+  // ① 停了就开 —— 只对真正停下的状态动作。
+  // starting / stopping 是过渡态，此时再发 start-queue 是浪费一次广告冷却。
+  const NEED_START = ['offline', 'stopped', 'crashed'];
+  if (ENABLE_START && NEED_START.includes(state)) {
     log(`⚠️ 服务器 ${state}，需要开机`);
     await doStart();
     return 'started';
   }
+  if (state === 'starting') log('⏳ 正在启动中，等待…');
 
   // ② 快到期就续（窗口内）
   if (ENABLE_RENEW && (eta <= 0 || left <= win)) {
@@ -158,8 +171,22 @@ async function tick() {
   log(`职责: 开机=${ENABLE_START ? '开' : '关'} 续期=${ENABLE_RENEW ? '开' : '关'}`);
   log(`cookie: ${Object.keys(jar).length} 项` + (hasRemember() ? '（含 remember_web ✅）' : '（无 remember_web ⚠️）'));
 
+  // 看门狗：如果超过 STALL_MS 没有完成过一轮，说明卡死了，
+  // 主动退出让 GitHub 重启 job（比卡住不动强）。
+  const STALL_MS = Number(process.env.TORCHLITE_STALL_MS || '300000');
+  let lastOk = Date.now();
+  const stallTimer = setInterval(() => {
+    const idle = Date.now() - lastOk;
+    if (idle > STALL_MS) {
+      log(`🚨 ${Math.round(idle / 1000)}s 无进展，判定卡死，主动退出`);
+      process.exit(9);
+    }
+  }, 30000);
+  stallTimer.unref?.();
+
   let errs = 0;
   while (Date.now() < endAt) {
+    const started = Date.now();
     try {
       const r = await tick();
       if (r === 'auth-fail') process.exit(3);
@@ -169,7 +196,12 @@ async function tick() {
       log(`异常: ${e.message}`);
       if (++errs >= 8) process.exit(1);
     }
-    await sleep(TICK_SEC * 1000);
+    lastOk = Date.now();
+    const spent = Date.now() - started;
+    // 续期时要等 72s 冷却，别再多睡一整轮
+    const pause = spent > TICK_SEC * 1000 ? 0 : Math.max(0, TICK_SEC * 1000 - spent);
+    if (pause) await sleep(pause / 1000);
   }
+  clearInterval(stallTimer);
   log('本次计划时长结束，正常退出（等下一次 cron 接力）');
 })();
