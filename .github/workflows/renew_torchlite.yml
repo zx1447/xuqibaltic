@@ -36,9 +36,11 @@ on:
 permissions:
   contents: read
 
+# 新的顶掉旧的：长驻 job 万一卡死（实测出现过 cancel 不生效、
+# 一直占着并发组的情况），新一轮能立刻接管，不会把接力链堵死。
 concurrency:
   group: torchlite-keepalive
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   keepalive:
