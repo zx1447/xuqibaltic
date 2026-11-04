@@ -1,28 +1,28 @@
 name: Torchlite Renew
 
-# Torchlite 免费服务器每次只发 40 分钟，只能在到期前最后 5 分钟续期。
-# 广告闸门已破解：后端只校验 ad_token 有效 + 等够 count×wait_seconds，
-# 不看广告本身。所以纯 HTTP 就能续，不需要浏览器。
+# Torchlite 免费服务器每 40 分钟到期，只能在到期前最后 5 分钟续期。
 #
-# cron 每 5 分钟一次：40 分钟周期内 8 次机会。
-# 不在窗口的轮次秒退；进窗口的轮次会睡到点再续。
+# 广告闸门已破解：后端只校验 ad_token 有效 + 等够 count×wait_seconds，
+# 不看广告本身。所以纯 HTTP + 会话 cookie 就能续，不需要浏览器。
+#
+# 为什么用长驻 job 而不是 */5 cron：
+#   实测本仓库的 */5 schedule 完全不触发（新 workflow 激活延迟 /
+#   默认分支长期无提交会被自动禁用 schedule）。40 分钟周期漏一次就下线，
+#   所以改成「一次跑 5.5 小时，内部每 4 分钟查一次」。
+#   下面的 cron 每 6 小时兜底接力一个新的（6 小时 > 5.5 小时，无缝衔接）。
 on:
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "7 */6 * * *"
   workflow_dispatch:
     inputs:
-      force:
-        description: "true = 无视窗口强行续期"
+      minutes:
+        description: "运行多少分钟（默认 330）"
         required: false
-        default: "false"
+        default: "330"
       dry_run:
-        description: "true = 只看状态不动作"
+        description: "true = 只看状态不动手"
         required: false
         default: "false"
-      do_start:
-        description: "true = 离线时顺便开机"
-        required: false
-        default: "true"
 
 permissions:
   contents: read
@@ -34,7 +34,7 @@ concurrency:
 jobs:
   renew:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 350
     steps:
       - uses: actions/checkout@v4
         with:
@@ -44,12 +44,11 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Renew
+      - name: Renew loop
         env:
           TORCHLITE_COOKIE: ${{ secrets.TORCHLITE_COOKIE }}
           TORCHLITE_UUID: "be89843c-8e77-4ce7-9fc4-c4d78a2b4ea1"
-          TORCHLITE_MAX_WAIT_SEC: "660"
-          TORCHLITE_FORCE: ${{ inputs.force == 'true' && '1' || '0' }}
+          TORCHLITE_LOOP_MINUTES: ${{ inputs.minutes || '330' }}
           TORCHLITE_DRY_RUN: ${{ inputs.dry_run == 'true' && '1' || '0' }}
-          TORCHLITE_DO_START: ${{ github.event_name == 'workflow_dispatch' && (inputs.do_start == 'false' && '0' || '1') || '1' }}
-        run: node renew_session.js
+          TORCHLITE_DO_START: "1"
+        run: node renew_loop.js
