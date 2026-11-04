@@ -60,21 +60,33 @@ POST /ad-gate  with  Authorization: Bearer ptlc_...
 
 **每 40 分钟必须续一次**，错过 5 分钟窗口服务器就下线。
 
-## cron 设计
+## 调度设计
+
+**不用 `*/5` cron —— 实测本仓库的短周期 schedule 完全不触发**（新 workflow 有激活
+延迟，且默认分支长期无提交时 GitHub 会自动禁用 schedule）。40 分钟周期漏一次就下线，
+不能赌这个。
+
+改成**长驻 job**：
 
 ```yaml
-- cron: "*/5 * * * *"
+- cron: "7 */6 * * *"     # 每 6 小时接力一次
 ```
 
-40 分钟 ÷ 5 分钟 = **每个周期 8 次机会**。每次运行：
+一次 job 跑 **5.5 小时**（330 分钟），内部每 4 分钟检查一次状态，
+进窗口就过闸门续期。6 小时接力 5.5 小时，无缝衔接。
 
-```
-renewable_in > 660s        秒退（不睡，几乎不耗资源）
-0 < renewable_in <= 660s   睡到窗口打开，再过闸门
-renewable_in <= 0          已在窗口内，直接过闸门
+```js
+while (now < endAt) {
+  读 renewal 状态
+  进窗口 -> ad-gate -> 等 72s -> renewal
+  离线   -> ad-gate -> 等 72s -> start-queue
+  sleep 4 分钟
+}
 ```
 
-公开仓库，Actions 分钟数不限，5 分钟一次没有成本。
+公开仓库，Actions 分钟数不限，长驻没有成本。
+
+> ⚠️ 每个 job 上限 6 小时（GitHub 硬限制），连跑 5.5 小时是安全余量。
 
 ## ⚠️ Cookie 会过期
 
