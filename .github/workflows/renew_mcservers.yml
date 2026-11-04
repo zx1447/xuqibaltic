@@ -1,0 +1,74 @@
+name: McServers Renew
+
+# 每 5 天点一次 Discord 面板上的「Renew Server」按钮。
+#
+# 面板：McServers | Free Hosting (bot 1524370665631649865)
+# 频道：1567486173495173181  消息：1567495211016519802
+# 按钮：custom_id = "renew_server"（style 2 primary）
+# 服务器：Server ID 72 / Identifier 697de3d4 / dash.mcservers.in
+#
+# cron 的日字段 */4 从 1 号起算，所以每月实际落在 1/5/9/13/17/21/25/29 号，
+# 约每 4 天一次；脚本内部再按「距上次成功点击是否满 5 天」判定一次，
+# 不满就跳过——所以净效果是每 5 天点一次。
+on:
+  schedule:
+    - cron: "23 5 */4 * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "true = 无视 5 天间隔立即点一次"
+        required: false
+        default: "false"
+      dry_run:
+        description: "true = 只看判定不点击"
+        required: false
+        default: "false"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mcservers-renew
+  cancel-in-progress: false
+
+jobs:
+  renew:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: disordrenew
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install deps
+        run: npm install ws --no-audit --no-fund
+
+      - name: Renew
+        env:
+          DISCORDERENEW_TOKEN: ${{ secrets.DISCORDERENEW_TOKEN }}
+          DR_INTERVAL_DAYS: "5"
+          DR_FORCE: ${{ inputs.force == 'true' && '1' || '0' }}
+          DR_DRY_RUN: ${{ inputs.dry_run == 'true' && '1' || '0' }}
+          DR_LISTEN_MS: "20000"
+        run: node renew_mcservers.js
+
+      - name: Save state
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add disordrenew_state.json || true
+          if git diff --cached --quiet; then echo "No state change."; exit 0; fi
+          git commit -m "Update McServers state [skip ci]"
+          for i in 1 2 3; do
+            git fetch origin disordrenew
+            if git rebase origin/disordrenew && git push origin HEAD:disordrenew; then
+              echo "✅ state 已推送"; break
+            fi
+            git rebase --abort 2>/dev/null || true
+            sleep 3
+          done

@@ -1,0 +1,14 @@
+{
+  "name": "disordrenew",
+  "private": true,
+  "version": "1.0.0",
+  "description": "McServers 免费 MC 服续期：每 5 天点一次 Discord 面板 Renew Server",
+  "main": "renew_mcservers.js",
+  "scripts": {
+    "renew": "node renew_mcservers.js",
+    "dry": "DR_DRY_RUN=1 node renew_mcservers.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}
