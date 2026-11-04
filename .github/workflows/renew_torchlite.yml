@@ -1,0 +1,55 @@
+name: Torchlite Renew
+
+# Torchlite 免费服务器每次只发 40 分钟，只能在到期前最后 5 分钟续期。
+# 广告闸门已破解：后端只校验 ad_token 有效 + 等够 count×wait_seconds，
+# 不看广告本身。所以纯 HTTP 就能续，不需要浏览器。
+#
+# cron 每 5 分钟一次：40 分钟周期内 8 次机会。
+# 不在窗口的轮次秒退；进窗口的轮次会睡到点再续。
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "true = 无视窗口强行续期"
+        required: false
+        default: "false"
+      dry_run:
+        description: "true = 只看状态不动作"
+        required: false
+        default: "false"
+      do_start:
+        description: "true = 离线时顺便开机"
+        required: false
+        default: "true"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: torchlite-renew
+  cancel-in-progress: false
+
+jobs:
+  renew:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: torchlite
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Renew
+        env:
+          TORCHLITE_COOKIE: ${{ secrets.TORCHLITE_COOKIE }}
+          TORCHLITE_UUID: "be89843c-8e77-4ce7-9fc4-c4d78a2b4ea1"
+          TORCHLITE_MAX_WAIT_SEC: "660"
+          TORCHLITE_FORCE: ${{ inputs.force == 'true' && '1' || '0' }}
+          TORCHLITE_DRY_RUN: ${{ inputs.dry_run == 'true' && '1' || '0' }}
+          TORCHLITE_DO_START: ${{ github.event_name == 'workflow_dispatch' && (inputs.do_start == 'false' && '0' || '1') || '1' }}
+        run: node renew_session.js
