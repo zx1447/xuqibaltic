@@ -1,5 +1,14 @@
 {
-  "last_check_at": "2026-11-04T12:14:42.554Z",
-  "last_verdict": "too-early",
-  "last_note": "You can renew again later."
+  "_meta": {
+    "note": "两个目标的状态互不影响。last_click_at 只在确认续期成功后写。",
+    "last_run": "2026-11-04T12:26:00.083Z"
+  },
+  "mcservers": {},
+  "antagonix": {
+    "expiresAt": "2026-11-09T12:26:03.000Z",
+    "remainingDays": 5,
+    "last_check_at": "2026-11-04T12:26:06.954Z",
+    "last_note": "Hébergement renouvelé pour 5 jours à partir de maintenant.",
+    "last_click_at": "2026-11-04T12:26:06.954Z"
+  }
 }

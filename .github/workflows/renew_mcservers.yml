@@ -1,22 +1,27 @@
-name: McServers Renew
+name: Discord Panel Renew
 
-# 每 5 天点一次 Discord 面板上的「Renew Server」按钮。
+# 两个 Discord 面板续期，共用一个脚本，机制不同：
 #
-# 面板：McServers | Free Hosting (bot 1524370665631649865)
-# 频道：1567486173495173181  消息：1567495211016519802
-# 按钮：custom_id = "renew_server"（style 2 primary）
-# 服务器：Server ID 72 / Identifier 697de3d4 / dash.mcservers.in
+#   McServers  7 天有效期，只有到期后才能续（提前点回 "You can renew again later."）
+#   Antagonix  5 天有效期，随时可点，点一次 = 从现在起重置 +5 天
 #
-# cron 的日字段 */4 从 1 号起算，所以每月实际落在 1/5/9/13/17/21/25/29 号，
-# 约每 4 天一次；脚本内部再按「距上次成功点击是否满 5 天」判定一次，
-# 不满就跳过——所以净效果是每 5 天点一次。
+# 调度策略：cron 每 2 天跑一次，脚本内部按各自规则判定：
+#   - McServers：距上次成功点击满 5 天才点
+#   - Antagonix：面板剩余 <= 4.5 天才点（用 embed 里的真实到期时间判定）
+#
+# cron 用固定间隔 */2 而不是按日字段，配合脚本自身判定更稳；
+# 每 2 天一次意味着窗口错过最多耽误 2 天，对 5/7 天有效期的服务足够安全。
 on:
   schedule:
-    - cron: "23 5 */4 * *"
+    - cron: "37 6 */2 * *"
   workflow_dispatch:
     inputs:
+      target:
+        description: "mcservers / antagonix / all"
+        required: false
+        default: "all"
       force:
-        description: "true = 无视 5 天间隔立即点一次"
+        description: "true = 无视间隔立即点"
         required: false
         default: "false"
       dry_run:
@@ -28,13 +33,13 @@ permissions:
   contents: write
 
 concurrency:
-  group: mcservers-renew
+  group: discord-panel-renew
   cancel-in-progress: false
 
 jobs:
   renew:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -50,7 +55,8 @@ jobs:
       - name: Renew
         env:
           DISCORDERENEW_TOKEN: ${{ secrets.DISCORDERENEW_TOKEN }}
-          DR_INTERVAL_DAYS: "5"
+          ANTAGONIX_TOKEN: ${{ secrets.ANTAGONIX_TOKEN }}
+          DR_TARGET: ${{ inputs.target || 'all' }}
           DR_FORCE: ${{ inputs.force == 'true' && '1' || '0' }}
           DR_DRY_RUN: ${{ inputs.dry_run == 'true' && '1' || '0' }}
           DR_LISTEN_MS: "20000"
@@ -61,8 +67,6 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          # npm install 会生成被 gitignore 的 package-lock.json，导致 rebase 报
-          # "You have unstaged changes"。先清掉工作区噪声再提交。
           rm -f package-lock.json
           git checkout -- . 2>/dev/null || true
           git add disordrenew_state.json || true
@@ -70,12 +74,11 @@ jobs:
             echo "No state change."
             exit 0
           fi
-          git commit -m "Update McServers state [skip ci]"
           for i in 1 2 3; do
             git fetch origin disordrenew
             git reset --soft origin/disordrenew 2>/dev/null || true
             git add disordrenew_state.json
-            if git commit -q -m "Update McServers state [skip ci]" && git push origin HEAD:disordrenew; then
+            if git commit -q -m "Update renew state [skip ci]" && git push origin HEAD:disordrenew; then
               echo "✅ state 已推送"; exit 0
             fi
             sleep 3
