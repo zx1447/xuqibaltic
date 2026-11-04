@@ -77,8 +77,9 @@ const TARGETS = {
     message: '1567073789395730475',
     appId: '1565149630260322418',
     customId: 'b|fa67c4d1a69f9e08bc484195|renew',
-    intervalDays: 4,          // 有效期 5 天，留 1 天缓冲
+    intervalDays: 2,          // 每 2 天点一次（有效期 5 天，冗余很足）
     manageable: true,         // 随时可点，点一次重置 +5 天
+    renewalDays: 5,           // 每次续期发放天数，用于到期兜底判定
     successRe: /h[eé]bergement renouvel[eé]|renouvel[eé] pour \d+ jours/i,
     tooEarlyRe: /à nouveau plus tard|pas encore|trop t[oô]t/i,
     replyOnly: true,
@@ -265,9 +266,11 @@ async function processTarget(name, t, state) {
   // 用到期时间做兜底判定：剩余天数还多就不用点
   let needByExpiry = true;
   if (st.remainingDays != null && t.manageable) {
-    // 可随时点的服务：剩余 <= 4.5 天才需要动
-    needByExpiry = st.remainingDays <= 4.5;
-    log(tag, `按到期判定：${needByExpiry ? '需要续期' : `剩余 ${st.remainingDays} 天，暂不续`}`);
+    // 可随时点的服务：按「有效期 - 间隔」做兜底，剩余不足才补点
+    const floor = (t.renewalDays || 5) - t.intervalDays + 0.5;
+    needByExpiry = st.remainingDays <= floor;
+    st._floor = floor;
+    log(tag, `按到期判定：${needByExpiry ? '需要续期' : `剩余 ${st.remainingDays} 天，暂不续（阈值 ${st._floor} 天）`}`);
   }
 
   if (!FORCE) {

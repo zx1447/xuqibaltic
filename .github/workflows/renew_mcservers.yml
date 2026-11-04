@@ -5,15 +5,16 @@ name: Discord Panel Renew
 #   McServers  7 天有效期，只有到期后才能续（提前点回 "You can renew again later."）
 #   Antagonix  5 天有效期，随时可点，点一次 = 从现在起重置 +5 天
 #
-# 调度策略：cron 每 2 天跑一次，脚本内部按各自规则判定：
-#   - McServers：距上次成功点击满 5 天才点
-#   - Antagonix：面板剩余 <= 4.5 天才点（用 embed 里的真实到期时间判定）
+# 调度策略：cron 每天跑一次，脚本内部按各自规则判定（真正决定点不点的是脚本）：
+#   - McServers：距上次成功点击满 5 天才点（有效期内点了会被拒）
+#   - Antagonix：距上次成功点击满 2 天才点，且面板剩余 <= 3.5 天兜底
 #
-# cron 用固定间隔 */2 而不是按日字段，配合脚本自身判定更稳；
-# 每 2 天一次意味着窗口错过最多耽误 2 天，对 5/7 天有效期的服务足够安全。
+# 为什么 cron 用每日而不是 */2：
+#   */2 走的是日历日字段，两个目标间隔不同、月边界还容易错位；
+#   每天触发 + 脚本内按真实 last_click_at 判定，错过一次也只会晚 1 天。
 on:
   schedule:
-    - cron: "37 6 */2 * *"
+    - cron: "37 6 * * *"
   workflow_dispatch:
     inputs:
       target:
