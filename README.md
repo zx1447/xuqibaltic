@@ -1,207 +1,127 @@
-# Torchlite 免费服务器守护
+# Discord 面板自动续期（多账号）
 
-`Minecraft (Paper) - zxy1715x` · UUID `be89843c-8e77-4ce7-9fc4-c4d78a2b4ea1`
+一个脚本管两个 Discord 面板续期。两者机制**完全不同**，共用点击 + 网关判定。
 
-## 干什么
+| | McServers | Antagonix |
+|---|---|---|
+| 有效期 | 7 天 | **5 天** |
+| 有效期内点击 | ❌ 回 `You can renew again later.` | ✅ **直接续，从现在起重置 +5 天** |
+| 续期节奏 | 每 5 天探一次 | 剩余 ≤ 4.5 天才点 |
+| 面板消息 | `1567495211016519802` | `1567073789395730475` |
+| 频道 | `1567486173495173181` | `1567073787143524383` |
+| bot / application_id | `1524370665631649865` | `1565149630260322418` |
+| 按钮 custom_id | `renew_server` | `b\|fa67c4d1a69f9e08bc484195\|renew` |
+| 成功文案 | （无回执） | `Hébergement renouvelé pour 5 jours...` |
 
-**只做一件事：服务器停止就自动启动。**
-
-| 状态 | 动作 |
-|---|---|
-| `offline` / `stopped` / `crashed` | 过广告闸门 → `start-queue` |
-| `starting` | 等待，不重复发请求 |
-| `running` | 什么都不做 |
-
-每次 `start` 会**重新发放 40 分钟**。到期自然下线后下一轮再拉起来，
-等效于持续保活，而且**不受「只能到期前 5 分钟续期」这个窄窗口约束**。
-
-实测：`offline` → `starting` → `running`，**76 秒**。
-
-```yaml
-- cron: "7 */6 * * *"    # 每 6 小时接力一个 5.5 小时的长驻 job
-```
-
-## 结论先行：广告闸门已破解
-
-面板要求"看广告才能开机/续期"，但**后端根本不检查你有没有看广告**。
-它只校验两件事：
-
-1. `ad_token` 是 `/ad-gate` 真实签发的
-2. 从签发到提交，过了 `count × wait_seconds` 秒
-
-所以纯 HTTP 就能续期，不需要浏览器、不需要播广告。
-
-### 实测对照
-
-| 提交的东西 | 结果 |
-|---|---|
-| 假 token | `403 ad_gate_required` |
-| 无 token | `403 ad_gate_required` |
-| 真 token，0 秒后 | `403 ad_gate_required` ← 冷却没到 |
-| **真 token，等 72 秒** | **`200 OK` ✅** |
-
-## 完整协议
+## 通用请求格式
 
 ```http
-# 1. 校验会话（必须有 cookie，API key 不行）
-GET /api/client/account
+POST https://discord.com/api/v9/interactions
+Authorization: <该账号的用户 token>
 
-# 2. 申请闸门令牌
-POST /api/client/servers/{uuid}/ad-gate
-     {"action": "renew" | "start"}
-→ {"data": {"required": true, "token": "...", "count": 3, "wait_seconds": 24}}
-
-# 3. 等 count × wait_seconds 秒（3 × 24 = 72 秒）
-
-# 4. 提交令牌
-POST /api/client/servers/{uuid}/renewal      {"ad_token": token}   # 续期
-POST /api/client/servers/{uuid}/start-queue  {"ad_token": token}   # 开机
-```
-
-### 为什么不能用 API key
-
-```
-POST /ad-gate  with  Authorization: Bearer ptlc_...
-→ 403 {"code":"ad_gate_browser_only",
-       "detail":"Free servers can only be started or renewed from the panel
-                 in a browser, not with an API key."}
-```
-
-平台明确拒绝 API key。必须用**浏览器会话 cookie**。
-
-## 续期机制
-
-| 项目 | 值 |
-|---|---|
-| 每次发放 | **40 分钟** |
-| 可续期窗口 | 到期前**最后 5 分钟**（300 秒） |
-| 提前点的结果 | `409 renewal_not_expired` + `{renewable_in: N}` |
-
-**每 40 分钟必须续一次**，错过 5 分钟窗口服务器就下线。
-
-## 调度设计
-
-**不用 `*/5` cron —— 实测本仓库的短周期 schedule 完全不触发**（新 workflow 有激活
-延迟，且默认分支长期无提交时 GitHub 会自动禁用 schedule）。40 分钟周期漏一次就下线，
-不能赌这个。
-
-改成**长驻 job**：
-
-```yaml
-- cron: "7 */6 * * *"     # 每 6 小时接力一次
-```
-
-一次 job 跑 **5.5 小时**（330 分钟），内部每 4 分钟检查一次状态，
-进窗口就过闸门续期。6 小时接力 5.5 小时，无缝衔接。
-
-```js
-while (now < endAt) {
-  读 renewal 状态
-  进窗口 -> ad-gate -> 等 72s -> renewal
-  离线   -> ad-gate -> 等 72s -> start-queue
-  sleep 4 分钟
+{
+  "type": 3,
+  "nonce": "<19 位数字>",
+  "guild_id": "...",
+  "channel_id": "...",
+  "message_flags": 0,
+  "message_id": "...",
+  "application_id": "<bot 的用户 ID>",
+  "session_id": "<32 位十六进制>",
+  "data": { "component_type": 2, "custom_id": "..." }
 }
 ```
 
-公开仓库，Actions 分钟数不限，长驻没有成本。
+成功返回 **HTTP 204**。
 
-> ⚠️ 每个 job 上限 6 小时（GitHub 硬限制），连跑 5.5 小时是安全余量。
+### 三个必踩的坑
 
-## Cookie 与自动续命
-
-### 关键：`remember_web` 能自己恢复会话
-
-cookie 里成分：
-
-| cookie | 作用 | 寿命 |
-|---|---|---|
-| `pterodactyl_session` | 主会话 | **短**，几天 |
-| `XSRF-TOKEN` | CSRF 令牌 | 跟随 session |
-| **`remember_web_...`** | **Laravel remember me** | **长**，默认几个月 |
-| `cf_clearance` | Cloudflare | 约 30 分钟（脚本不依赖） |
-
-实测（删掉 session 只留 remember）：
-
-| cookie | `/api/client/account` |
+| 报错 | 原因 |
 |---|---|
-| 完整 cookie | `200` ✅ |
-| 去掉 `pterodactyl_session` | `200` ✅ |
-| **只剩 `remember_web`** | **`200`** ✅ |
+| `{"code":10005,"message":"未知集成"}` | `type` 写成 `2`（应用命令），组件交互必须 `3` |
+| `{"code":50035}` 说 `application_id` 必填 | 消息 JSON 里 `application_id` 是 `null`，必须手填 |
+| `{"code":10002,"Application inconnue"}` | 用了 guild id；应该用 **bot 的用户 ID** |
 
-服务器还会在响应里 `Set-Cookie` 下发新的 `pterodactyl_session` 和 `XSRF-TOKEN`。
+## 怎么确认真续上了
 
-所以脚本做了两件事：
-
-1. **cookie jar** —— 每次响应都把 `Set-Cookie` 收进内存，自动更新轮换后的 session
-2. **失效重试** —— 会话 401 但还有 `remember_web` 时，等 2 秒重试一次，
-   让 Laravel 用 remember 重建会话
-
-> 前提：登录时必须勾 **「记住我 / Remember me」**，否则不会有 `remember_web`。
-
-### 什么时候还需要重新抓 cookie
-
-- `remember_web` 本身过期（默认几个月）或你改密码 / 手动登出
-- 日志会明确提示：
+bot 的回复是 **ephemeral（私密）**，普通消息接口读不到：
 
 ```
-[torchlite] ❌ 会话无效 HTTP 401 —— 需要重新导出 cookie
+GET /channels/{c}/messages/{m}  →  403 {"code":20002,"detail":"只有机器人可使用此端点"}
 ```
 
-更新方法：浏览器登录 → F12 → Network → 任意请求 → 复制整个 `Cookie:` → 覆盖 secret `TORCHLITE_COOKIE`
+所以脚本连 **Discord 网关**监听推送：
+
+```
+【MESSAGE_CREATE】flags=192 ephemeral=true
+【MESSAGE_UPDATE】"Hébergement renouvelé pour 5 jours à partir de maintenant."
+INTERACTION_SUCCESS
+```
+
+判定时**只挑短句回执**（≤120 字）来匹配，避免面板 embed 那种大段文字误命中。
+
+三种结果：
+
+| verdict | 触发 | 后续 |
+|---|---|---|
+| `renewed` | 匹配成功文案 | 记录 `last_click_at`，下次按间隔判断 |
+| `too-early` | `You can renew again later.` | 不记点击时间，等下一个周期 |
+| `no-reply` | 204 + INTERACTION_SUCCESS 但无文案 | 按成功计 |
+
+## 调度
+
+```yaml
+- cron: "37 6 * * *"     # 每天唤醒一次
+```
+
+cron 只负责"每天唤醒"，真正节奏由脚本按 `last_click_at` 判定：
+
+- **McServers**：距上次成功点击满 **5 天** 才点（有效期内点了会被拒）
+- **Antagonix**：距上次成功点击满 **2 天** 就点（随时可点），
+  另加一道兜底：面板剩余 **≤ 3.5 天** 时无论如何都补一次
+
+每日唤醒 + 脚本内判定：两个目标间隔不同，用日历日 `*/2` 会互相错位，月边界也容易漏；
+现在最多只晚 1 天。
+
+## 手动触发
+
+Actions → **Discord Panel Renew** → Run workflow
+
+| 输入 | 说明 |
+|---|---|
+| `target` | `mcservers` / `antagonix` / `all`（默认 all） |
+| `force` | `true` = 无视间隔立即点 |
+| `dry_run` | `true` = 只看判定不点击 |
 
 ## 本地跑
 
 ```bash
-# 只看状态
-TORCHLITE_COOKIE='...' TORCHLITE_DRY_RUN=1 node renew_session.js
+npm install
 
-# 正常续期（窗口内才动）
-TORCHLITE_COOKIE='...' node renew_session.js
+export DISCORDERENEW_TOKEN='...'   # McServers 账号
+export ANTAGONIX_TOKEN='...'       # Antagonix 账号
 
-# 强行续期（测试用，非窗口期会 409）
-TORCHLITE_COOKIE='...' TORCHLITE_FORCE=1 node renew_session.js
-
-# 离线时顺便开机
-TORCHLITE_COOKIE='...' TORCHLITE_DO_START=1 node renew_session.js
+node renew_mcservers.js                    # 两个都处理
+DR_TARGET=antagonix node renew_mcservers.js
+DR_DRY_RUN=1 node renew_mcservers.js
+DR_FORCE=1 node renew_mcservers.js
 ```
 
-## 文件说明
+## 当前状态
 
-| 文件 | 作用 |
-|---|---|
-| **`watchdog.js`** | **主脚本**。双职责守护：开机 + 续期，长驻轮询 |
-| `renew_session.js` | 单次续期（手动用） |
-| `renew_torchlite.js` | 早期 API key 版，被 `ad_gate_browser_only` 挡死，仅留作记录 |
-| `browser/renew_browser.js` | Playwright 版，破解过程用的，现在不需要 |
-| `browser/token_compare.js` | 对照实验脚本，证明"不看广告也能过" |
-| `BROWSER-方案结论.md` | 探路记录 |
+| 服务 | 到期 | Secret |
+|---|---|---|
+| McServers | 2026-11-11 12:01 UTC | `DISCORDERENEW_TOKEN` |
+| Antagonix | 2026-11-09 12:26 UTC | `ANTAGONIX_TOKEN` |
 
 ## 需要维护的地方
 
 | 情况 | 怎么办 |
 |---|---|
-| cookie 过期（401） | 重新导出，覆盖 `TORCHLITE_COOKIE` |
-| 换了服务器 | 改 `TORCHLITE_UUID` |
-| 面板换域名 | 改 `TORCHLITE_BASE` |
-| 广告数量/冷却变了 | 脚本自动读 `count` / `wait_seconds`，不用改 |
+| token 失效（401） | 换对应 secret |
+| 面板消息被删/重建 | Antagonix 会自动探测新消息 id；McServers 需改 `DR_*` 或代码里的 message |
+| 机器人改了按钮 id | 改 `TARGETS` 里对应项的 `customId` |
 
-## 2026-11-04 重要变更：cron → 链路接力
-
-排查发现 `renew_torchlite.yml` 从创建起 **schedule 一次都没触发过**（该工作流 9 次运行全是
-`workflow_dispatch`，而同仓库其它 workflow 的 schedule 正常）。后果：06:19 那轮跑满 330 分钟
-在 11:49 正常退出后没有接力，服务器离线 40 分钟才被手动拉起。
-
-现在的方案（`.github/workflows/torchlite_autostart.yml`，位于 `main`，`ref: torchlite`）：
-
-| 机制 | 作用 |
-|---|---|
-| 长驻 job（330 分钟） | 每 60s 查一次 `current_state`，是 `offline` 才走开机（`running`/`starting` 都不动） |
-| **链路接力** | 正常跑完后用 `GH_PAT` 自我派发下一轮（`chain` 代数 +1），中断 < 2 分钟 |
-| `chain >= 40` 熔断 | 最多连 40 代（约 9 天），防止异常时无限刷额度 |
-| cron `7 */4 * * *` | 仅兜底：万一接力链断了，4 小时内拉起来一次 |
-
-实测：`chain 38 → 39 → 40` 自动连跳后熔断停止；`minutes=1` 短轮次退出后接力正常；
-接力后服务器 `running`。
-
-注意：`concurrency: torchlite-keepalive, cancel-in-progress: true` 会让**任何**新一轮抢占旧一轮，
-所以手动补发不会出现两个 job 抢着开机。
+> ⚠️ Discord 用户 token 会因改密码 / 退出所有设备 / **跨地区使用**被吊销。
+> 之前 Antagonix 的 token 就是拿到 GitHub 美国 IP 用之后被杀的（活不过 2 分钟）。
+> 如果日志报 `401`，需要重新抓 token。
