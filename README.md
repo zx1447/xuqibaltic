@@ -88,22 +88,47 @@ while (now < endAt) {
 
 > ⚠️ 每个 job 上限 6 小时（GitHub 硬限制），连跑 5.5 小时是安全余量。
 
-## ⚠️ Cookie 会过期
+## Cookie 与自动续命
 
-`TORCHLITE_COOKIE` 是 Pterodactyl 会话 cookie，**通常几天到几周失效**。
-失效后脚本会明确报错：
+### 关键：`remember_web` 能自己恢复会话
+
+cookie 里成分：
+
+| cookie | 作用 | 寿命 |
+|---|---|---|
+| `pterodactyl_session` | 主会话 | **短**，几天 |
+| `XSRF-TOKEN` | CSRF 令牌 | 跟随 session |
+| **`remember_web_...`** | **Laravel remember me** | **长**，默认几个月 |
+| `cf_clearance` | Cloudflare | 约 30 分钟（脚本不依赖） |
+
+实测（删掉 session 只留 remember）：
+
+| cookie | `/api/client/account` |
+|---|---|
+| 完整 cookie | `200` ✅ |
+| 去掉 `pterodactyl_session` | `200` ✅ |
+| **只剩 `remember_web`** | **`200`** ✅ |
+
+服务器还会在响应里 `Set-Cookie` 下发新的 `pterodactyl_session` 和 `XSRF-TOKEN`。
+
+所以脚本做了两件事：
+
+1. **cookie jar** —— 每次响应都把 `Set-Cookie` 收进内存，自动更新轮换后的 session
+2. **失效重试** —— 会话 401 但还有 `remember_web` 时，等 2 秒重试一次，
+   让 Laravel 用 remember 重建会话
+
+> 前提：登录时必须勾 **「记住我 / Remember me」**，否则不会有 `remember_web`。
+
+### 什么时候还需要重新抓 cookie
+
+- `remember_web` 本身过期（默认几个月）或你改密码 / 手动登出
+- 日志会明确提示：
 
 ```
-[torchlite] ❌ 会话无效 HTTP 401
-[torchlite]    cookie 过期了，需要重新从浏览器导出
+[torchlite] ❌ 会话无效 HTTP 401 —— 需要重新导出 cookie
 ```
 
-更新方法：
-
-1. 浏览器登录 `https://game.torchlite.host`
-2. F12 → Network → 点任意 `game.torchlite.host` 请求
-3. 复制 Request Headers 里完整的 `Cookie:` 值
-4. 覆盖 secret `TORCHLITE_COOKIE`
+更新方法：浏览器登录 → F12 → Network → 任意请求 → 复制整个 `Cookie:` → 覆盖 secret `TORCHLITE_COOKIE`
 
 ## 本地跑
 
