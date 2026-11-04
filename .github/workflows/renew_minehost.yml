@@ -27,7 +27,7 @@ on:
         default: "false"
 
 permissions:
-  contents: read
+  contents: write   # 需要把 minehost_state.json 提交回分支
 
 concurrency:
   group: minehost-renew
