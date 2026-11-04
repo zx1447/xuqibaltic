@@ -1,0 +1,89 @@
+name: Torchlite Auto Start (chain)
+
+# 服务器处于「停止」状态就自动启动。不做窗口续期。
+#
+# 每次 start 重新发放 40 分钟；到期自然下线后由守护进程下一轮再拉起。
+#
+# 为什么不再依赖 cron 接力：
+#   实测本仓库的 renew_torchlite.yml 从创建起 schedule 一次都没触发过
+#   （9 次运行全是 workflow_dispatch），而同仓库其它 workflow 的
+#   schedule 正常，说明是「新 workflow 的 schedule 未启用」。
+#   结果就是 06:19 那轮跑满 330 分钟退出后没有接力，服务器离线 40 分钟。
+#
+# 所以改成：长驻 job 正常退出时，用 API 自己派发下一轮（链路接力），
+# cron 只作为兜底（防链路断）。chain 参数防止失控递归。
+
+on:
+  schedule:
+    - cron: "7 */4 * * *"
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: "跑多少分钟（默认 330）"
+        required: false
+        default: "330"
+      tick_sec:
+        description: "多少秒查一次（默认 60）"
+        required: false
+        default: "60"
+      dry_run:
+        description: "只看状态不动手"
+        required: false
+        default: "false"
+      chain:
+        description: "接力代数（内部用，别手动设）"
+        required: false
+        default: "0"
+
+permissions:
+  contents: read
+
+# 新的顶掉旧的：长驻 job 卡死时 run 级 cancel 不生效，只有 concurrency 抢占能踢掉。
+concurrency:
+  group: torchlite-keepalive
+  cancel-in-progress: true
+
+jobs:
+  autostart:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: torchlite
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Watchdog
+        env:
+          TORCHLITE_COOKIE: ${{ secrets.TORCHLITE_COOKIE }}
+          TORCHLITE_UUID: "be89843c-8e77-4ce7-9fc4-c4d78a2b4ea1"
+          TORCHLITE_LOOP_MINUTES: ${{ inputs.minutes || '330' }}
+          TORCHLITE_TICK_SEC: ${{ inputs.tick_sec || '60' }}
+          TORCHLITE_REQ_TIMEOUT_MS: "20000"
+          TORCHLITE_DRY_RUN: ${{ inputs.dry_run == 'true' && '1' || '0' }}
+        run: node watchdog.js
+
+      # 只有 watchdog 正常跑完才接力；崩了就不接，避免死循环刷额度。
+      - name: 链路接力：派发下一轮
+        if: success() && inputs.dry_run != 'true'
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+          CHAIN: ${{ inputs.chain || '0' }}
+          NEXT_MINUTES: ${{ inputs.minutes || '330' }}
+        run: |
+          if [ "$CHAIN" -ge 40 ]; then
+            echo "接力代数已到上限（$CHAIN），停止，交给 cron 兜底"
+            exit 0
+          fi
+          NEXT=$((CHAIN + 1))
+          echo "派发下一轮：chain=$NEXT minutes=$NEXT_MINUTES"
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+            -H "Authorization: token $GH_PAT" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/torchlite_autostart.yml/dispatches" \
+            -d "{\"ref\":\"main\",\"inputs\":{\"minutes\":\"$NEXT_MINUTES\",\"chain\":\"$NEXT\"}}")
+          echo "派发结果 HTTP $code"
+          [ "$code" = "204" ] || { echo "派发失败，交给 cron 兜底"; exit 0; }
