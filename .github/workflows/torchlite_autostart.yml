@@ -1,4 +1,4 @@
-name: Torchlite Auto Start
+name: Torchlite Auto Start (chain)
 
 # 服务器处于「停止」状态就自动启动。不做窗口续期。
 #
