@@ -1,6 +1,19 @@
-# Torchlite 免费服务器自动续期
+# Torchlite 免费服务器守护
 
 `Minecraft (Paper) - zxy1715x` · UUID `be89843c-8e77-4ce7-9fc4-c4d78a2b4ea1`
+
+## 干什么
+
+**两件事，每 50 秒查一次，全自动：**
+
+| 情况 | 动作 | 实测结果 |
+|---|---|---|
+| 服务器 **停了 / 崩了** | `start-queue` 开机 | offline → running，**82 秒** |
+| 服务器 **快到期** | `renewal` 续期 | +40 分钟 |
+
+```yaml
+- cron: "7 */6 * * *"    # 每 6 小时接力一个 5.5 小时的长驻 job
+```
 
 ## 结论先行：广告闸门已破解
 
@@ -150,7 +163,8 @@ TORCHLITE_COOKIE='...' TORCHLITE_DO_START=1 node renew_session.js
 
 | 文件 | 作用 |
 |---|---|
-| `renew_session.js` | **主脚本**，纯 HTTP，cookie 认证 |
+| **`watchdog.js`** | **主脚本**。双职责守护：开机 + 续期，长驻轮询 |
+| `renew_session.js` | 单次续期（手动用） |
 | `renew_torchlite.js` | 早期 API key 版，被 `ad_gate_browser_only` 挡死，仅留作记录 |
 | `browser/renew_browser.js` | Playwright 版，破解过程用的，现在不需要 |
 | `browser/token_compare.js` | 对照实验脚本，证明"不看广告也能过" |
