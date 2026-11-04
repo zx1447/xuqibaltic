@@ -1,26 +1,35 @@
-name: Torchlite Renew
+name: Torchlite Keepalive
 
-# Torchlite 免费服务器每 40 分钟到期，只能在到期前最后 5 分钟续期。
+# 两件事，每 50 秒查一次：
+#   ① 服务器停了  -> 自动开机（start-queue）
+#   ② 快到期了    -> 自动续期（renewal）
 #
 # 广告闸门已破解：后端只校验 ad_token 有效 + 等够 count×wait_seconds，
-# 不看广告本身。所以纯 HTTP + 会话 cookie 就能续，不需要浏览器。
+# 不看广告本身。所以纯 HTTP + 会话 cookie 即可，不需要浏览器。
 #
 # 为什么用长驻 job 而不是 */5 cron：
-#   实测本仓库的 */5 schedule 完全不触发（新 workflow 激活延迟 /
-#   默认分支长期无提交会被自动禁用 schedule）。40 分钟周期漏一次就下线，
-#   所以改成「一次跑 5.5 小时，内部每 4 分钟查一次」。
-#   下面的 cron 每 6 小时兜底接力一个新的（6 小时 > 5.5 小时，无缝衔接）。
+#   40 分钟周期漏一次就下线。实测本仓库的 */5 schedule 完全不触发
+#   （新 workflow 激活延迟 / 默认分支长期无提交会被自动禁用）。
+#   改成「一次跑 5.5 小时，内部轮询」，cron 每 6 小时接力，无缝衔接。
 on:
   schedule:
     - cron: "7 */6 * * *"
   workflow_dispatch:
     inputs:
       minutes:
-        description: "运行多少分钟（默认 330）"
+        description: "跑多少分钟（默认 330）"
         required: false
         default: "330"
+      do_start:
+        description: "自动开机（默认 true）"
+        required: false
+        default: "true"
+      do_renew:
+        description: "自动续期（默认 true）"
+        required: false
+        default: "true"
       dry_run:
-        description: "true = 只看状态不动手"
+        description: "只看状态不动手"
         required: false
         default: "false"
 
@@ -28,11 +37,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: torchlite-renew
+  group: torchlite-keepalive
   cancel-in-progress: false
 
 jobs:
-  renew:
+  keepalive:
     runs-on: ubuntu-latest
     timeout-minutes: 350
     steps:
@@ -44,11 +53,13 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Renew loop
+      - name: Watchdog
         env:
           TORCHLITE_COOKIE: ${{ secrets.TORCHLITE_COOKIE }}
           TORCHLITE_UUID: "be89843c-8e77-4ce7-9fc4-c4d78a2b4ea1"
           TORCHLITE_LOOP_MINUTES: ${{ inputs.minutes || '330' }}
+          TORCHLITE_TICK_SEC: "50"
+          TORCHLITE_DO_START: ${{ github.event_name == 'workflow_dispatch' && (inputs.do_start == 'false' && '0' || '1') || '1' }}
+          TORCHLITE_DO_RENEW: ${{ github.event_name == 'workflow_dispatch' && (inputs.do_renew == 'false' && '0' || '1') || '1' }}
           TORCHLITE_DRY_RUN: ${{ inputs.dry_run == 'true' && '1' || '0' }}
-          TORCHLITE_DO_START: "1"
-        run: node renew_loop.js
+        run: node watchdog.js
