@@ -61,14 +61,23 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          # npm install 会生成被 gitignore 的 package-lock.json，导致 rebase 报
+          # "You have unstaged changes"。先清掉工作区噪声再提交。
+          rm -f package-lock.json
+          git checkout -- . 2>/dev/null || true
           git add disordrenew_state.json || true
-          if git diff --cached --quiet; then echo "No state change."; exit 0; fi
+          if git diff --cached --quiet -- disordrenew_state.json; then
+            echo "No state change."
+            exit 0
+          fi
           git commit -m "Update McServers state [skip ci]"
           for i in 1 2 3; do
             git fetch origin disordrenew
-            if git rebase origin/disordrenew && git push origin HEAD:disordrenew; then
-              echo "✅ state 已推送"; break
+            git reset --soft origin/disordrenew 2>/dev/null || true
+            git add disordrenew_state.json
+            if git commit -q -m "Update McServers state [skip ci]" && git push origin HEAD:disordrenew; then
+              echo "✅ state 已推送"; exit 0
             fi
-            git rebase --abort 2>/dev/null || true
             sleep 3
           done
+          echo "⚠️ state 推送失败，不影响续期本身"
