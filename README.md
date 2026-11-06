@@ -28,7 +28,35 @@ Authorization: Bearer ptlc_xxxxxxxx     ← Pterodactyl Client API key
 4. 生成后复制 `ptlc_` 开头那串，**只显示一次**
 5. 填进仓库 secret `QI_API_KEY`
 
-## 实测状态（2026-11-06）
+## 实测结论（2026-11-06，用真 key 跑通）
+
+| 项 | 值 |
+|---|---|
+| key | ✅ `GET /api/client/account` → 200，`maikeruisi_rshh` / `zxy1715x@gmail.com`（id 3277） |
+| 服务器 | `Free Q-Fi Server Paper`，标识 `2909e505`，节点 `gs1.ca` |
+| 配置 | 8192 MB 内存 / 15360 MB 盘 / 150% CPU / io 500 |
+| 当前状态 | `running`，已运行 294202325 秒，占用 2.0 GB 内存、1.25 GB 盘（**没被暂停**） |
+| **续期规则** | 周期 **7 天**，窗口在到期前 **48 小时**开放，`graceHours: 24`，暂停后 **5 天**清除 |
+| **下次可续** | `renewAt = 2026-11-15T00:19:36-05:00` = **2026-11-15 05:19:36 UTC**（查时时还有 209 小时） |
+| 上次续期 | `lastRenewedAt = 2026-11-06T06:52:55-05:00`，`renewals: 1` |
+| 现在能续吗 | `renewable: false` → `POST renew` 返回 `400 DisplayException: This server cannot be renewed yet.` |
+
+**所以「每 2 天一次」在服务端是行不通的** —— 它 7 天才开一次 48 小时的窗口，
+脚本照 2 天点只会天天吃 400。现在的实现改成：
+
+```
+GET  .../renewal          → 读 renewable / renewAt（真值来源）
+renewable=false           → 跳过，不空点
+renewable=true 且间隔够    → POST .../renew
+```
+
+`QI_INTERVAL_DAYS=2` 保留为「防重复点」的最小间隔，cron 改成 **每 6 小时查一次**，
+窗口（48 小时）一开就能在 6 小时内抓住。
+
+顺带发现：这个站的免费额度是 `perUser: 1`、`held: 1`（已用满），
+且要求 Discord 绑定（`discord.linked: true`，账号 `Lycoris`）。
+
+## 端点探测记录（2026-11-06）
 
 | 探测 | 结果 |
 |---|---|

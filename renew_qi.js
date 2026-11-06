@@ -1,9 +1,14 @@
 #!/usr/bin/env node
 // Q-Fi Cloud（Dezerx 主题 / Pterodactyl）免费服务器自动续期 · 每 2 天一次
 //
-// 端点（从浏览器 F12 抓到的真实请求）
-//   POST https://gp.qficloud.com/api/client/dezerx/server-create/<UUID>/renew
-//   成功 → 200，失败 → 401 Unauthenticated / 4xx（带 errors[0].code）
+// 端点
+//   GET  /api/client/dezerx/server-create/<UUID>/renewal
+//        → {renewAt, lastRenewedAt, renewals, renewable, overdue, suspended}
+//          renewable=true 才允许续，否则 POST 会 400 "cannot be renewed yet"
+//   POST /api/client/dezerx/server-create/<UUID>/renew
+//        → 200 续期成功 / 400 DisplayException 还没到时间 / 401 key 无效
+//   GET  /api/client/dezerx/server-create
+//        → 免费额度状态：refusal/remaining/held/perUser/discord + renewals 周期规则
 //
 // 认证
 //   Pterodactyl Client API key：Authorization: Bearer ptlc_xxx
@@ -73,6 +78,13 @@ async function serverInfo(uuid) {
   return { ok: false, error: errOf(r), status: r.status };
 }
 
+// 读「什么时候能续」——有这个就不用盲点，也不会吃 400
+async function readRenewal(uuid) {
+  const r = await api(`/api/client/dezerx/server-create/${uuid}/renewal`);
+  if (r.status === 200 && r.body && r.body.uuid) return { ok: true, ...r.body };
+  return { ok: false, status: r.status, error: errOf(r) };
+}
+
 async function renew(uuid) {
   return api(`/api/client/dezerx/server-create/${uuid}/renew`, 'POST', {});
 }
@@ -108,14 +120,44 @@ async function main() {
       log(`  ⚠️ 标准 /api/client/servers 读不到（${info.error}），只按自定义 renew 端点执行`);
     }
 
+    // 关键：先问服务端「现在能不能续」
+    const rn = await readRenewal(uuid);
+    if (rn.ok) {
+      st.renewAt = rn.renewAt || null;
+      st.lastRenewedAt = rn.lastRenewedAt || null;
+      st.renewals = rn.renewals ?? null;
+      st.renewable = rn.renewable === true;
+      st.overdue = rn.overdue === true;
+      changed = true;
+      if (rn.renewAt) {
+        const left = Date.parse(rn.renewAt) - now;
+        log(`  可续窗口：${new Date(rn.renewAt).toISOString().replace('T', ' ').slice(0, 19)} UTC`
+          + `（${left > 0 ? '还有 ' + (left / 3600000).toFixed(1) + ' 小时' : '已开启'}）`);
+      }
+      log(`  服务端判定 renewable=${rn.renewable} · 已续 ${rn.renewals} 次`
+        + (rn.lastRenewedAt ? ` · 上次 ${new Date(rn.lastRenewedAt).toISOString().slice(0, 19)} UTC` : '')
+        + (rn.overdue ? ' · ⚠️ 已逾期' : ''));
+    } else {
+      log(`  ⚠️ 读不到 renewAt（${rn.error}），退回按间隔判定`);
+    }
+
     const last = st.last_click_at ? Date.parse(st.last_click_at) : null;
     const daysSince = last ? (now - last) / 86400000 : null;
     if (daysSince !== null) log(`  距上次成功续期 ${daysSince.toFixed(2)} 天`);
 
-    const need = FORCE || daysSince === null || daysSince >= INTERVAL_DAYS;
-    log(`  判定：${need ? `需要续期（间隔 ${INTERVAL_DAYS} 天）` : `距上次不足 ${INTERVAL_DAYS} 天，跳过`}`);
+    const spaced = daysSince === null || daysSince >= INTERVAL_DAYS;
+    // renewable=false 时不要发 POST，否则只会拿到 400
+    const need = FORCE || (spaced && (rn.ok ? st.renewable : true));
+    if (!need) {
+      log(rn.ok && !st.renewable
+        ? `  判定：还没到续期窗口，跳过（不空点，避免 400）`
+        : `  判定：距上次不足 ${INTERVAL_DAYS} 天，跳过`);
+      st.last_check_at = new Date().toISOString();
+      changed = true;
+      continue;
+    }
+    log(`  判定：现在可以续（间隔 ${INTERVAL_DAYS} 天已满足）`);
     st.last_check_at = new Date().toISOString();
-    if (!need) { changed = true; continue; }
     if (DRY) { log('  DRY_RUN=1，不提交'); changed = true; continue; }
 
     log('  🎯 POST /api/client/dezerx/server-create/<uuid>/renew');
@@ -136,7 +178,14 @@ async function main() {
       st.last_note = JSON.stringify(r.body).slice(0, 200);
       delete st.too_early_since;
       log('  ✅ 续期成功');
-    } else if (/too.?early|TooEarly|renewTooEarly/i.test(errOf(r))) {
+      const after = await readRenewal(uuid);
+      if (after.ok && after.renewAt) {
+        st.renewAt = after.renewAt;
+        st.lastRenewedAt = after.lastRenewedAt || null;
+        st.renewals = after.renewals ?? null;
+        log(`     下次可续：${new Date(after.renewAt).toISOString().replace('T', ' ').slice(0, 19)} UTC`);
+      }
+    } else if (/too.?early|cannot be renewed yet|Come back closer/i.test(errOf(r))) {
       st.last_verdict = 'too-early';
       st.last_note = errOf(r);
       st.too_early_since = st.too_early_since || new Date().toISOString();

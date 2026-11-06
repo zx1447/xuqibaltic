@@ -1,7 +1,17 @@
 {
+  "2909e505-6516-4d30-86ca-ae75af6aa91b": {
+    "name": "Free Q-Fi Server Paper",
+    "identifier": "2909e505",
+    "status": null,
+    "renewAt": "2026-11-15T00:19:36-05:00",
+    "lastRenewedAt": "2026-11-06T06:52:55-05:00",
+    "renewals": 1,
+    "renewable": false,
+    "overdue": false,
+    "last_check_at": "2026-11-06T11:57:09.893Z"
+  },
   "_meta": {
-    "note": "每 2 天续一次。last_click_at 只在 renew 返回 200 时写；服务端说 too-early 只记 too_early_since。",
-    "interval_days": 2,
-    "last_run": null
+    "last_run": "2026-11-06T11:57:09.893Z",
+    "interval_days": 2
   }
 }
