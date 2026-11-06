@@ -5,15 +5,18 @@ name: Q-Fi Cloud Renew
 # 端点：POST /api/client/dezerx/server-create/<UUID>/renew
 # 认证：Authorization: Bearer <ptlc_...>（在站点 /account/api 页面创建）
 #
-# 节奏：每 2 天一次。cron 每天唤醒一次、由脚本按 last_click_at 判定，
-#       这样即使某天 runner 排队延误，也只会晚 1 天，不会漏。
+# 节奏（重要）：
+#   服务端规则 = 7 天一个周期，续期窗口在到期前 48 小时内开放（graceHours 24，purge 5 天）。
+#   所以 cron 每 6 小时检查一次「窗口开没开」，窗口一开立刻续；
+#   脚本内部再用 QI_INTERVAL_DAYS=2 兜一层，防止短周期内重复点。
+#   只看时间盲点会错过窗口 —— 现在以服务端返回的 renewable 为准。
 #
 # 需要的 secret
 #   QI_API_KEY   Pterodactyl Client API key（ptlc_ 开头）
 
 on:
   schedule:
-    - cron: "41 7 * * *"
+    - cron: "41 */6 * * *"
   workflow_dispatch:
     inputs:
       force:
@@ -25,7 +28,7 @@ on:
         required: false
         default: "false"
       interval_days:
-        description: "间隔天数（默认 2）"
+        description: "最小间隔天数（默认 2，防重复点）"
         required: false
         default: "2"
 
