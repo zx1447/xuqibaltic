@@ -1,127 +1,61 @@
-# Discord 面板自动续期（多账号）
+# Q-Fi Cloud 免费服务器续期（每 2 天）
 
-一个脚本管两个 Discord 面板续期。两者机制**完全不同**，共用点击 + 网关判定。
+`https://gp.qficloud.com` · 服务器 UUID `2909e505-6516-4d30-86ca-ae75af6aa91b`
 
-| | McServers | Antagonix |
-|---|---|---|
-| 有效期 | 7 天 | **5 天** |
-| 有效期内点击 | ❌ 回 `You can renew again later.` | ✅ **直接续，从现在起重置 +5 天** |
-| 续期节奏 | 每 5 天探一次 | 剩余 ≤ 4.5 天才点 |
-| 面板消息 | `1567495211016519802` | `1567073789395730475` |
-| 频道 | `1567486173495173181` | `1567073787143524383` |
-| bot / application_id | `1524370665631649865` | `1565149630260322418` |
-| 按钮 custom_id | `renew_server` | `b\|fa67c4d1a69f9e08bc484195\|renew` |
-| 成功文案 | （无回执） | `Hébergement renouvelé pour 5 jours...` |
+## 端点
 
-## 通用请求格式
-
-```http
-POST https://discord.com/api/v9/interactions
-Authorization: <该账号的用户 token>
-
-{
-  "type": 3,
-  "nonce": "<19 位数字>",
-  "guild_id": "...",
-  "channel_id": "...",
-  "message_flags": 0,
-  "message_id": "...",
-  "application_id": "<bot 的用户 ID>",
-  "session_id": "<32 位十六进制>",
-  "data": { "component_type": 2, "custom_id": "..." }
-}
+```
+POST /api/client/dezerx/server-create/<UUID>/renew
+Authorization: Bearer ptlc_xxxxxxxx     ← Pterodactyl Client API key
+→ 200 OK       续期成功
+→ 401          Unauthenticated（key 无效/过期）
 ```
 
-成功返回 **HTTP 204**。
+`dezerx` 是套在 Pterodactyl 上的第三方主题（`server-create` 是它自己的路由前缀），
+所以续期端点在 `/api/client/dezerx/...` 而不是标准的 `/api/client/servers/...`。
 
-### 三个必踩的坑
+## 认证怎么拿
 
-| 报错 | 原因 |
+**必须用 Client API key**，网页登录的 cookie 不顶用（Pterodactyl 的 API 中间件只认 `Authorization: Bearer`，
+实测空 cookie / 空 Bearer 一律 401 `AuthenticationException`）。
+
+获取步骤：
+
+1. 浏览器登录 `https://gp.qficloud.com`（登录页带 Google reCAPTCHA，这步只能真人做）
+2. 左侧菜单 → **API credentials**（地址 `https://gp.qficloud.com/account/api`）
+3. Description 随便填（如 `renew-bot`），权限至少勾上：
+   - `renew` / `server.create`（Dezerx 的续期权限，名字可能略有差异，**全勾最省事**）
+4. 生成后复制 `ptlc_` 开头那串，**只显示一次**
+5. 填进仓库 secret `QI_API_KEY`
+
+## 实测状态（2026-11-06）
+
+| 探测 | 结果 |
 |---|---|
-| `{"code":10005,"message":"未知集成"}` | `type` 写成 `2`（应用命令），组件交互必须 `3` |
-| `{"code":50035}` 说 `application_id` 必填 | 消息 JSON 里 `application_id` 是 `null`，必须手填 |
-| `{"code":10002,"Application inconnue"}` | 用了 guild id；应该用 **bot 的用户 ID** |
+| `POST .../renew`（无 key） | `401 AuthenticationException` |
+| `POST .../renew`（假 UUID） | `401`（先过认证再校验资源，说明路由存在） |
+| `GET /api/client/dezerx/server-create` | `401`（路由存在，不是 404） |
+| `GET /api/client/dezerx/renewables` | `404`（没有这个官方端点） |
+| `GET /api/client/account`（假 ptlc_ key） | `401` |
+| 登录页 | `Sign in · Q-Fi Cloud`，Google **reCAPTCHA enabled**，有 Discord 链接 |
 
-## 怎么确认真续上了
+结论：**认证是唯一门槛**，拿到 API key 之后 `POST renew` 就是纯 HTTP，不需要浏览器、不需要验证码。
+站点也没有像 MineHost/Severoo 那种「看广告 / 过人机验证」的环节，属于最好自动化的一类。
 
-bot 的回复是 **ephemeral（私密）**，普通消息接口读不到：
+## 节奏
 
-```
-GET /channels/{c}/messages/{m}  →  403 {"code":20002,"detail":"只有机器人可使用此端点"}
-```
+`QI_INTERVAL_DAYS=2`：距上次 **成功**（200）续期满 2 天才提交下一次。
 
-所以脚本连 **Discord 网关**监听推送：
+cron 用**每天唤醒**（`41 7 * * *`），真正判定在脚本里：
 
-```
-【MESSAGE_CREATE】flags=192 ephemeral=true
-【MESSAGE_UPDATE】"Hébergement renouvelé pour 5 jours à partir de maintenant."
-INTERACTION_SUCCESS
-```
+- 满 2 天 → 提交 `POST renew`
+- 服务端回「太早」→ 只记 `too_early_since`，**不写 `last_click_at`**，并把间隔调小即可贴近窗口
+- 429 / 5xx → 8 秒后重试一次
 
-判定时**只挑短句回执**（≤120 字）来匹配，避免面板 embed 那种大段文字误命中。
+## 文件
 
-三种结果：
-
-| verdict | 触发 | 后续 |
-|---|---|---|
-| `renewed` | 匹配成功文案 | 记录 `last_click_at`，下次按间隔判断 |
-| `too-early` | `You can renew again later.` | 不记点击时间，等下一个周期 |
-| `no-reply` | 204 + INTERACTION_SUCCESS 但无文案 | 按成功计 |
-
-## 调度
-
-```yaml
-- cron: "37 6 * * *"     # 每天唤醒一次
-```
-
-cron 只负责"每天唤醒"，真正节奏由脚本按 `last_click_at` 判定：
-
-- **McServers**：距上次成功点击满 **5 天** 才点（有效期内点了会被拒）
-- **Antagonix**：距上次成功点击满 **2 天** 就点（随时可点），
-  另加一道兜底：面板剩余 **≤ 3.5 天** 时无论如何都补一次
-
-每日唤醒 + 脚本内判定：两个目标间隔不同，用日历日 `*/2` 会互相错位，月边界也容易漏；
-现在最多只晚 1 天。
-
-## 手动触发
-
-Actions → **Discord Panel Renew** → Run workflow
-
-| 输入 | 说明 |
+| 文件 | 作用 |
 |---|---|
-| `target` | `mcservers` / `antagonix` / `all`（默认 all） |
-| `force` | `true` = 无视间隔立即点 |
-| `dry_run` | `true` = 只看判定不点击 |
-
-## 本地跑
-
-```bash
-npm install
-
-export DISCORDERENEW_TOKEN='...'   # McServers 账号
-export ANTAGONIX_TOKEN='...'       # Antagonix 账号
-
-node renew_mcservers.js                    # 两个都处理
-DR_TARGET=antagonix node renew_mcservers.js
-DR_DRY_RUN=1 node renew_mcservers.js
-DR_FORCE=1 node renew_mcservers.js
-```
-
-## 当前状态
-
-| 服务 | 到期 | Secret |
-|---|---|---|
-| McServers | 2026-11-11 12:01 UTC | `DISCORDERENEW_TOKEN` |
-| Antagonix | 2026-11-09 12:26 UTC | `ANTAGONIX_TOKEN` |
-
-## 需要维护的地方
-
-| 情况 | 怎么办 |
-|---|---|
-| token 失效（401） | 换对应 secret |
-| 面板消息被删/重建 | Antagonix 会自动探测新消息 id；McServers 需改 `DR_*` 或代码里的 message |
-| 机器人改了按钮 id | 改 `TARGETS` 里对应项的 `customId` |
-
-> ⚠️ Discord 用户 token 会因改密码 / 退出所有设备 / **跨地区使用**被吊销。
-> 之前 Antagonix 的 token 就是拿到 GitHub 美国 IP 用之后被杀的（活不过 2 分钟）。
-> 如果日志报 `401`，需要重新抓 token。
+| `renew_qi.js` | 主脚本（读状态 → 判定间隔 → POST renew → 写状态） |
+| `.github/workflows/renew_qi.yml` | 仓库工作流 `Q-Fi Cloud Renew`，cron `41 7 * * *` |
+| `qi_state.json` | `last_click_at` / `last_verdict` / `too_early_since` |

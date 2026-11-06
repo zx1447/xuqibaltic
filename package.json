@@ -1,8 +1,1 @@
-{
-  "private": true,
-  "dependencies": {
-    "playwright": "^1.40.0",
-    "playwright-extra": "^4.3.6",
-    "puppeteer-extra-plugin-stealth": "^2.11.2"
-  }
-}
+{ "name": "qi-renew", "private": true, "version": "1.0.0", "scripts": { "renew": "node renew_qi.js" } }

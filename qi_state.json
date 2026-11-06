@@ -1,0 +1,7 @@
+{
+  "_meta": {
+    "note": "每 2 天续一次。last_click_at 只在 renew 返回 200 时写；服务端说 too-early 只记 too_early_since。",
+    "interval_days": 2,
+    "last_run": null
+  }
+}
