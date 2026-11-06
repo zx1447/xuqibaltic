@@ -89,6 +89,11 @@ const TARGETS = {
 };
 
 const log = (tag, m) => console.log(`[${tag}] ${m}`);
+
+// 面板下线/维护时 Discord 侧的现象：guild/频道查不到、点击回 400 10003/10004。
+// 这种不是 token 问题，也不该按「失败」反复刷，直接标记 unavailable 等恢复。
+const MAINT_RE = /unknown (guild|channel)|\b10003\b|\b10004\b|未知服务器|未知频道/i;
+const isUnavailable = (status, body) => (status === 404 || status === 400) && MAINT_RE.test(String(body || ''));
 const randDigits = (n) => Array.from({ length: n }, () => Math.floor(Math.random() * 10)).join('');
 const randHex = (n) => Array.from({ length: n }, () => '0123456789abcdef'[Math.floor(Math.random() * 16)]).join('');
 
@@ -146,6 +151,17 @@ async function click(token, t) {
     signal: AbortSignal.timeout(20000),
   });
   return { status: res.status, body: (await res.text()).slice(0, 300) };
+}
+
+// 只读探活：频道还在不在（GET，不产生任何互动）
+async function probeChannel(token, t) {
+  try {
+    const res = await fetch(`https://discord.com/api/v9/channels/${t.channel}`,
+      { headers: headers(token, t), signal: AbortSignal.timeout(15000) });
+    return { status: res.status, body: (await res.text()).slice(0, 300) };
+  } catch (e) {
+    return { status: 0, body: e.message };
+  }
 }
 
 // 读面板消息里的到期时间戳（Antagonix 的 embed 里有 <t:...>）
@@ -258,6 +274,12 @@ async function processTarget(name, t, state) {
     }
   }
 
+  // 之前标记过不可用，现在探测通了 → 清标记并提示已恢复
+  if (st.unavailable_since && exp) {
+    log(tag, `✅ 已恢复（自 ${st.unavailable_since} 起不可用）`);
+    delete st.unavailable_since;
+  }
+
   // 间隔判定
   const lastTs = st.last_click_at ? Math.floor(Date.parse(st.last_click_at) / 1000) : null;
   const daysSince = lastTs ? (nowSec - lastTs) / 86400 : null;
@@ -290,8 +312,22 @@ async function processTarget(name, t, state) {
 
   if (DRY_RUN) { log(tag, 'DRY_RUN=1，不点击'); state[name] = st; return; }
 
-  log(tag, `🎯 点击 ${t.customId}`);
   let result;
+  // 先探一下频道还在不在：面板维护/换服时 guild 和频道会 404，
+  // 这时候点也是白点（会回 400 10003），直接标记维护、保留状态
+  log(tag, `🎯 准备点击 ${t.customId}`);
+  const probe = await probeChannel(token, t);
+  if (isUnavailable(probe.status, probe.body)) {
+    st.last_check_at = new Date().toISOString();
+    st.last_verdict = 'unavailable';
+    st.last_note = `频道不可用（HTTP ${probe.status}），面板可能在维护或换服`;
+    st.unavailable_since = st.unavailable_since || new Date().toISOString();
+    log(tag, `🚧 ${st.last_note}；自 ${st.unavailable_since} 起一直不可用`);
+    if (USE_GATEWAY) log(tag, '   跳过网关监听，避免等满 20 秒');
+    state[name] = st;
+    return;
+  }
+
   if (USE_GATEWAY) {
     result = await watchReplies(token, t, async () => {
       const r = await click(token, t);
