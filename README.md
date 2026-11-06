@@ -70,6 +70,44 @@ renewable=true 且间隔够    → POST .../renew
 结论：**认证是唯一门槛**，拿到 API key 之后 `POST renew` 就是纯 HTTP，不需要浏览器、不需要验证码。
 站点也没有像 MineHost/Severoo 那种「看广告 / 过人机验证」的环节，属于最好自动化的一类。
 
+## 精准触发（当前实现）
+
+不再是「每 N 天盲点」，而是**算到服务端给的 renewAt，主动睡到窗口开启那一秒再提交**：
+
+```
+GET  .../renewal  →  renewAt / renewable
+        │
+        ├─ 距 renewAt ≤ 330 分钟 → sleep 到 renewAt + 30s 余量 → POST renew
+        │                          （等待期间每 5 分钟复查，服务端提前开窗就立即续）
+        └─ 距 renewAt > 330 分钟 → 只报告，交给后面每 6 小时的 cron 接力
+```
+
+具体机制：
+
+| 参数 | 默认 | 作用 |
+|---|---|---|
+| `QI_WAIT` | `1` | 开启精准等待 |
+| `QI_WAIT_MAX_MIN` | `330` | 单次 job 最多睡多久（GitHub 上限 350 分钟） |
+| `QI_SLACK_SEC` | `30` | 到点后再补的余量，抵消服务端/runner 时钟差 |
+| `QI_POLL_SEC` | `300` | 等待期间复查状态的间隔 |
+| `QI_INTERVAL_DAYS` | `2` | 最小间隔兜底，防止窗口内重复点 |
+| `QI_FORCE` / `QI_DRY_RUN` | `0` | 调试用 |
+
+到点后若服务端仍说 `renewable=false`，会再复查 3 轮（每轮 60 秒）；
+若服务端把窗口推后超过 1 小时，则本轮退出，等下一次 cron。
+
+`concurrency.cancel-in-progress = false` —— 精准等待期间不会被下一次定时任务抢占。
+
+**实测校验**（用 `QI_OVERRIDE_RENEW_AT` / `QI_OVERRIDE_RENEWABLE` 伪造时间跑通）：
+
+```
+⏳ 精准等待 0.2 分钟，到 2026-11-06 12:04:15 UTC 再提交
+…还差 0.1 分钟
+🎯 POST /api/client/dezerx/server-create/<uuid>/renew
+📡 HTTP 400 DisplayException: This server cannot be renewed yet.
+⏳ 服务端说还太早；不计入 last_click_at      ← 不会污染状态
+```
+
 ## 节奏
 
 `QI_INTERVAL_DAYS=2`：距上次 **成功**（200）续期满 2 天才提交下一次。

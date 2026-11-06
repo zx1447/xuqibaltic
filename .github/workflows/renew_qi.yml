@@ -1,18 +1,17 @@
 name: Q-Fi Cloud Renew
 
-# Q-Fi Cloud（gp.qficloud.com，Pterodactyl + Dezerx 主题）免费服务器续期
+# Q-Fi Cloud（gp.qficloud.com，Pterodactyl + Dezerx）免费服务器续期
 #
-# 端点：POST /api/client/dezerx/server-create/<UUID>/renew
-# 认证：Authorization: Bearer <ptlc_...>（在站点 /account/api 页面创建）
-#
-# 节奏（重要）：
-#   服务端规则 = 7 天一个周期，续期窗口在到期前 48 小时内开放（graceHours 24，purge 5 天）。
-#   所以 cron 每 6 小时检查一次「窗口开没开」，窗口一开立刻续；
-#   脚本内部再用 QI_INTERVAL_DAYS=2 兜一层，防止短周期内重复点。
-#   只看时间盲点会错过窗口 —— 现在以服务端返回的 renewable 为准。
+# 节奏：服务端规则是「7 天一个周期，窗口在 renewAt 起 48 小时内」。
+#       cron 只是"定期来看一眼"，真正决定何时提交的是脚本：
+#         1. GET .../renewal 读 renewAt / renewable
+#         2. 若窗口在本次可等范围内（QI_WAIT_MAX_MIN，默认 330 分钟）
+#            → 直接 sleep 到 renewAt + slack 再 POST，做到分钟级精准
+#         3. 若窗口还很远 → 只报告，交给后面的 cron 接力（每 6 小时一次）
+#         4. 等待期间每 5 分钟复查，服务端提前开窗就立刻续
 #
 # 需要的 secret
-#   QI_API_KEY   Pterodactyl Client API key（ptlc_ 开头）
+#   QI_API_KEY   Pterodactyl Client API key（ptlc_ 开头，站点 /account/api 创建）
 
 on:
   schedule:
@@ -20,29 +19,33 @@ on:
   workflow_dispatch:
     inputs:
       force:
-        description: "无视 2 天间隔立即续"
+        description: "无视窗口立即续（会吃 400，仅调试）"
         required: false
         default: "false"
       dry_run:
         description: "只看状态不提交"
         required: false
         default: "false"
-      interval_days:
-        description: "最小间隔天数（默认 2，防重复点）"
+      wait:
+        description: "精准等待到点再续（默认 true）"
         required: false
-        default: "2"
+        default: "true"
+      wait_max_min:
+        description: "本次最多等多少分钟（默认 330）"
+        required: false
+        default: "330"
 
 permissions:
   contents: write
 
 concurrency:
   group: qi-renew
-  cancel-in-progress: true
+  cancel-in-progress: false     # 精准等待期间不要被下一次定时抢掉
 
 jobs:
   renew:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 350
     steps:
       - uses: actions/checkout@v4
         with:
@@ -52,12 +55,14 @@ jobs:
         with:
           node-version: "20"
 
-      - name: 续期
+      - name: 续期（会睡到窗口开启）
         env:
           QI_API_KEY: ${{ secrets.QI_API_KEY }}
-          QI_INTERVAL_DAYS: ${{ inputs.interval_days || '2' }}
+          QI_WAIT: ${{ inputs.wait == 'false' && '0' || '1' }}
+          QI_WAIT_MAX_MIN: ${{ inputs.wait_max_min || '330' }}
           QI_FORCE: ${{ inputs.force == 'true' && '1' || '0' }}
           QI_DRY_RUN: ${{ inputs.dry_run == 'true' && '1' || '0' }}
+          QI_INTERVAL_DAYS: "2"
         run: node renew_qi.js
 
       - name: 提交状态
