@@ -1,20 +1,42 @@
 {
   "email": "450144yy@gmail.com",
   "finished_reason": "time",
-  "last_error": "HTTPSConnectionPool(host='hub.vertos.in', port=443): Max retries exceeded with url: /api/afk/heartbeat (Caused by ConnectTimeoutError(<HTTPSConnection(host='hub.vertos.in', port=443) at 0x7f006564a390>, 'Connection to hub.vertos.in timed out. (connect timeout=30)'))",
-  "last_status": "finished",
-  "lifetime_credits": 180,
-  "lifetime_seconds": 297755,
-  "restarts": 3,
+  "last_error": "start rejected: DATACENTER_NETWORK: AFK Earning is not supported on cloud, hosting, or datacenter networks. Please connect from a personal residential or mobile connection.",
+  "last_status": "auth_failed",
+  "lifetime_credits": 187,
+  "lifetime_seconds": 317674,
+  "pending_session": {
+    "expiresAt": "2026-11-05 22:33:19",
+    "prev": {
+      "expiresAt": "2026-11-05 21:34:17",
+      "prev": {
+        "expiresAt": "2026-11-05 20:49:23",
+        "prev": null,
+        "saved_at": "2026-11-06 04:47:54",
+        "sessionId": "a41c0a13-1b4a-47ed-98cf-4f92895b2cb5",
+        "sessionToken": "6404b81562ab808b2ec8a7bac18fcc7e1e25f743e24204abb7a6b74f7afce5e3",
+        "startedAt": "2026-11-05 20:47:53"
+      },
+      "saved_at": "2026-11-06 05:32:47",
+      "sessionId": "ba79f95b-fd1b-42dd-8472-9be2074234d5",
+      "sessionToken": "e79da235c10f7ec942a3ffae822380d3e82972a63b58922e8fdcea87f5f2a2e0",
+      "startedAt": "2026-11-05 21:32:47"
+    },
+    "saved_at": "2026-11-06 06:31:49",
+    "sessionId": "4c488164-db2e-4811-b06e-945b30798f67",
+    "sessionToken": "6872b029d183d0c62aacbc921632a4e7dda26aa48fe84357ad5a8dbbdbec3452",
+    "startedAt": "2026-11-05 22:31:49"
+  },
+  "restarts": 1,
   "seconds_to_next_credit": null,
-  "session_id": "8ec16617-41c3-4225-af3a-e8d476f89e30",
-  "session_seconds": 21272,
-  "today_credits": 25,
-  "today_earned": 62.15,
-  "today_seconds": 74609,
-  "total_beats": 9839,
-  "updated_at": "2026-11-06 04:46:55",
+  "session_id": "4c488164-db2e-4811-b06e-945b30798f67",
+  "session_seconds": 13895,
+  "today_credits": 3,
+  "today_earned": 2.86,
+  "today_seconds": 8628,
+  "total_beats": 10499,
+  "updated_at": "2026-11-06 10:24:00",
   "user_id": 20,
   "username": "nice",
-  "wallet_balance": 80.0
+  "wallet_balance": 1.0
 }
