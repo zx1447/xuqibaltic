@@ -36,8 +36,8 @@ async function whoami() {
     log(`❌ 会话无效 HTTP ${status} · ${body && (body.error_code || body.message) || ''}`);
     return null;
   }
-  const u = body?.user || body?.data || body?.session || body;
-  log(`✅ 会话有效 · 用户 ${u?.username ?? u?.user?.username ?? '?'} · 余额 ${u?.coins ?? u?.user?.coins ?? '?'}`);
+  const u = body?.user_info || body?.user || body?.data || body;
+  log(`✅ 会话有效 · ${u?.username ?? '?'} · 余额 ${u?.credits ?? u?.coins ?? '?'} · 累计挂机 ${u?.minutes_afk ?? '?'} 分`);
   return u;
 }
 
@@ -50,9 +50,12 @@ async function beat(minute) {
     body: JSON.stringify({ coins_earned: coins, minutes_afk: 1 }),
   });
   const ok = status === 200 && (body?.success !== false);
-  log(`${ok ? '💓' : '⚠️'} 第 ${minute} 分钟 · HTTP ${status} · coins_earned=${coins}` +
-      (ok ? '' : ` · ${body?.error_code || body?.message || ''}`));
-  return { ok, coins };
+  const awarded = Number(body?.coins_awarded ?? 0);
+  const total = body?.total_coins ?? '?';
+  const afk = body?.total_afk_time ?? '?';
+  log(`${ok ? '💓' : '⚠️'} 第 ${minute} 分钟 · HTTP ${status} · 上报 ${coins} 实得 ${awarded}` +
+      (ok ? ` · 余额 ${total} · 累计挂机 ${afk} 分` : ` · ${body?.error_code || body?.message || ''}`));
+  return { ok, coins: awarded };
 }
 
 (async () => {
