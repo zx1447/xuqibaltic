@@ -1,0 +1,59 @@
+name: Hostrix Renew
+
+# 每 30 分钟检查一次：面板给 +24h，冷却 11h，因此每 12 小时必然能成功一次。
+# 高频轮询的作用是让 cookie 一直被滚动续期（服务端每次响应都回写 session）。
+on:
+  schedule:
+    - cron: '13,43 * * * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: '无视冷却直接点（调试用）'
+        required: false
+        default: ''
+
+concurrency:
+  group: hostrix-renew
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  renew:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: hostrix
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 续期 / 检查冷却
+        id: renew
+        env:
+          HOSTRIX_COOKIE: ${{ secrets.HOSTRIX_COOKIE }}
+          HOSTRIX_SERVER: cd86ccde4e34
+          HR_FORCE: ${{ github.event.inputs.force }}
+        run: python renew_hostrix.py
+
+      - name: 写回滚动后的 cookie
+        if: always() && steps.renew.outputs.cookie != ''
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+          NEW_COOKIE: ${{ steps.renew.outputs.cookie }}
+        run: |
+          printf '%s' "$NEW_COOKIE" | gh secret set HOSTRIX_COOKIE --repo "$GITHUB_REPOSITORY"
+          echo "✅ HOSTRIX_COOKIE 已更新（${#NEW_COOKIE} 字节）"
+
+      - name: 提交状态
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add hostrix_state.json || true
+          git diff --cached --quiet && echo "无状态变化" && exit 0
+          git commit -m "Update Hostrix state [skip ci]"
+          git push origin HEAD:hostrix
