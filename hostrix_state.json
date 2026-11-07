@@ -1,9 +1,9 @@
 {
-  "hours_left": 46,
+  "hours_left": 39,
   "cooldown_h": 11.0,
   "last_check": "2026-11-07T07:05:00Z",
   "last_action": "wait_next_tick",
   "last_error": null,
-  "next_allowed_epoch": 1794074954,
-  "last_check_epoch": 1794035354
+  "next_allowed_epoch": 1794075258,
+  "last_check_epoch": 1794060858
 }
