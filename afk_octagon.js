@@ -63,7 +63,7 @@ async function beat(minute) {
     log('❌ 缺少 OCTAGON_COOKIE（格式：name=value）— 需要先在浏览器登录后导出 cookie');
     process.exit(2);
   }
-  log(`目标 ${BASE} · 本轮 ${MINUTES} 分钟 · 每 ${PER_COIN} 分钟 1 币`);
+  log(`目标 ${BASE} · 本轮 ${MINUTES} 分钟 · 60 秒一次心跳（服务端每次实发 3 credits）`);
   const u = DRY ? {} : await whoami();
   if (!DRY && !u) process.exit(3);
   if (!DRY) await sleep(2000);
