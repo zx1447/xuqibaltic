@@ -1,0 +1,43 @@
+name: Octagon Turnstile Probe
+
+# 只做一件事：测试 GitHub runner 的出口 IP + headless/headed 能否通过 Turnstile。
+# 不登录、不提交任何凭据、不刷挂机。
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: octagon
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: 安装依赖
+        run: |
+          npm init -y >/dev/null 2>&1
+          npm install playwright-core --no-audit --no-fund
+          npx playwright install --with-deps chromium
+
+      - name: 本机出口 IP
+        run: curl -s https://api.ipify.org; echo
+
+      - name: headless 探测
+        run: xvfb-run -a node probe_gha.js || true
+
+      - name: 上传截图
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: turnstile-shots
+          path: turnstile-*.png
+          if-no-files-found: ignore
+          retention-days: 3
