@@ -1,14 +1,16 @@
 name: Hostrix Renew
 
-# 每 30 分钟检查一次：面板给 +24h，冷却 11h，因此每 12 小时必然能成功一次。
-# 高频轮询的作用是让 cookie 一直被滚动续期（服务端每次响应都回写 session）。
+# 账号密码登录 + 精准定时续期
+#  · 面板给 +24h / 次，冷却 11h
+#  · cron 每 20 分钟巡检；页面显示可点时立即点
+#  · 若已知精确边界（上次点击 + 11h）且落在等待窗口内，直接 sleep 到秒级边界再点
 on:
   schedule:
-    - cron: '13,43 * * * *'
+    - cron: '3,23,43 * * * *'
   workflow_dispatch:
     inputs:
       force:
-        description: '无视冷却直接点（调试用）'
+        description: '无视冷却强行点击（仅调试）'
         required: false
         default: ''
 
@@ -22,7 +24,7 @@ permissions:
 jobs:
   renew:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
         with:
@@ -31,22 +33,23 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: 续期 / 检查冷却
+      - name: 登录并续期
         id: renew
         env:
-          HOSTRIX_COOKIE: ${{ secrets.HOSTRIX_COOKIE }}
+          HOSTRIX_USER: ${{ secrets.HOSTRIX_USER }}
+          HOSTRIX_PASS: ${{ secrets.HOSTRIX_PASS }}
           HOSTRIX_SERVER: cd86ccde4e34
+          HR_WAIT_MAX: '1100'
           HR_FORCE: ${{ github.event.inputs.force }}
         run: python renew_hostrix.py
 
-      - name: 写回滚动后的 cookie
-        if: always() && steps.renew.outputs.cookie != ''
-        env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}
-          NEW_COOKIE: ${{ steps.renew.outputs.cookie }}
+      - name: 汇总
+        if: always()
         run: |
-          printf '%s' "$NEW_COOKIE" | gh secret set HOSTRIX_COOKIE --repo "$GITHUB_REPOSITORY"
-          echo "✅ HOSTRIX_COOKIE 已更新（${#NEW_COOKIE} 字节）"
+          echo "状态：${{ steps.renew.outputs.status }}"
+          echo "剩余：${{ steps.renew.outputs.hours_left }}h"
+          echo "下次可点：${{ steps.renew.outputs.next_allowed }}"
+          echo "动作：${{ steps.renew.outputs.action }}"
 
       - name: 提交状态
         if: always()
