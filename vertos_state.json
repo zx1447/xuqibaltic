@@ -1,7 +1,7 @@
 {
   "email": "450144yy@gmail.com",
   "finished_reason": "time",
-  "last_error": "start rejected: PROXY_DETECTED: Proxy connections are not supported for AFK Earning. Please connect directly via your residential or mobile network.",
+  "last_error": "start rejected: DATACENTER_NETWORK: AFK Earning is not supported on cloud, hosting, or datacenter networks. Please connect from a personal residential or mobile connection.",
   "last_status": "auth_failed",
   "lifetime_credits": 187,
   "lifetime_seconds": 317674,
@@ -35,7 +35,7 @@
   "today_earned": 2.86,
   "today_seconds": 8628,
   "total_beats": 10499,
-  "updated_at": "2026-11-07 14:12:29",
+  "updated_at": "2026-11-07 21:17:07",
   "user_id": 20,
   "username": "nice",
   "wallet_balance": 1.0
