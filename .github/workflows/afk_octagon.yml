@@ -1,15 +1,15 @@
-name: Octagon Circle AFK
+name: Octagon AFK
 
+# 每 20 分钟一轮，跑 15 分钟 → 留 5 分钟余量，保证 30 分钟的会话窗口永不失效
 on:
   workflow_dispatch:
     inputs:
       minutes:
-        description: '本轮挂机分钟数（每 3 分钟 1 币）'
+        description: '本轮挂机分钟数'
         required: false
-        default: '30'
-  # 每 2 小时自动跑 30 分钟，一天累计约 6 小时 = 120 币
+        default: '15'
   schedule:
-    - cron: '17 */2 * * *'
+    - cron: '*/20 * * * *'
 
 concurrency:
   group: octagon-afk
@@ -21,14 +21,33 @@ permissions:
 jobs:
   afk:
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - name: 心跳挂机
+
+      - name: 心跳挂机（顺带续期 cookie）
+        id: afk
         env:
           OCTAGON_COOKIE: ${{ secrets.OCTAGON_COOKIE }}
-          AFK_MINUTES: ${{ github.event.inputs.minutes || '30' }}
+          AFK_MINUTES: ${{ github.event.inputs.minutes || '15' }}
         run: node afk_octagon.js
+
+      - name: 把续期后的 cookie 写回 secret
+        if: always() && steps.afk.outputs.cookie != ''
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+          NEW_COOKIE: ${{ steps.afk.outputs.cookie }}
+        run: |
+          printf '%s' "$NEW_COOKIE" | gh secret set OCTAGON_COOKIE --repo "$GITHUB_REPOSITORY"
+          echo "✅ secret OCTAGON_COOKIE 已更新（${#NEW_COOKIE} 字节）"
+
+      - name: 接力下一轮（cron 兜底）
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          gh workflow run afk_octagon.yml --repo "$GITHUB_REPOSITORY" --ref main || \
+            echo "⚠️ 接力 dispatch 失败，等待 cron 20 分钟内拉起"
