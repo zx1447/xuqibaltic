@@ -77,6 +77,9 @@ def server_page():
     cd = re.search(r'in\s*(\d+)h', info.get("btn_text", "") + " " + info.get("btn_title", ""))
     info["hours_left"] = int(ttl.group(1)) if ttl else None
     info["cooldown_h"] = int(cd.group(1)) if cd else 0
+    # 抓页面 flash（成功续期时 Flask 会渲染一条提示）
+    fl = re.findall(r'<(?:div|p|span)[^>]*class="[^"]*(?:flash|toast|alert|notice)[^"]*"[^>]*>(.*?)</(?:div|p|span)>', b, re.S)
+    info["flash"] = " | ".join(re.sub(r'<[^>]+>', '', x).strip() for x in fl if x.strip())[:200]
     return info, None
 
 def save_state(d):
@@ -126,8 +129,19 @@ if err2:
     sys.exit(4)
 
 before, after = info["hours_left"], info2["hours_left"]
-ok = after is not None and before is not None and after > before
-log(f"{'✅' if ok else '⚠️'} 剩余时长 {before}h → {after}h（{'成功 +%dh' % (after-before) if ok else '未变化'}）· 下次冷却 {info2['cooldown_h']}h")
+grew = after is not None and before is not None and after > before
+# 时长封顶时：数字不变，但冷却被重置成 11h（按钮重新变灰）→ 也算续期成功
+capped = (not grew) and after == before and info2.get("btn_disabled") and info2["cooldown_h"] >= 10
+ok = grew or capped
+if grew:
+    detail = f"成功 +{after - before}h"
+elif capped:
+    detail = f"已封顶（存量上限 ~{after}h），冷却已重置"
+else:
+    detail = "未变化"
+log(f"{'✅' if ok else '⚠️'} 剩余时长 {before}h → {after}h（{detail}）· 下次冷却 {info2['cooldown_h']}h")
+if info2.get("flash"):
+    log(f"💬 {info2['flash']}")
 save_state({"hours_left": after, "cooldown_h": info2["cooldown_h"],
             "last_check": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "last_action": "renew" if ok else "renew_nochange",
