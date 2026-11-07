@@ -1,0 +1,34 @@
+name: Octagon Circle AFK
+
+on:
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: '本轮挂机分钟数（每 3 分钟 1 币）'
+        required: false
+        default: '30'
+  # 每 2 小时自动跑 30 分钟，一天累计约 6 小时 = 120 币
+  schedule:
+    - cron: '17 */2 * * *'
+
+concurrency:
+  group: octagon-afk
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  afk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: 心跳挂机
+        env:
+          OCTAGON_COOKIE: ${{ secrets.OCTAGON_COOKIE }}
+          AFK_MINUTES: ${{ github.event.inputs.minutes || '30' }}
+        run: node afk_octagon.js
