@@ -1,0 +1,34 @@
+name: Gamesilo Wake
+
+# 定时唤醒 Gamesilo 免费服务器（无需登录、无需任何 secret）
+#
+# 用的是面板自己的公开唤醒入口（就是给朋友分享的 /s/nice 页面上那个"唤醒"按钮）：
+#   POST https://app.gamesilo.de/api/public/server/nice/wake
+#   · 服务器在跑 → {"status":"already-running"}，什么都不做
+#   · 服务器睡着/停了 → 直接拉起来
+#
+# 关键：走这个入口启动时不会施加 60 分钟运行预算（/runtime 的 runtimeExpiresAt 为 null），
+# 所以它能一直跑；什么时候被回收，下一次 tick 再拉起来。
+on:
+  schedule:
+    - cron: '4,14,24,34,44,54 * * * *'   # 每 10 分钟
+  workflow_dispatch:
+
+concurrency:
+  group: gamesilo-wake
+  cancel-in-progress: false
+
+jobs:
+  wake:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Wake
+        run: |
+          set -x
+          curl -s --max-time 25 -X POST \
+            -H 'User-Agent: gamesilo-wake/1.0' \
+            https://app.gamesilo.de/api/public/server/nice/wake
+          echo
+          curl -s --max-time 25 https://app.gamesilo.de/api/public/server/nice
+          echo
