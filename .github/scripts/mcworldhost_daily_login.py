@@ -1,6 +1,6 @@
-"""Claim MCWorldHost's daily login reward once per day.
+"""Claim the daily login reward and buy the 7-day runtime extension if affordable.
 
-This intentionally does not open the AFK page or load ad slots.
+This automation intentionally never opens the AFK page or loads ad slots.
 """
 import asyncio
 import os
@@ -11,6 +11,8 @@ import requests
 from playwright.async_api import async_playwright
 
 BASE = "https://mcworldhost.de"
+RUNTIME_OFFER = "7 days extra runtime"
+RUNTIME_COST = 500
 
 
 def create_session(email: str, password: str) -> requests.Session | None:
@@ -50,7 +52,7 @@ async def main() -> int:
     async with async_playwright() as p:
         browser = await p.chromium.launch()
         context = await browser.new_context(locale="en-US")
-        # The daily claim does not need advertising resources; keep this job limited to sign-in.
+        # Account/shop actions do not need ad resources.
         await context.route("**/api/ad-slot**", lambda route: route.abort())
         await context.add_cookies([{
             "name": "__Secure-better-auth.session_token",
@@ -68,32 +70,58 @@ async def main() -> int:
             if "/login" in page.url:
                 print("Site did not accept the authenticated session.", file=sys.stderr)
                 return 1
-            stage = "find-daily"
+            stage = "daily-claim"
             await page.get_by_text(re.compile(r"Daily login", re.I)).first.wait_for(timeout=20000)
             body = (await page.locator("body").inner_text()).lower()
             if "claimed today" in body:
-                print("Daily login was already claimed today; no action needed.")
+                print("Daily login already claimed today.")
+            else:
+                claim = page.get_by_role("button", name=re.compile(r"daily\s*\(\+|täglich", re.I)).first
+                await claim.wait_for(timeout=10000)
+                if await claim.is_enabled():
+                    await claim.click()
+                    await page.wait_for_function(
+                        "() => document.body.innerText.toLowerCase().includes('claimed today')",
+                        timeout=20000,
+                    )
+                    print("Daily login reward claimed.")
+                else:
+                    print("Daily login is unavailable; continuing to check the shop.")
+
+            stage = "check-runtime-offer"
+            await page.goto(f"{BASE}/dashboard/shop", wait_until="domcontentloaded")
+            await page.locator("article.ds-offer").first.wait_for(timeout=20000)
+            balance_text = await page.locator(".ds-wallet__value").first.inner_text()
+            balance = int(re.sub(r"[^0-9]", "", balance_text) or "0")
+            if balance < RUNTIME_COST:
+                print(f"Runtime extension not purchased: {balance}/{RUNTIME_COST} Coins.")
                 return 0
 
-            stage = "find-claim-button"
-            claim = page.get_by_role("button", name=re.compile(r"daily\s*\(\+|täglich", re.I)).first
-            await claim.wait_for(timeout=10000)
-            if not await claim.is_enabled():
-                print("Daily claim is not available (possibly already claimed). No action taken.")
-                return 0
-
-            stage = "click-claim"
-            await claim.click()
-            stage = "verify-claim"
-            await page.wait_for_function(
-                "() => document.body.innerText.toLowerCase().includes('claimed today')",
-                timeout=20000,
+            offer = page.locator("article.ds-offer").filter(
+                has=page.get_by_role("heading", name=re.compile(r"^7 days extra runtime$", re.I))
             )
-            print("Daily login reward claimed successfully.")
+            if await offer.count() != 1:
+                print("Could not uniquely identify the 7-day runtime offer; no purchase made.", file=sys.stderr)
+                return 1
+            buy_button = offer.get_by_role("button")
+            if await buy_button.is_disabled():
+                print("500 Coins available, but the 7-day offer is locked/active; no purchase made.")
+                return 0
+            if (await buy_button.inner_text()).strip().lower() != "buy":
+                print("Offer is not in a purchasable state; no purchase made.")
+                return 0
+
+            stage = "purchase-runtime-extension"
+            await buy_button.click()
+            await page.wait_for_function(
+                "() => document.body.innerText.includes('Purchase successful')",
+                timeout=25000,
+            )
+            print("Purchased the 7-day runtime extension for 500 Coins.")
             return 0
         except Exception as exc:
             # Do not print page contents or credentials into Actions logs.
-            print(f"Daily login automation failed at {stage}: {type(exc).__name__}", file=sys.stderr)
+            print(f"MCWorldHost automation failed at {stage}: {type(exc).__name__}", file=sys.stderr)
             return 1
         finally:
             await browser.close()

@@ -1,8 +1,8 @@
-name: MCWorldHost Daily Login
+name: MCWorldHost Coins & Runtime Extension
 
 on:
   schedule:
-    - cron: '15 1 * * *' # Daily at 01:15 UTC
+    - cron: '13 * * * *' # Hourly check: claim daily reward, then extend runtime if enough Coins
   workflow_dispatch:
 
 permissions:
