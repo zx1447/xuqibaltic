@@ -1,0 +1,59 @@
+name: Gamesilo Keepalive
+
+# 免费档每次启动只有 60 分钟运行预算，到期服务器直接停。
+# POST /orders/{id}/power {"signal":"restart"} 会把预算重置回 60 分钟，且不需要验证码
+# （官方的"Verlängern"续期接口要过 Cloudflare Turnstile，无法自动化）。
+# 本 workflow 每 15 分钟看一次余量，≤20 分钟就 restart，永远撞不到 0。
+on:
+  schedule:
+    - cron: '8,23,38,53 * * * *'
+  workflow_dispatch:
+    inputs:
+      min_remaining:
+        description: '余量低于多少分钟就重启（默认 20）'
+        required: false
+        default: '20'
+
+concurrency:
+  group: gamesilo-keepalive
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: gamesilo
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 检查并保活
+        id: ka
+        env:
+          GAMESILO_USER: ${{ secrets.GAMESILO_USER }}
+          GAMESILO_PASS: ${{ secrets.GAMESILO_PASS }}
+          GS_MIN_REMAINING: ${{ github.event.inputs.min_remaining || '20' }}
+        run: python keepalive_gamesilo.py
+
+      - name: 汇总
+        if: always()
+        run: |
+          echo "动作：${{ steps.ka.outputs.action }}"
+          echo "执行了 ${{ steps.ka.outputs.acted }} 个操作"
+          echo "剩余预算：${{ steps.ka.outputs.minutes_left }} 分钟"
+
+      - name: 提交状态
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add gamesilo_state.json || true
+          git diff --cached --quiet && echo "无状态变化" && exit 0
+          git commit -m "Update Gamesilo state [skip ci]"
+          git push origin HEAD:gamesilo
