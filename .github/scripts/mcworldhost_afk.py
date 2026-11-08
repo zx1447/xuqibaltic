@@ -86,8 +86,10 @@ def flight_payloads(text: str) -> list[dict]:
 
 def resolve_action_ids(session: requests.Session) -> tuple[str, str] | None:
     """Fetch the AFK page and its route chunk to find the current action IDs."""
-    html = session.get(f"{BASE}{AFK_PAGE}", timeout=25).text
-    if "/login" in session.current_url or 'name="next-url" value="/login' in html:
+    resp = session.get(f"{BASE}{AFK_PAGE}", timeout=25)
+    html = resp.text
+    if "/login" in resp.url or "Sign in" in html[:4000]:
+        log("session rejected by the site (login redirect).")
         return None
     match = CHUNK_RE.search(html)
     if not match:
