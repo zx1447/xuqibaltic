@@ -196,7 +196,7 @@ def start_xray():
     binary = find_xray()
     if not binary:
         die("找不到 xray 可执行文件（workflow 会先装好；本地测试请 XRAY_BIN=/path/to/xray）")
-    log(f"🔗 VLESS 节点: {node['name']} -> {node['host']}:{node['port']} (sni={node['sni']})")
+    log(f"🔗 VLESS 节点: {node['name']} -> {mask_host(node['host'])}:{node['port']} (sni={mask_host(node['sni'])})")
     proc = subprocess.Popen(
         [binary, "run", "-c", XRAY_CFG],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -224,7 +224,7 @@ def check_exit_ip():
                              proxies=PROXIES, timeout=20)
             fields = dict(line.split("=", 1) for line in r.text.splitlines() if "=" in line)
             ip, loc = fields.get("ip", "?"), fields.get("loc", "?")
-            log(f"🌍 节点出口 IP: {ip} ({loc})  warp={fields.get('warp', '?')}")
+            log(f"🌍 节点出口 IP: {mask_ip(ip)} ({loc})  warp={fields.get('warp', '?')}")
             return ip
         except Exception as exc:
             log(f"⚠️ 出口检查第 {attempt + 1} 次失败: {type(exc).__name__}")
@@ -379,19 +379,19 @@ def get_login_cookie():
     if saved:
         me = api_me(saved)
         if me:
-            log(f"♻️ 复用保存的登录态（用户 {me.get('username')}）")
+            log(f"♻️ 复用保存的登录态（用户 {mask(me.get('username', ''))}）")
             return saved, me
         log("⚠️ 保存的登录态已失效，改走 Discord OAuth")
     if STATIC_COOKIE:
         me = api_me(STATIC_COOKIE)
         if me:
-            log(f"🍪 使用注入的静态 cookie（用户 {me.get('username')}）")
+            log(f"🍪 使用注入的静态 cookie（用户 {mask(me.get('username', ''))}）")
             return STATIC_COOKIE, me
     cookie = oauth_login()
     if cookie:
         me = api_me(cookie)
         if me:
-            log(f"✅ OAuth 登录成功（用户 {me.get('username')}）")
+            log(f"✅ OAuth 登录成功（用户 {mask(me.get('username', ''))}）")
             return cookie, me
     die("没有可用的登录方式（Discord token / cookie 全部失败）")
 
@@ -524,7 +524,12 @@ def browser_renew(cookie):
         time.sleep(6)
 
         setup = json.loads(driver.execute_async_script(JS_SETUP_WIDGET, 45))
-        log(f"    widget setup: {json.dumps(setup, ensure_ascii=False)[:200]}")
+        slog = dict(setup)
+        if slog.get("username"):
+            slog["username"] = mask(slog["username"])
+        if slog.get("sitekey"):
+            slog["sitekey"] = str(slog["sitekey"])[:8] + "***"
+        log(f"    widget setup: {json.dumps(slog, ensure_ascii=False)[:200]}")
         if not setup.get("rendered"):
             return False, f"Turnstile 渲染失败: {setup.get('error', '未知')}"
 
@@ -586,6 +591,20 @@ def mask(s):
     if len(s) <= 8:
         return s[:2] + "****"
     return s[:6] + "****" + s[-4:]
+
+
+def mask_ip(ip):
+    """日志脱敏：只保留前两段，防止家宽 IP 出现在公开 Actions 日志里。"""
+    parts = (ip or "").split(".")
+    return ".".join(parts[:2]) + ".x.x" if len(parts) == 4 else "***"
+
+
+def mask_host(host):
+    """日志脱敏：隧道域名只留首 4 字符 + 后两段。"""
+    parts = (host or "").split(".")
+    if len(parts) >= 3:
+        return parts[0][:4] + "***." + ".".join(parts[-2:])
+    return "***"
 
 
 def main():
