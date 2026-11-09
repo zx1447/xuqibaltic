@@ -25,7 +25,7 @@
 
 需要的环境变量（GitHub secrets）：
   MWS_DISCORD_TOKEN  Discord 用户 token（登录用，推荐）
-  MWS_VLESS_URL      可选，覆盖内置 VLESS 节点（trycloudflare 隧道换域名后更新它）
+  MWS_VLESS_URL      可选，vless:// 直链或 http(s) 订阅链接（推荐订阅，节点变更自动跟随）
   MWS_BOT_ID         可选，默认 60
   MWS_SESSION_KEY    可选，Fernet key；不配则不持久化登录态
   MWS_COOKIE         可选，直接注入的登录 cookie 值（备用）
@@ -67,7 +67,11 @@ def _d(s):
     return base64.b64decode(s.encode()).decode()
 
 DEFAULT_VLESS_URL = _d(
-    "dmxlc3M6Ly82Yjg5Yzk0Mi1hNGU4LTQxZDgtYjdkYS0xMTFmMzRjZGZlMzFAcnNzLWVtcGxveW1lbnQtcm9nZXItcHJvc3BlY3RpdmUudHJ5Y2xvdWRmbGFyZS5jb206NDQzP2VuY3J5cHRpb249bm9uZSZzZWN1cml0eT10bHMmc25pPXJzcy1lbXBsb3ltZW50LXJvZ2VyLXByb3NwZWN0aXZlLnRyeWNsb3VkZmxhcmUuY29tJmZwPWNocm9tZSZ0eXBlPXdzJnBhdGg9JTJGc3RhdGljJTJGYXNzZXRzJTJGMmQ0M2YwMDk2ODg4LmpzI0NGLVZMRVNTJTIwbGV2"
+    "aHR0cDovLzgzLjE2OC45NC4yMzc6MzAyMDAvYXBpL3Byb3h5L3N1YnNjcmlwdGlvbi9mNGYzMDNiNTJiOWMyN2M1YmUzZjE0MTMzYjAxYjcyZWQ4YjQ2ZjY3M2JiMzFmNzcxZGEwZTg1NzczNWNkM2U0"
+)
+# 兑底节点：订阅拉取失败时使用（与订阅内当前节点一致；站方换节点后记得同步更新这里）
+FALLBACK_VLESS_URL = _d(
+    "dmxlc3M6Ly81Y2ViNDFiYS1hNjQ3LTQ2ZjctOGM1MC04MjRlYTUyOTQxYTNAcmFwaWQtb3BlcmF0aW5nLWdyZWF0ZXItdGVybXMudHJ5Y2xvdWRmbGFyZS5jb206NDQzP3R5cGU9d3Mmc2VjdXJpdHk9dGxzJnBhdGg9JTJGc3RhdGljJTJGYXNzZXRzJTJGYzEwZGRkNTA2NTQ3LmpzJnNuaT1yYXBpZC1vcGVyYXRpbmctZ3JlYXRlci10ZXJtcy50cnljbG91ZGZsYXJlLmNvbSZmcD1jaHJvbWUjQW95b3UtUHJveHktVkxFU1M="
 )
 FRONT = os.environ.get("MWS_FRONT", _d("aHR0cHM6Ly9jbG91ZC5tLXdzLmNj")).rstrip("/")
 API = f"{FRONT}/api"
@@ -161,8 +165,48 @@ def find_xray():
     return None
 
 
+def resolve_vless_url():
+    """MWS_VLESS_URL 支持两种形态：vless:// 节点直链，或 http(s) 订阅链接。
+    订阅在每次运行时拉取（base64 节点列表，带重试），站方换节点自动跟随；
+    订阅暂时拉不到时退回内置兑底节点，不影响当次续期。"""
+    url = VLESS_URL
+    if url.startswith("vless://"):
+        return url
+    if url.startswith(("http://", "https://")):
+        raw = None
+        for attempt in range(4):
+            log(f"📡 拉取订阅 (第 {attempt + 1}/4 次) ...")
+            try:
+                r = requests.get(url, timeout=25,
+                                 headers={"User-Agent": "clash-verge/1.6.6"})
+                if r.status_code == 200 and r.text.strip():
+                    raw = r.text.strip()
+                    break
+                log(f"⚠️ 订阅响应异常: HTTP {r.status_code}")
+            except Exception as exc:
+                log(f"⚠️ 订阅拉取失败: {type(exc).__name__}")
+            time.sleep(5)
+        if raw is None:
+            log("⚠️ 订阅连续拉取失败，退回内置兑底节点")
+            return FALLBACK_VLESS_URL
+        cand = raw.replace("-", "+").replace("_", "/")
+        cand += "=" * (-len(cand) % 4)
+        try:
+            text = base64.b64decode(cand).decode("utf-8")
+        except Exception:
+            text = raw  # 有些订阅直接吐明文节点列表
+        nodes = [ln.strip() for ln in text.splitlines()
+                 if ln.strip().startswith("vless://")]
+        if not nodes:
+            log("⚠️ 订阅里没有 vless:// 节点，退回内置兑底节点")
+            return FALLBACK_VLESS_URL
+        log(f"📡 订阅解析成功：{len(nodes)} 条 vless 节点，选用第 1 条")
+        return nodes[0]
+    die("MWS_VLESS_URL 不是 vless:// 直链也不是 http(s) 订阅链接")
+
+
 def start_xray():
-    node = parse_vless(VLESS_URL)
+    node = parse_vless(resolve_vless_url())
     cfg = {
         "log": {"loglevel": "warning"},
         "inbounds": [{
@@ -229,8 +273,7 @@ def check_exit_ip():
         except Exception as exc:
             log(f"⚠️ 出口检查第 {attempt + 1} 次失败: {type(exc).__name__}")
             time.sleep(3)
-    die("VLESS 节点不通 —— trycloudflare 隧道可能已更换域名，"
-        "请更新 MWS_VLESS_URL 后手动触发 workflow")
+    die("VLESS 节点不通 —— 订阅指向的隧道可能已下线，请检查家里隧道服务与订阅接口")
 
 
 # ---------------------------------------------------------------- 登录态
