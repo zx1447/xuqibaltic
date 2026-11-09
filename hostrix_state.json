@@ -1,11 +1,11 @@
 {
-  "hours_left": 36,
+  "hours_left": 47,
   "cooldown_h": 11.0,
   "last_check": "2026-11-07T07:05:00Z",
-  "last_action": "probe_still_cooling",
+  "last_action": "renew",
   "last_error": null,
-  "next_allowed_epoch": 1794173033,
-  "last_check_epoch": 1794169433,
-  "last_click_epoch": 1794127998,
-  "last_success_epoch": 1794127998
+  "next_allowed_epoch": 1794222261,
+  "last_check_epoch": 1794182662,
+  "last_click_epoch": 1794182661,
+  "last_success_epoch": 1794182661
 }
