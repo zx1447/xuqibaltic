@@ -120,8 +120,10 @@ function finish(code) {
   const out = cookieHeader();
   if (OUT_FILE && out) {
     const fs = require('fs');
+    // GitHub Actions logs are public for this repository; mask the full rotating cookie before any later step uses it.
+    console.log(`::add-mask::${out}`);
     fs.appendFileSync(OUT_FILE, `cookie<<__EOF__\n${out}\n__EOF__\n`);
-    log(`📤 已导出续期后 cookie（${out.length} 字节）到 GITHUB_OUTPUT`);
+    log('📤 已导出续期后的 cookie 到 GITHUB_OUTPUT');
   }
   process.exit(code);
 }
