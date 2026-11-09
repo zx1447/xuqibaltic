@@ -1,6 +1,6 @@
 name: Octagon AFK
 
-# 每 20 分钟一轮，跑 15 分钟 → 留 5 分钟余量，保证 30 分钟的会话窗口永不失效
+# 每 20 分钟一轮，跑 15 分钟；响应中刷新滑动会话 cookie。
 on:
   workflow_dispatch:
     inputs:
@@ -42,10 +42,11 @@ jobs:
           NEW_COOKIE: ${{ steps.afk.outputs.cookie }}
         run: |
           printf '%s' "$NEW_COOKIE" | gh secret set OCTAGON_COOKIE --repo "$GITHUB_REPOSITORY"
-          echo "✅ secret OCTAGON_COOKIE 已更新（${#NEW_COOKIE} 字节）"
+          echo "✅ secret OCTAGON_COOKIE 已更新"
 
-      - name: 接力下一轮（cron 兜底）
-        if: always()
+      # Do not self-dispatch after an API error (e.g. AFK disabled); let the cron fallback retry later.
+      - name: 接力下一轮（成功时；cron 兜底）
+        if: steps.afk.outcome == 'success'
         env:
           GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
