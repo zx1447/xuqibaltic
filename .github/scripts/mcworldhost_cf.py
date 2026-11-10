@@ -90,10 +90,14 @@ def open_session(base: str = "https://mcworldhost.de", wait_seconds: int = 90):
 
 def sign_in(page, base: str, email: str, password: str, timeout: int = 45000) -> None:
     """Submit the login form; raises on failure. Never logs credentials."""
-    page.goto(f"{base}/login", wait_until="domcontentloaded")
-    for attempt in (1, 2):
-        if not _wait_login_form(page, 60):
+    if not _wait_login_form(page, 10):
+        # open_session already landed us on the login page in the normal case;
+        # re-navigating would just re-trigger the challenge, so only goto as a
+        # fallback when the form is not present at all.
+        page.goto(f"{base}/login", wait_until="domcontentloaded")
+        if not _wait_login_form(page, 90):
             raise RuntimeError("login form did not render (challenge stuck?)")
+    for attempt in (1, 2):
         page.get_by_role("textbox", name=re.compile(r"mail", re.I)).first.fill(email)
         page.get_by_role("textbox", name=re.compile(r"pass(wort)?", re.I)).first.fill(password)
         page.get_by_role("button", name=re.compile(r"sign\s*in|anmelden", re.I)).first.click()
@@ -109,4 +113,6 @@ def sign_in(page, base: str, email: str, password: str, timeout: int = 45000) ->
             if "invalid email" in body or "ungültig" in body:
                 raise RuntimeError("invalid credentials")
             # transient (challenge hold or click race) -> one more attempt
+            if not _wait_login_form(page, 60):
+                raise RuntimeError("login form did not render (challenge stuck?)")
     raise RuntimeError("login did not reach the dashboard after 2 attempts")
