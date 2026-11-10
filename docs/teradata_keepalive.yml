@@ -25,6 +25,7 @@ jobs:
   keepalive:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    environment: teradata   # secrets 全部放在 environment "teradata" 下（repo secrets 已满 100 上限）
     steps:
       - uses: actions/checkout@v4
         with:
