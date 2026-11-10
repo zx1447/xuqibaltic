@@ -70,11 +70,24 @@ def open_session(base: str = "https://mcworldhost.de", wait_seconds: int = 90):
     raise RuntimeError(f"Cloudflare challenge not cleared (last title={last_title!r}).")
 
 
-def sign_in(page, base: str, email: str, password: str, timeout: int = 35000) -> None:
+def sign_in(page, base: str, email: str, password: str, timeout: int = 45000) -> None:
     """Submit the login form; raises on failure. Never logs credentials."""
     page.goto(f"{base}/login", wait_until="domcontentloaded")
-    page.get_by_role("textbox", name=re.compile(r"mail", re.I)).first.wait_for(timeout=timeout)
-    page.get_by_role("textbox", name=re.compile(r"mail", re.I)).first.fill(email)
-    page.get_by_role("textbox", name=re.compile(r"pass(wort)?", re.I)).first.fill(password)
-    page.get_by_role("button", name=re.compile(r"sign\s*in|anmelden", re.I)).first.click()
-    page.wait_for_url("**/dashboard/**", timeout=timeout)
+    for attempt in (1, 2):
+        page.get_by_role("textbox", name=re.compile(r"mail", re.I)).first.wait_for(timeout=timeout)
+        page.get_by_role("textbox", name=re.compile(r"mail", re.I)).first.fill(email)
+        page.get_by_role("textbox", name=re.compile(r"pass(wort)?", re.I)).first.fill(password)
+        page.get_by_role("button", name=re.compile(r"sign\s*in|anmelden", re.I)).first.click()
+        try:
+            page.wait_for_url("**/dashboard/**", timeout=timeout)
+            return
+        except Exception:
+            body = ""
+            try:
+                body = page.locator("body").inner_text()[:2000].lower()
+            except Exception:
+                pass
+            if "invalid email" in body or "ungültig" in body:
+                raise RuntimeError("invalid credentials")
+            # transient (challenge hold or click race) -> one more attempt
+    raise RuntimeError("login did not reach the dashboard after 2 attempts")
