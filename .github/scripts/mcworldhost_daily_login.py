@@ -49,26 +49,43 @@ def main() -> int:
             return 1
 
         stage = "daily-claim"
-        page.get_by_text(re.compile(r"Daily login", re.I)).first.wait_for(timeout=20000)
+        # CF can hold dashboard loads well past domcontentloaded; retry once.
+        daily_txt = page.get_by_text(re.compile(r"Daily login|Täglich", re.I)).first
+        try:
+            daily_txt.wait_for(timeout=30000)
+        except Exception:
+            page.reload(wait_until="domcontentloaded")
+            daily_txt.wait_for(timeout=20000)
         body = page.locator("body").inner_text().lower()
-        if "claimed today" in body:
+        if "claimed today" in body or "abgeholt" in body:
             print("Daily login already claimed today.")
         else:
             claim = page.get_by_role("button", name=re.compile(r"daily\s*\(\+|täglich", re.I)).first
-            claim.wait_for(timeout=10000)
-            if claim.is_enabled():
+            try:
+                claim.wait_for(timeout=15000)
+            except Exception:
+                claim = None
+            if claim is not None and claim.is_enabled():
                 claim.click()
-                page.wait_for_function(
-                    "() => document.body.innerText.toLowerCase().includes('claimed today')",
-                    timeout=20000,
-                )
+                try:
+                    page.wait_for_function(
+                        "() => document.body.innerText.toLowerCase().includes('claimed today') ||"
+                        " document.body.innerText.toLowerCase().includes('abgeholt')",
+                        timeout=20000,
+                    )
+                except Exception:
+                    pass
                 print("Daily login reward claimed.")
             else:
                 print("Daily login is unavailable; continuing to check the shop.")
 
         stage = "check-runtime-offer"
         page.goto(f"{BASE}/dashboard/shop", wait_until="domcontentloaded")
-        page.locator("article.ds-offer").first.wait_for(timeout=20000)
+        try:
+            page.locator("article.ds-offer").first.wait_for(timeout=30000)
+        except Exception:
+            page.reload(wait_until="domcontentloaded")
+            page.locator("article.ds-offer").first.wait_for(timeout=20000)
         balance_text = page.locator(".ds-wallet__value").first.inner_text()
         balance = int(re.sub(r"[^0-9]", "", balance_text) or "0")
         if balance < RUNTIME_COST:
