@@ -1,11 +1,11 @@
 {
-  "hours_left": 33,
-  "cooldown_h": 11.0,
-  "last_check": "2026-11-07T07:05:00Z",
-  "last_action": "renew_nochange",
-  "last_error": "服务端拒绝：⏰ Added 48 hours. It has 3d 9h now. You can add more in 12 hours.",
-  "next_allowed_epoch": 1794299589,
-  "last_check_epoch": 1794298689,
-  "last_click_epoch": 1794245013,
-  "last_success_epoch": 1794245013
+  "hours_left": 81,
+  "cooldown_h": 12.0,
+  "last_check": "2026-11-10T08:18:09Z",
+  "last_action": "renew",
+  "last_error": null,
+  "last_click_epoch": 1794298689,
+  "last_success_epoch": 1794298689,
+  "next_allowed_epoch": 1794341889,
+  "last_check_epoch": 1794298689
 }

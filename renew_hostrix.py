@@ -81,6 +81,20 @@ SUCCESS_RE = re.compile(r"(?i)(added|renewed|extended|topped up|\+\s*24)")
 FAILURE_RE = re.compile(r"(?i)(can add more|can't add|already|too soon|cooldown|wait|not yet)")
 
 
+def hours_from_flash(text):
+    """Parse e.g. 'It has 3d 9h now' when the server-rendered timer is stale."""
+    m = re.search(r"(?i)it has\s+(?:(\d+)\s*d\s*)?(\d+)\s*h(?:\s*(\d+)\s*m)?\s+now", text or "")
+    if not m:
+        return None
+    return int(m.group(1) or 0) * 24 + int(m.group(2)) + (1 if int(m.group(3) or 0) else 0)
+
+
+def cooldown_from_flash(text, fallback_seconds):
+    """Use the cooldown explicitly reported by the service, if present."""
+    m = re.search(r"(?i)you can add more in\s*(\d+)\s*(hours?|h)\b", text or "")
+    return int(m.group(1)) * 3600 if m else fallback_seconds
+
+
 def flashes(html):
     """精确解析 Flask flash：<div class="flash error">…</div>；退回扫描 toast 容器"""
     hits = re.findall(r'<div[^>]*class="flash(?:\s+([a-z]+))?"[^>]*>(.*?)</div>', html, re.S)
@@ -211,11 +225,13 @@ def click(info):
         log(f"💬 服务端提示：{fl}")
     if grew:
         return True, f"+{after_h - before_h}h（{before_h}h → {after_h}h）· {fl}".strip(" ·")
-    # 时长没变 → 以服务端 flash 定性（实测冷却期是 "You can add more time in 11h."）
+    # 成功消息有时也会带下一次冷却提示，例如：
+    # “Added 48 hours. It has 3d 9h now. You can add more in 12 hours.”
+    # 成功关键词优先级必须高于后半句的 cooldown 文案。
+    if SUCCESS_RE.search(fl):
+        return True, f"服务端确认续期（页面 {before_h}h → {after_h}h）· {fl}"
     if FAILURE_RE.search(fl):
         return False, f"服务端拒绝：{fl}"
-    if SUCCESS_RE.search(fl):
-        return True, f"服务端确认续期（存量 {after_h}h 已封顶）· {fl}"
     return False, f"未确认（{before_h}h → {after_h}h，flash={fl or '空'}）"
 
 
@@ -298,14 +314,19 @@ ok, msg = click(info)
 now = int(time.time())
 if ok:
     after, _ = read_server()
+    flash_hours = hours_from_flash(msg)
+    page_hours = after["hours_left"] if after else None
+    # Prefer an increased page reading; if the page is stale, trust the success flash.
+    final_hours = page_hours if page_hours is not None and page_hours > (info["hours_left"] or 0) else (flash_hours if flash_hours is not None else page_hours)
+    actual_cooldown_s = cooldown_from_flash(msg, cooldown_s)
     log(f"✅ 续期成功：{msg}")
-    save_state(hours_left=after["hours_left"] if after else info["hours_left"],
-               last_click_epoch=now, next_allowed_epoch=now + cooldown_s,
-               cooldown_h=cooldown_s / 3600, last_action="renew",
+    save_state(hours_left=final_hours if final_hours is not None else info["hours_left"],
+               last_click_epoch=now, next_allowed_epoch=now + actual_cooldown_s,
+               cooldown_h=actual_cooldown_s / 3600, last_action="renew",
                last_success_epoch=now, last_error=None)
-    log(f"🎯 下一次可点：{cst(now + cooldown_s)}")
-    out(status="renewed", hours_left=after["hours_left"] if after else "",
-        next_allowed=now + cooldown_s, action="renew", detail=msg)
+    log(f"🎯 下一次可点：{cst(now + actual_cooldown_s)}（冷却 {actual_cooldown_s // 3600}h）")
+    out(status="renewed", hours_left=final_hours if final_hours is not None else "",
+        next_allowed=now + actual_cooldown_s, action="renew", detail=msg)
     sys.exit(0)
 else:
     log(f"⚠️ {msg}")
