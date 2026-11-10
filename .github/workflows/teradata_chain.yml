@@ -1,0 +1,32 @@
+name: Teradata Chain
+
+# GitHub 的 schedule 对新建 workflow 注册失效（2026-11-10 观察：8+ 小时 0 触发，
+# 同仓库老 workflow 正常）。本 workflow 不依赖调度器——workflow_run 是事件驱动，
+# 推送即注册：每当 MCWorldHost 两个每小时 workflow 任一完成（无论成败），
+# 就触发一次 Teradata 保活（唤醒/到期重建/探针核对，纯事件链，无本地依赖）。
+# teradata_keepalive.yml 里的 2h cron 保留；若某天恢复生效，concurrency 去重。
+
+on:
+  workflow_run:
+    workflows:
+      - "MCWorldHost Coins & Runtime Extension"
+      - "MCWorldHost AFK Coin Farming"
+    types: [completed]
+
+permissions:
+  actions: write
+
+concurrency:
+  group: teradata-keepalive-chain
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Teradata keepalive
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run teradata_keepalive.yml --ref main -R "$GITHUB_REPOSITORY"
+          echo "Teradata keepalive dispatched (chain)."
