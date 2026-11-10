@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>保活看门狗 · Keep-Alive Watchdog</title>
+<style>
+  :root{
+    --bg:#0d1117; --card:#161b22; --border:#30363d; --txt:#c9d1d9;
+    --dim:#8b949e; --ok:#3fb950; --warn:#d29922; --bad:#f85149; --accent:#58a6ff;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--txt);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Noto Sans SC",monospace;padding:16px;line-height:1.5}
+  .wrap{max-width:860px;margin:0 auto}
+  h1{font-size:20px;margin-bottom:4px}
+  .sub{color:var(--dim);font-size:12px;margin-bottom:16px}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:14px}
+  .card h2{font-size:14px;color:var(--accent);margin-bottom:10px}
+  label{display:block;font-size:12px;color:var(--dim);margin:8px 0 4px}
+  input[type=text],input[type=number]{width:100%;background:#0d1117;border:1px solid var(--border);border-radius:6px;color:var(--txt);padding:8px 10px;font-size:13px;font-family:inherit}
+  input:focus{outline:none;border-color:var(--accent)}
+  .row{display:flex;gap:10px;flex-wrap:wrap}
+  .row>div{flex:1;min-width:160px}
+  .btns{display:flex;gap:10px;margin-top:12px;flex-wrap:wrap}
+  button{background:#21262d;border:1px solid var(--border);color:var(--txt);padding:8px 16px;border-radius:6px;font-size:13px;cursor:pointer;font-family:inherit}
+  button.primary{background:#1f6feb;border-color:#1f6feb;color:#fff}
+  button.danger{background:#b62324;border-color:#b62324;color:#fff}
+  button:hover{filter:brightness(1.15)}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .checks{display:flex;gap:18px;margin-top:10px;flex-wrap:wrap;font-size:13px}
+  .checks label{display:flex;align-items:center;gap:6px;margin:0;color:var(--txt);font-size:13px}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px}
+  .stat{background:#0d1117;border:1px solid var(--border);border-radius:6px;padding:10px;text-align:center}
+  .stat .v{font-size:18px;font-weight:bold}
+  .stat .k{font-size:11px;color:var(--dim);margin-top:2px}
+  .badge{display:inline-block;padding:3px 12px;border-radius:99px;font-size:12px;font-weight:bold}
+  .b-run{background:#1a3a1f;color:var(--ok);border:1px solid var(--ok)}
+  .b-stop{background:#3a2a1a;color:var(--warn);border:1px solid var(--warn)}
+  #log{height:260px;overflow-y:auto;background:#0d1117;border:1px solid var(--border);border-radius:6px;padding:8px;font-size:12px}
+  #log div{padding:1px 0;white-space:pre-wrap;word-break:break-all}
+  .l-ok{color:var(--ok)} .l-bad{color:var(--bad)} .l-info{color:var(--dim)} .l-warn{color:var(--warn)}
+  .note{font-size:12px;color:var(--dim)}
+  .note b{color:var(--txt)}
+  iframe#kpframe{width:1px;height:1px;border:0;position:fixed;left:-9999px;top:-9999px}
+  .sameorigin{margin-top:8px;font-size:12px;color:var(--warn)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🛡️ 保活看门狗</h1>
+  <div class="sub">静态单文件 · 打开在本标签页内由 JS 定时访问目标，防止闲置休眠 · 配置自动保存</div>
+
+  <div class="card">
+    <h2>① 目标与节奏</h2>
+    <label>目标 URL（环境域名根地址，不带末尾斜杠）</label>
+    <input type="text" id="target" placeholder="https://web-xxxx.env.trial.teradata.com">
+    <div class="row">
+      <div>
+        <label>Ping 间隔（秒，建议 30–120）</label>
+        <input type="number" id="interval" value="60" min="10" max="3600">
+      </div>
+      <div>
+        <label>隐藏 iframe 刷新间隔（分钟，0=关闭）</label>
+        <input type="number" id="iframeMin" value="10" min="0" max="720">
+      </div>
+      <div>
+        <label>单次 Ping 超时（秒）</label>
+        <input type="number" id="timeout" value="15" min="3" max="120">
+      </div>
+    </div>
+    <div class="checks">
+      <label><input type="checkbox" id="usePing" checked> HTTP Ping（no-cors 请求）</label>
+      <label><input type="checkbox" id="useIframe"> 隐藏 iframe 加载（同源时带 cookie，保活效果最强）</label>
+    </div>
+    <div class="sameorigin" id="soTip" style="display:none">✅ 检测到页面与目标同源：ping 将携带登录 cookie 并读取 /api/status 真实状态。</div>
+    <div class="btns">
+      <button class="primary" id="btnStart">▶ 开始保活</button>
+      <button id="btnStop" disabled>⏸ 停止</button>
+      <button class="danger" id="btnClear">🗑 清空日志</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>② 状态 <span class="badge b-stop" id="badge">未运行</span></h2>
+    <div class="stats">
+      <div class="stat"><div class="v" id="stOk">0</div><div class="k">成功</div></div>
+      <div class="stat"><div class="v" id="stFail">0</div><div class="k">失败</div></div>
+      <div class="stat"><div class="v" id="stStreak">0</div><div class="k">连续失败</div></div>
+      <div class="stat"><div class="v" id="stLast">—</div><div class="k">上次成功</div></div>
+      <div class="stat"><div class="v" id="stUp">0s</div><div class="k">保活时长</div></div>
+      <div class="stat"><div class="v" id="stNext">—</div><div class="k">下次 Ping</div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>③ 日志</h2>
+    <div id="log"></div>
+  </div>
+
+  <div class="card">
+    <h2>④ 使用说明（重要）</h2>
+    <div class="note">
+      <b>1. 本页必须保持标签页打开</b>——静态页面由浏览器执行，标签页关了就没有人访问目标了。建议固定在一个单独窗口/标签。<br><br>
+      <b>2. 已休眠的环境无法被 ping 唤醒</b>——先登录 trial.teradata.com → Environments 手动启动环境，等 JupyterLab 可打开后，再开启本页防止它再次闲置休眠。<br><br>
+      <b>3. 两种用法：</b><br>
+      · <b>本地打开（本文件双击）</b>：匿名 no-cors ping，能制造持续入站流量；<br>
+      · <b>同源部署（推荐，真正的"自己访问自己"）</b>：把本文件放进 Teradata 容器，通过 <code>https://web-xxx.env.trial.teradata.com/files/keepalive.html</code> 打开——页面与目标同源，请求自动带上 Jupyter 登录 cookie，并在 /api/status 里读到真实内核状态，保活效果最强。<br><br>
+      <b>4. 状态判断：</b>失败=连接不通（环境大概率已休眠/停止）；成功=有 HTTP 响应（环境活着）。同源模式下会显示 /api/status 的 JSON 详情。
+    </div>
+  </div>
+</div>
+<iframe id="kpframe" title="keepalive-frame"></iframe>
+
+<script>
+(function(){
+  var $ = function(id){return document.getElementById(id)};
+  var targetEl=$('target'), intervalEl=$('interval'), iframeMinEl=$('iframeMin'), timeoutEl=$('timeout');
+  var usePingEl=$('usePing'), useIframeEl=$('useIframe');
+  var btnStart=$('btnStart'), btnStop=$('btnStop'), btnClear=$('btnClear');
+  var badge=$('badge'), logEl=$('log'), frame=$('kpframe'), soTip=$('soTip');
+  var stOk=$('stOk'), stFail=$('stFail'), stStreak=$('stStreak'), stLast=$('stLast'), stUp=$('stUp'), stNext=$('stNext');
+
+  var S = {
+    running:false, timer:null, iframeTimer:null, startedAt:0, nextAt:0,
+    ok:0, fail:0, streak:0, lastOk:null, logs:[]
+  };
+  var LS='keepalive_watchdog_v1';
+
+  function norm(u){ return (u||'').trim().replace(/\/+$/,''); }
+  function sameOrigin(){
+    var t=norm(targetEl.value); if(!t) return false;
+    try{ var a=new URL(t); return a.origin===location.origin; }catch(e){ return false; }
+  }
+  function save(){
+    try{ localStorage.setItem(LS, JSON.stringify({
+      cfg:{target:norm(targetEl.value),interval:intervalEl.value,iframeMin:iframeMinEl.value,timeout:timeoutEl.value,
+           usePing:usePingEl.checked,useIframe:useIframeEl.checked,auto:btnStop.disabled?false:true},
+      st:{ok:S.ok,fail:S.fail,streak:S.streak,lastOk:S.lastOk,logs:S.logs.slice(-100)}
+    })); }catch(e){}
+  }
+  function load(){
+    try{
+      var d=JSON.parse(localStorage.getItem(LS)||'null'); if(!d) return;
+      if(d.cfg){
+        if(d.cfg.target) targetEl.value=d.cfg.target;
+        if(d.cfg.interval) intervalEl.value=d.cfg.interval;
+        if(d.cfg.iframeMin!=null) iframeMinEl.value=d.cfg.iframeMin;
+        if(d.cfg.timeout) timeoutEl.value=d.cfg.timeout;
+        usePingEl.checked=d.cfg.usePing!==false;
+        useIframeEl.checked=!!d.cfg.useIframe;
+      }
+      if(d.st){
+        S.ok=d.st.ok||0; S.fail=d.st.fail||0; S.streak=d.st.streak||0; S.lastOk=d.st.lastOk||null;
+        S.logs=d.st.logs||[];
+        S.logs.forEach(function(l){ appendLog(l.t,l.m,l.c,true); });
+        updStats();
+      }
+    }catch(e){}
+  }
+  function ts(){ var d=new Date(); return d.toLocaleTimeString('zh-CN',{hour12:false}); }
+  function appendLog(t,m,c,noStore){
+    var div=document.createElement('div'); div.className='l-'+(c||'info'); div.textContent='['+t+'] '+m;
+    logEl.appendChild(div);
+    while(logEl.childNodes.length>300) logEl.removeChild(logEl.firstChild);
+    logEl.scrollTop=logEl.scrollHeight;
+    if(!noStore){ S.logs.push({t:t,m:m,c:c}); if(S.logs.length>100) S.logs=S.logs.slice(-100); save(); }
+  }
+  function updStats(){
+    stOk.textContent=S.ok; stFail.textContent=S.fail; stStreak.textContent=S.streak;
+    stLast.textContent=S.lastOk?S.lastOk:'—';
+    if(S.running&&S.startedAt){
+      var s=Math.floor((Date.now()-S.startedAt)/1000);
+      var h=Math.floor(s/3600), m2=Math.floor(s%3600/60), ss=s%60;
+      stUp.textContent=(h?h+'h':'')+(h||m2?m2+'m':'')+ss+'s';
+    }
+    if(S.running&&S.nextAt){
+      var r=Math.max(0,Math.ceil((S.nextAt-Date.now())/1000));
+      stNext.textContent=r+'s';
+    }
+  }
+
+  function pingOnce(){
+    var t=norm(targetEl.value);
+    if(!t){ appendLog(ts(),'目标 URL 为空，跳过本次','warn'); return; }
+    var so=sameOrigin();
+    var url = t + (so?'/api/status':'/api/status');
+    var t0=Date.now();
+    var done=false;
+    function finish(okTxt, cls){
+      if(done) return; done=true;
+      if(cls==='ok'){ S.ok++; S.streak=0; S.lastOk=ts(); appendLog(ts(), okTxt,'ok'); }
+      else{ S.fail++; S.streak++; appendLog(ts(), okTxt,'bad'); }
+      updStats(); save();
+    }
+    var opts = so
+      ? {method:'GET', credentials:'include', headers:{'Cache-Control':'no-store'}}
+      : {method:'GET', mode:'no-cors', cache:'no-store'};
+    var ctrl = new AbortController();
+    opts.signal = ctrl.signal;
+    var toSec = Math.max(3, parseInt(timeoutEl.value,10)||15);
+    var toTimer = setTimeout(function(){ ctrl.abort(); }, toSec*1000);
+    fetch(url, opts).then(function(r){
+      var ms=Date.now()-t0;
+      if(so){
+        if(r.ok){
+          return r.text().then(function(tx){
+            var extra='';
+            try{ var j=JSON.parse(tx); if(j&&j.kernelspecs!=null) extra=' kernels='+Object.keys(j.kernelspecs).length; }catch(e){}
+            finish('✔ 同源带 cookie HTTP '+r.status+' '+ms+'ms'+extra,'ok');
+          });
+        }
+        finish('⚠ 同源响应 HTTP '+r.status+'（未带有效登录态）'+ms+'ms','warn');
+      }else{
+        finish('✔ 匿名 ping HTTP '+r.status+' '+ms+'ms','ok');
+      }
+    }).catch(function(e){
+      var ms=Date.now()-t0;
+      if(e && (e.name==='AbortError' || ms >= toSec*1000)){
+        finish('✘ Ping 超时 '+toSec+'s（环境疑似休眠/停机）','bad');
+      }else{
+        finish('✘ 连接失败（环境疑似休眠/停止） '+ms+'ms','bad');
+      }
+    });
+  }
+
+  function refreshIframe(){
+    var t=norm(targetEl.value);
+    if(!t) return;
+    var so=sameOrigin();
+    if(!so) return; /* 跨源 iframe 大概率不带 cookie，意义有限，仅同源启用 */
+    frame.src = t + '/?keepalive=' + Date.now();
+    appendLog(ts(),'🔄 隐藏 iframe 已刷新（同源带 cookie 会话）','info');
+  }
+
+  function start(){
+    var t=norm(targetEl.value);
+    if(!t){ alert('请先填写目标 URL'); return; }
+    if(!usePingEl.checked && !(parseInt(iframeMinEl.value,10)>0 && useIframeEl.checked)){
+      alert('Ping 与 iframe 至少启用一项'); return;
+    }
+    S.running=true; S.startedAt=Date.now();
+    btnStart.disabled=true; btnStop.disabled=false;
+    badge.textContent='● 运行中'; badge.className='badge b-run';
+    var iv=Math.max(10,parseInt(intervalEl.value,10)||60);
+    appendLog(ts(),'🚀 保活启动 → '+t+'（每 '+iv+'s）','info');
+    pingOnce();
+    S.timer=setInterval(function(){ S.nextAt=Date.now()+iv*1000; pingOnce(); }, iv*1000);
+    S.nextAt=Date.now()+iv*1000;
+    var im=parseInt(iframeMinEl.value,10)||0;
+    if(useIframeEl.checked && im>0){
+      refreshIframe();
+      S.iframeTimer=setInterval(refreshIframe, im*60000);
+    }
+    save();
+  }
+  function stop(){
+    S.running=false;
+    clearInterval(S.timer); clearInterval(S.iframeTimer);
+    btnStart.disabled=false; btnStop.disabled=true;
+    badge.textContent='未运行'; badge.className='badge b-stop';
+    stNext.textContent='—';
+    appendLog(ts(),'⏸ 已停止','warn');
+    save();
+  }
+
+  btnStart.onclick=start;
+  btnStop.onclick=stop;
+  btnClear.onclick=function(){ logEl.innerHTML=''; S.logs=[]; S.ok=0;S.fail=0;S.streak=0;S.lastOk=null; updStats(); save(); appendLog(ts(),'日志与计数已清空','info'); };
+  targetEl.addEventListener('change',function(){ soTip.style.display=sameOrigin()?'block':'none'; save(); });
+  [intervalEl,iframeMinEl,usePingEl,useIframeEl,timeoutEl].forEach(function(el){
+    el.addEventListener('change',save);
+  });
+
+  setInterval(updStats, 1000);
+  load();
+  soTip.style.display=sameOrigin()?'block':'none';
+  if(!targetEl.value){
+    targetEl.value='https://web-nzprobe-mhgdw85x7ua6ij0t.env.trial.teradata.com';
+    save();
+  }
+  appendLog(ts(),'页面就绪。填好目标后点「开始保活」，并保持本标签页打开。','info');
+})();
+</script>
+</body>
+</html>

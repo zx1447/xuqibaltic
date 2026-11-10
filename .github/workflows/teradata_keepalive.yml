@@ -1,0 +1,61 @@
+name: Teradata Keepalive
+
+# 每 2 小时一轮:
+#   - 环境 STOPPED -> PATCH start 自动唤醒
+#   - 距 60 天到期 <= 3 天, 或环境已被平台回收 -> 删旧建新(同配置) + 自动重部署哪吒探针
+#   - 重建全程无浏览器: Firebase REST -> Firestore token -> environments API -> Jupyter token API -> kernel ws
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "填 dry-run 则只登录+读状态，不做任何变更"
+        required: false
+        default: ""
+  schedule:
+    - cron: "23 */2 * * *"
+
+concurrency:
+  group: teradata-keepalive
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: teradata
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 保活 / 唤醒 / 到期重建
+        id: run
+        env:
+          TD_EMAIL: ${{ secrets.TD_EMAIL }}
+          TD_PASSWORD: ${{ secrets.TD_PASSWORD }}
+          TD_ENV_PASSWORD: ${{ secrets.TD_ENV_PASSWORD }}
+          NZ_SECRET: ${{ secrets.NZ_SECRET }}
+          NZ_PANEL_USER: ${{ secrets.NZ_PANEL_USER }}
+          NZ_PANEL_PASS: ${{ secrets.NZ_PANEL_PASS }}
+        run: python td_keepalive.py ${{ github.event.inputs.mode == 'dry-run' && '--dry-run' || '' }}
+
+      - name: 状态回写 teradata 分支
+        if: always()
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+        run: |
+          git config user.name "teradata-bot"
+          git config user.email "bot@teradata.keepalive"
+          git add td_state.json
+          if git diff --cached --quiet; then
+            echo "state 无变化，跳过"
+          else
+            git commit -m "td state: $(date -u '+%F %T') [skip ci]"
+            git push "https://x-access-token:${GH_PAT}@github.com/${GITHUB_REPOSITORY}" teradata
+          fi

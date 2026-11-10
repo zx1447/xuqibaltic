@@ -1,0 +1,14 @@
+{
+ "env_name": "nzprobe",
+ "region": "asia-northeast",
+ "type": "clearscape",
+ "agent_uuid": "a75b0e41-ed11-8cce-d947-46d6d8455da2",
+ "node_name": "Teradata 免费PaaS",
+ "web_dns": "web-nzprobe-mhgdw85x7ua6ij0t.env.trial.teradata.com",
+ "create_date": "2026-11-09T12:58:03.591Z",
+ "jupyter_token": "487a689c4fa7f2eb91d026a682972010006ae2365fa95308",
+ "last_rebuild": "",
+ "last_rebuild_reason": "",
+ "last_run": "2026-11-10 03:40:54",
+ "last_result": "ok"
+}

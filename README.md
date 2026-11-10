@@ -1,127 +1,60 @@
-# Discord 面板自动续期（多账号）
+# Teradata ClearScape 哪吒探针保活
 
-一个脚本管两个 Discord 面板续期。两者机制**完全不同**，共用点击 + 网关判定。
+节点：**Teradata 免费PaaS**（uuid 固定 `a75b0e41-ed11-8cce-d947-46d6d8455da2`）
+面板：`https://nz.zxydk1715.dpdns.org`
 
-| | McServers | Antagonix |
-|---|---|---|
-| 有效期 | 7 天 | **5 天** |
-| 有效期内点击 | ❌ 回 `You can renew again later.` | ✅ **直接续，从现在起重置 +5 天** |
-| 续期节奏 | 每 5 天探一次 | 剩余 ≤ 4.5 天才点 |
-| 面板消息 | `1567495211016519802` | `1567073789395730475` |
-| 频道 | `1567486173495173181` | `1567073787143524383` |
-| bot / application_id | `1524370665631649865` | `1565149630260322418` |
-| 按钮 custom_id | `renew_server` | `b\|fa67c4d1a69f9e08bc484195\|renew` |
-| 成功文案 | （无回执） | `Hébergement renouvelé pour 5 jours...` |
+## 平台特性
 
-## 通用请求格式
+- ClearScape Analytics Experience 免费试用：1 个环境 / 60 天寿命 / 40 credits 月配额
+- 环境闲置会被平台挂起（STOPPED），外部 ping 无法唤醒，必须 dashboard/API start
+- 60 天到期后环境被回收 → **同账号删旧建新可续**（本分支核心能力）
 
-```http
-POST https://discord.com/api/v9/interactions
-Authorization: <该账号的用户 token>
-
-{
-  "type": 3,
-  "nonce": "<19 位数字>",
-  "guild_id": "...",
-  "channel_id": "...",
-  "message_flags": 0,
-  "message_id": "...",
-  "application_id": "<bot 的用户 ID>",
-  "session_id": "<32 位十六进制>",
-  "data": { "component_type": 2, "custom_id": "..." }
-}
-```
-
-成功返回 **HTTP 204**。
-
-### 三个必踩的坑
-
-| 报错 | 原因 |
-|---|---|
-| `{"code":10005,"message":"未知集成"}` | `type` 写成 `2`（应用命令），组件交互必须 `3` |
-| `{"code":50035}` 说 `application_id` 必填 | 消息 JSON 里 `application_id` 是 `null`，必须手填 |
-| `{"code":10002,"Application inconnue"}` | 用了 guild id；应该用 **bot 的用户 ID** |
-
-## 怎么确认真续上了
-
-bot 的回复是 **ephemeral（私密）**，普通消息接口读不到：
+## 全自动链路（纯 HTTP，无浏览器）
 
 ```
-GET /channels/{c}/messages/{m}  →  403 {"code":20002,"detail":"只有机器人可使用此端点"}
+Firebase REST 登录 (identitytoolkit signInWithPassword)
+  └→ Firestore 读 users/{email}.token (后端 API token)
+      └→ GET  /environments            状态检查
+          ├→ PATCH /environments/nzprobe {operation:start}   自动唤醒
+          ├→ 剩余<=3天 或 环境不存在 → DELETE + POST 重建（同配置 nzprobe / asia-northeast）
+          │    └→ Jupyter ?token= API → PUT 部署脚本 → kernel ws 执行
+          │         （容器内自下载 nezha-agent v2.4.0 + md5 校验 + v4proxy + watchdog）
+          └→ RUNNING → Jupyter /api/status 探活 + 面板节点核对
 ```
 
-所以脚本连 **Discord 网关**监听推送：
+## 防休眠双保险
 
-```
-【MESSAGE_CREATE】flags=192 ephemeral=true
-【MESSAGE_UPDATE】"Hébergement renouvelé pour 5 jours à partir de maintenant."
-INTERACTION_SUCCESS
-```
+1. **容器内** watchdog.sh 每 5 分钟自我 ping + 每 60 秒拉起 v4proxy/nezha-agent
+2. **外部** GitHub Actions 每 2 小时检查：STOPPED 自动 start，1 分钟内恢复上报
 
-判定时**只挑短句回执**（≤120 字）来匹配，避免面板 embed 那种大段文字误命中。
+## 到期重建（60 天）
 
-三种结果：
+- 判定：`createDate + 60 天` 剩余 ≤ 3 天 → 提前主动重建，不断线
+- 重建：删旧环境 → `POST /environments {name, password, region}` 同配置 → 等 RUNNING →
+  自动重部署探针（uuid 不变，面板节点自动恢复，名字不对自动改名）
+- 密码：`TD_ENV_PASSWORD` secret（创建实例密码，8+ 位大小写数字符号）
 
-| verdict | 触发 | 后续 |
-|---|---|---|
-| `renewed` | 匹配成功文案 | 记录 `last_click_at`，下次按间隔判断 |
-| `too-early` | `You can renew again later.` | 不记点击时间，等下一个周期 |
-| `no-reply` | 204 + INTERACTION_SUCCESS 但无文案 | 按成功计 |
+## 文件
 
-## 调度
+| 文件 | 作用 |
+| --- | --- |
+| `td_keepalive.py` | 主脚本（保活/唤醒/重建/部署/面板校正） |
+| `td_state.json` | 状态（环境域名、createDate、jupyter token、最近结果），每轮回写 |
+| `td_assets/v4proxy.py` | IPv4-only CONNECT 代理（容器 IPv6 全断，agent 走 127.0.0.1:3128） |
+| `td_assets/keepalive.html` | 同源保活页（可放浏览器标签持续 ping） |
 
-```yaml
-- cron: "37 6 * * *"     # 每天唤醒一次
-```
+## secrets
 
-cron 只负责"每天唤醒"，真正节奏由脚本按 `last_click_at` 判定：
-
-- **McServers**：距上次成功点击满 **5 天** 才点（有效期内点了会被拒）
-- **Antagonix**：距上次成功点击满 **2 天** 就点（随时可点），
-  另加一道兜底：面板剩余 **≤ 3.5 天** 时无论如何都补一次
-
-每日唤醒 + 脚本内判定：两个目标间隔不同，用日历日 `*/2` 会互相错位，月边界也容易漏；
-现在最多只晚 1 天。
+| 名称 | 说明 |
+| --- | --- |
+| `TD_EMAIL` / `TD_PASSWORD` | Teradata 账号 |
+| `TD_ENV_PASSWORD` | 重建环境时设置的实例密码 |
+| `NZ_SECRET` | 哪吒面板 agent 密钥 |
+| `NZ_PANEL_USER` / `NZ_PANEL_PASS` | 哪吒面板登录（改名兜底） |
+| `GH_PAT` | 回写 state / 接力用 PAT |
 
 ## 手动触发
 
-Actions → **Discord Panel Renew** → Run workflow
-
-| 输入 | 说明 |
-|---|---|
-| `target` | `mcservers` / `antagonix` / `all`（默认 all） |
-| `force` | `true` = 无视间隔立即点 |
-| `dry_run` | `true` = 只看判定不点击 |
-
-## 本地跑
-
-```bash
-npm install
-
-export DISCORDERENEW_TOKEN='...'   # McServers 账号
-export ANTAGONIX_TOKEN='...'       # Antagonix 账号
-
-node renew_mcservers.js                    # 两个都处理
-DR_TARGET=antagonix node renew_mcservers.js
-DR_DRY_RUN=1 node renew_mcservers.js
-DR_FORCE=1 node renew_mcservers.js
-```
-
-## 当前状态
-
-| 服务 | 到期 | Secret |
-|---|---|---|
-| McServers | 2026-11-11 12:01 UTC | `DISCORDERENEW_TOKEN` |
-| Antagonix | 2026-11-09 12:26 UTC | `ANTAGONIX_TOKEN` |
-
-## 需要维护的地方
-
-| 情况 | 怎么办 |
-|---|---|
-| token 失效（401） | 换对应 secret |
-| 面板消息被删/重建 | Antagonix 会自动探测新消息 id；McServers 需改 `DR_*` 或代码里的 message |
-| 机器人改了按钮 id | 改 `TARGETS` 里对应项的 `customId` |
-
-> ⚠️ Discord 用户 token 会因改密码 / 退出所有设备 / **跨地区使用**被吊销。
-> 之前 Antagonix 的 token 就是拿到 GitHub 美国 IP 用之后被杀的（活不过 2 分钟）。
-> 如果日志报 `401`，需要重新抓 token。
+Actions → Teradata Keepalive → Run workflow：
+- mode 留空 = 正常保活
+- mode 填 `dry-run` = 只登录+读状态，不做任何变更
