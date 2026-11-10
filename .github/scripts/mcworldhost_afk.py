@@ -115,10 +115,21 @@ def resolve_action_ids(page) -> tuple:
                "yes" if "createServerReference" in js else "no",
                js[:1500], js[-1500:])
         )
+    # Newer builds split the page chunk into a loader + sibling chunks, so the
+    # action IDs are no longer in the page chunk. Dump the RENDERED AFK page
+    # (screenshot + text) instead - the UI automation path works from these.
+    try:
+        time.sleep(8)  # let hydration render the watch widget
+        page.screenshot(path="mcwh_debug_afk_page.png", full_page=True)
+        with open("mcwh_debug_afk_page.txt", "w") as f:
+            f.write("url=%s\ntitle=%s\n\n%s" % (page.url, page.title(),
+                                                page.locator("body").inner_text()[:4000]))
+    except Exception:
+        pass
     with open("mcwh_debug_afk_chunk.txt", "w") as f:
         f.write("\n\n====\n\n".join(diag) if diag else "no chunks fetched")
     raise RuntimeError(
-        "AFK server actions not found in %d chunk(s) (diagnostics saved)" % len(chunks)
+        "AFK server actions not found in %d chunk(s) (page dump saved)" % len(chunks)
     )
 
 
