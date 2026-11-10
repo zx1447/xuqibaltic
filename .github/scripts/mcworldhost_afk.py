@@ -137,7 +137,7 @@ def main() -> int:
             sign_in(page, BASE, email, password)
             log("Signed in.")
         except Exception as exc:
-            log(f"Sign-in failed: {type(exc).__name__}")
+            log(f"Sign-in failed: {type(exc).__name__}: {str(exc)[:180]}")
             return 1
 
         try:

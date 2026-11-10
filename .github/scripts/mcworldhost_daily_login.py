@@ -39,7 +39,7 @@ def main() -> int:
             sign_in(page, BASE, email, password)
             print("Signed in.")
         except Exception as exc:
-            print(f"Sign-in failed: {type(exc).__name__}", file=sys.stderr)
+            print(f"Sign-in failed: {type(exc).__name__}: {str(exc)[:180]}", file=sys.stderr)
             return 1
 
         stage = "open-coins"

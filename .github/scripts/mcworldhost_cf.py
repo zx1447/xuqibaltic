@@ -73,8 +73,8 @@ def open_session(base: str = "https://mcworldhost.de", wait_seconds: int = 90):
 def sign_in(page, base: str, email: str, password: str, timeout: int = 35000) -> None:
     """Submit the login form; raises on failure. Never logs credentials."""
     page.goto(f"{base}/login", wait_until="domcontentloaded")
-    page.get_by_label("Email").wait_for(timeout=timeout)
-    page.get_by_label("Email").fill(email)
-    page.get_by_label("Password").fill(password)
+    page.get_by_role("textbox", name=re.compile(r"mail", re.I)).first.wait_for(timeout=timeout)
+    page.get_by_role("textbox", name=re.compile(r"mail", re.I)).first.fill(email)
+    page.get_by_role("textbox", name=re.compile(r"pass(wort)?", re.I)).first.fill(password)
     page.get_by_role("button", name=re.compile(r"sign\s*in|anmelden", re.I)).first.click()
     page.wait_for_url("**/dashboard/**", timeout=timeout)
