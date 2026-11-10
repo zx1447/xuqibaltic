@@ -533,12 +533,61 @@ def main():
         STATE["web_dns"] = urllib.parse.urlparse(base).hostname
         STATE["jupyter_token"] = jt
 
-    # 面板侧核对（探针 uuid 固定，一般无需动作；last_active 观察输出）
     if DRY:
-        log("DRY-RUN: 跳过面板校验")
+        log("DRY-RUN: 跳过探针刷新与面板上报确认")
+        # 面板侧核对（探针 uuid 固定，一般无需动作；last_active 观察输出）
+        st, txt = http("GET", PANEL_HTTP + "/api/v1/server",
+                       {"Authorization": "Bearer " + panel_token()})
+        try:
+            r = json.loads(txt)
+        except Exception:
+            log("面板节点列表非 JSON: %s" % txt[:150])
+            return
+        for s in (r.get("data") or []):
+            if str(s.get("uuid", "")).lower() == AGENT_UUID.lower():
+                log("面板节点: %s | last_active=%s" % (s.get("name"), s.get("last_active")))
+                break
         return
+
+    # 唤醒后强制刷新探针进程：容器休眠冻结会把 agent 的 TCP 连接切断，
+    # 进程恢复后可能僵死（无连接无日志）。杀旧进程，watchdog 60s 内拉新，
+    # 从根上消除"进程在但不上报"的状态。
+    if jurl:
+        try:
+            out = kernel_execute(base, jt,
+                "import subprocess;r=subprocess.run('pkill -x nezha-agent || true',shell=True,"
+                "capture_output=True,text=True);print('agent-killed')", timeout=90)
+            log("探针进程已刷新（杀旧，等 watchdog 拉新）: %s" % str(out)[:80])
+        except Exception as e:
+            log("探针刷新失败（不阻断）: %s" % str(e)[:150])
+
+    # 轮询面板确认探针恢复上报（最多 ~4 分钟）
+    ptok = panel_token()
+    confirmed = False
+    for i in range(16):
+        time.sleep(15)
+        st2, txt2 = http("GET", PANEL_HTTP + "/api/v1/server",
+                         {"Authorization": "Bearer " + ptok})
+        try:
+            r2 = json.loads(txt2)
+        except Exception:
+            continue
+        for s in (r2.get("data") or []):
+            if str(s.get("uuid", "")).lower() == AGENT_UUID.lower():
+                la = str(s.get("last_active") or "")
+                if la and not la.startswith("0001-01-01"):
+                    confirmed = True
+                break
+        if confirmed:
+            break
+    if confirmed:
+        log("面板上报确认 ✓（第 %d 次探测，约 %d 秒）" % (i + 1, (i + 1) * 15))
+    else:
+        log("⚠️ 面板 4 分钟内未见上报（探针可能未复活，下一轮会再刷新）")
+
+    # 面板侧核对（探针 uuid 固定，名字不对则改名）
     st, txt = http("GET", PANEL_HTTP + "/api/v1/server",
-                   {"Authorization": "Bearer " + panel_token()})
+                   {"Authorization": "Bearer " + ptok})
     try:
         r = json.loads(txt)
     except Exception:
@@ -548,10 +597,7 @@ def main():
         if str(s.get("uuid", "")).lower() == AGENT_UUID.lower():
             log("面板节点: %s | last_active=%s" % (s.get("name"), s.get("last_active")))
             if s.get("name") != NODE_NAME:
-                if DRY:
-                    log("DRY-RUN: 需要改名 %s -> %s（跳过）" % (s.get("name"), NODE_NAME))
-                else:
-                    panel_fix_name()
+                panel_fix_name()
             break
 
     STATE["last_run"] = time.strftime("%Y-%m-%d %H:%M:%S")
