@@ -116,8 +116,10 @@ def open_session(base: str = "https://mcworldhost.de", wait_seconds: int = 90):
     return pw, browser, page
 
 
-def sign_in(page, base: str, email: str, password: str, timeout: int = 45000) -> None:
+def sign_in(page, base: str, email: str, password: str, timeout: int = 75000) -> None:
     """Submit the login form; raises on failure. Never logs credentials."""
+    if "/dashboard" in page.url:
+        return  # already authenticated
     if not _wait_login_form(page, 10):
         # open_session already landed us on the login page in the normal case;
         # re-navigating would just re-trigger the challenge, so only goto as a
@@ -127,6 +129,8 @@ def sign_in(page, base: str, email: str, password: str, timeout: int = 45000) ->
             _debug_snapshot(page, "sign_in")
             raise RuntimeError("login form did not render (challenge stuck?)")
     for attempt in (1, 2):
+        if "/dashboard" in page.url:
+            return  # the previous submit landed late but succeeded
         page.get_by_role("textbox", name=re.compile(r"mail", re.I)).first.fill(email)
         page.get_by_role("textbox", name=re.compile(r"pass(wort)?", re.I)).first.fill(password)
         page.get_by_role("button", name=re.compile(r"sign\s*in|anmelden", re.I)).first.click()
@@ -141,9 +145,14 @@ def sign_in(page, base: str, email: str, password: str, timeout: int = 45000) ->
                 pass
             if "invalid email" in body or "ungültig" in body:
                 raise RuntimeError("invalid credentials")
-            # transient (challenge hold or click race) -> one more attempt
+            # the POST can be held by Cloudflare well past the timeout before
+            # finally redirecting - check whether we actually made it
             _debug_snapshot(page, f"sign_in_attempt{attempt}")
+            if "/dashboard" in page.url:
+                return
             if not _wait_login_form(page, 60):
                 _debug_snapshot(page, f"sign_in_stuck{attempt}")
+                if "/dashboard" in page.url:
+                    return
                 raise RuntimeError("login form did not render (challenge stuck?)")
     raise RuntimeError("login did not reach the dashboard after 2 attempts")
