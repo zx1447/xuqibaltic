@@ -56,6 +56,7 @@ def new_session(email: str, password: str, clearance: str = "", ua: str = ""):
     session = requests.Session()
     if ua:
         session.headers["User-Agent"] = ua
+        session.headers["Accept-Language"] = "en-US,en;q=0.9"
     if clearance:
         session.cookies.set("cf_clearance", clearance, domain="mcworldhost.de")
     else:
@@ -147,13 +148,19 @@ def main() -> int:
 
     deadline = time.time() + max_minutes * 60
     log("Solving Cloudflare challenge (headed Chromium on Xvfb)...")
-    try:
-        clearance, ua = solve_challenge(BASE)
-        log("Cloudflare challenge solved; clearance cookie obtained.")
-    except Exception as exc:
-        log(f"Cloudflare challenge failed: {exc}")
-        return 1
-    session = new_session(email, password, clearance, ua)
+    session = None
+    for attempt in (1, 2):
+        try:
+            clearance, ua = solve_challenge(BASE)
+            log("Cloudflare challenge solved; clearance cookie obtained.")
+        except Exception as exc:
+            log(f"Cloudflare challenge failed: {exc}")
+            return 1
+        session = new_session(email, password, clearance, ua)
+        if session is not None:
+            break
+        if attempt == 1:
+            log("Sign-in still blocked; re-solving challenge for a fresh clearance...")
     if session is None:
         return 1
     ids = resolve_action_ids(session)

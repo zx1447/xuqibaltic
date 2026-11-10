@@ -23,6 +23,7 @@ def create_session(email: str, password: str, clearance: str, ua: str):
     the request past the Cloudflare edge that would otherwise 403 it."""
     session = requests.Session()
     session.headers["User-Agent"] = ua
+    session.headers["Accept-Language"] = "en-US,en;q=0.9"
     session.cookies.set("cf_clearance", clearance, domain="mcworldhost.de")
     try:
         response = session.post(
@@ -59,15 +60,20 @@ async def main() -> int:
         return 2
 
     print("Solving Cloudflare challenge (headed Chromium on Xvfb)...", flush=True)
-    try:
-        # sync Playwright must not run inside the asyncio loop -> worker thread
-        clearance, ua = await asyncio.to_thread(solve_challenge, BASE)
-        print("Cloudflare challenge solved; clearance cookie obtained.")
-    except Exception as exc:
-        print(f"Cloudflare challenge failed: {exc}", file=sys.stderr)
-        return 1
-
-    session = create_session(email, password, clearance, ua)
+    session = None
+    for attempt in (1, 2):
+        try:
+            # sync Playwright must not run inside the asyncio loop -> worker thread
+            clearance, ua = await asyncio.to_thread(solve_challenge, BASE)
+            print("Cloudflare challenge solved; clearance cookie obtained.")
+        except Exception as exc:
+            print(f"Cloudflare challenge failed: {exc}", file=sys.stderr)
+            return 1
+        session = create_session(email, password, clearance, ua)
+        if session is not None:
+            break
+        if attempt == 1:
+            print("Sign-in still blocked; re-solving challenge for a fresh clearance...")
     if session is None:
         return 1
     token = session.cookies.get("__Secure-better-auth.session_token")
