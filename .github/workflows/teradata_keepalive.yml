@@ -12,7 +12,7 @@ on:
         required: false
         default: ""
   schedule:
-    - cron: "23 */2 * * *"
+    - cron: "23 */2 * * *" # re-registered
 
 concurrency:
   group: teradata-keepalive
