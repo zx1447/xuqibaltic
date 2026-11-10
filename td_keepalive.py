@@ -129,6 +129,12 @@ def start_env(tok, name):
     return st
 
 
+def stop_env(tok, name):
+    st, d = jhttp("PATCH", API + "/" + name, tok, {"operation": "stop"})
+    log("PATCH stop %s -> HTTP %s %s" % (name, st, str(d)[:120]))
+    return st
+
+
 def delete_env(tok, name):
     st, d = jhttp("DELETE", API + "/" + name, tok)
     log("DELETE %s -> HTTP %s %s" % (name, st, str(d)[:120]))
@@ -549,41 +555,59 @@ def main():
                 break
         return
 
-    # 唤醒后强制刷新探针进程：容器休眠冻结会把 agent 的 TCP 连接切断，
-    # 进程恢复后可能僵死（无连接无日志）。杀旧进程，watchdog 60s 内拉新，
-    # 从根上消除"进程在但不上报"的状态。
-    if jurl:
+    # —— 面板上报确认；探针不上报则环境 stop→start 重建（纯 API 路径）——
+    # 背景：环境休眠冻结会切断 agent 的 TCP 连接，容器唤醒后 agent 进程可能
+    # 僵死（进程在但不连接不日志）；GitHub runner 出口 IP 会被前置 WAF 拦
+    # POST（405），kernel 远程杀进程不可靠，stop→start 重建是可靠自愈路径。
+    def panel_reported(ptok_):
+        st_, txt_ = http("GET", PANEL_HTTP + "/api/v1/server",
+                         {"Authorization": "Bearer " + ptok_})
         try:
-            out = kernel_execute(base, jt,
-                "import subprocess;r=subprocess.run('pkill -x nezha-agent || true',shell=True,"
-                "capture_output=True,text=True);print('agent-killed')", timeout=90)
-            log("探针进程已刷新（杀旧，等 watchdog 拉新）: %s" % str(out)[:80])
-        except Exception as e:
-            log("探针刷新失败（不阻断）: %s" % str(e)[:150])
-
-    # 轮询面板确认探针恢复上报（最多 ~4 分钟）
-    ptok = panel_token()
-    confirmed = False
-    for i in range(16):
-        time.sleep(15)
-        st2, txt2 = http("GET", PANEL_HTTP + "/api/v1/server",
-                         {"Authorization": "Bearer " + ptok})
-        try:
-            r2 = json.loads(txt2)
+            for s_ in (json.loads(txt_).get("data") or []):
+                if str(s_.get("uuid", "")).lower() == AGENT_UUID.lower():
+                    la_ = str(s_.get("last_active") or "")
+                    return bool(la_) and not la_.startswith("0001-01-01")
         except Exception:
-            continue
-        for s in (r2.get("data") or []):
-            if str(s.get("uuid", "")).lower() == AGENT_UUID.lower():
-                la = str(s.get("last_active") or "")
-                if la and not la.startswith("0001-01-01"):
-                    confirmed = True
+            pass
+        return False
+
+    ptok = panel_token()
+    confirmed = panel_reported(ptok)
+    if not confirmed:
+        for _ in range(8):
+            time.sleep(15)
+            if panel_reported(ptok):
+                confirmed = True
                 break
-        if confirmed:
-            break
     if confirmed:
-        log("面板上报确认 ✓（第 %d 次探测，约 %d 秒）" % (i + 1, (i + 1) * 15))
+        log("面板上报确认 ✓（探针健康）")
     else:
-        log("⚠️ 面板 4 分钟内未见上报（探针可能未复活，下一轮会再刷新）")
+        log("⚠️ 面板 2 分钟未见上报——agent 僵死，执行环境 stop→start 重建")
+        try:
+            stop_env(tok, name)
+            t0 = time.time()
+            while time.time() - t0 < 420:
+                time.sleep(20)
+                try:
+                    cur = next((e for e in list_envs(tok) if e.get("name") == name), None)
+                except Exception:
+                    cur = None
+                if cur and cur.get("state") == "STOPPED":
+                    log("环境已 STOPPED (耗时 %ds)" % int(time.time() - t0))
+                    break
+                if cur:
+                    log("环境 %s state=%s (等待停止 %ds)" % (name, cur.get("state"), int(time.time() - t0)))
+            start_env(tok, name)
+            env = wait_running(tok, name, timeout=900)
+            confirmed = False
+            for _ in range(20):
+                time.sleep(15)
+                if panel_reported(ptok):
+                    confirmed = True
+                    break
+            log("重建后结果: %s" % ("面板上报确认 ✓（探针已恢复）" if confirmed else "⚠️ 仍未上报，等下一轮"))
+        except Exception as e:
+            log("重建异常（不阻断，等下一轮）: %s" % str(e)[:200])
 
     # 面板侧核对（探针 uuid 固定，名字不对则改名）
     st, txt = http("GET", PANEL_HTTP + "/api/v1/server",
@@ -601,7 +625,7 @@ def main():
             break
 
     STATE["last_run"] = time.strftime("%Y-%m-%d %H:%M:%S")
-    STATE["last_result"] = "ok"
+    STATE["last_result"] = "ok" if confirmed else "warn: 环境已恢复但面板未见上报"
     json.dump(STATE, open(STATE_FILE, "w"), indent=1, ensure_ascii=False)
     log("保活完成 ✓")
 
