@@ -45,6 +45,8 @@ CLAIM_JITTER = 2
 DEFAULT_MAX_MINUTES = 55     # matches the hourly GitHub Actions cadence
 CHUNK_RE = re.compile(r"page-[0-9a-f]+\.js")
 ACTION_RE = re.compile(r'createServerReference\)?\("([0-9a-f]{40,})"[^)]*"(\w+)"')
+# newer Next.js builds drop the trailing action-name argument
+ACTION_RE_LOOSE = re.compile(r'createServerReference\)?\("([0-9a-f]{32,})"')
 
 
 def log(msg: str) -> None:
@@ -88,21 +90,36 @@ def flight_payloads(text: str) -> list:
 
 
 def resolve_action_ids(page) -> tuple:
-    """Read the AFK page and its route chunk (in-page) for the action IDs."""
+    """Read the AFK page and its route chunk(s) (in-page) for the action IDs."""
     page.goto(f"{BASE}{AFK_PAGE}", wait_until="domcontentloaded")
     if "/login" in page.url:
         raise RuntimeError("session rejected by the site (login redirect)")
     html = page.content()
-    match = CHUNK_RE.search(html)
-    if not match:
-        raise RuntimeError("could not find the AFK route chunk in the page HTML")
-    chunk_url = f"{BASE}/_next/static/chunks/app/(dashboard)/dashboard/afk/{match.group(0)}"
-    js = page.evaluate("async (u) => await (await fetch(u)).text()", chunk_url)
-    ids = {name: aid for aid, name in ACTION_RE.findall(js)}
-    arm, claim = ids.get("armAfkWatchAction"), ids.get("claimAfkWatchRewardAction")
-    if not arm or not claim:
-        raise RuntimeError("AFK server actions missing from the route chunk")
-    return arm, claim
+    chunks = list(dict.fromkeys(CHUNK_RE.findall(html)))
+    if not chunks:
+        raise RuntimeError("could not find any AFK route chunk in the page HTML")
+    diag = []
+    for chunk in chunks:
+        chunk_url = f"{BASE}/_next/static/chunks/app/(dashboard)/dashboard/afk/{chunk}"
+        try:
+            js = page.evaluate("async (u) => await (await fetch(u)).text()", chunk_url)
+        except Exception:
+            continue
+        ids = {name: aid for aid, name in ACTION_RE.findall(js)}
+        if ids.get("armAfkWatchAction") and ids.get("claimAfkWatchRewardAction"):
+            return ids["armAfkWatchAction"], ids["claimAfkWatchRewardAction"]
+        loose = ACTION_RE_LOOSE.findall(js)
+        diag.append(
+            "chunk=%s len=%d strict_ids=%s loose_ids=%d has_csr=%s\n--- chunk head ---\n%s\n--- chunk tail ---\n%s"
+            % (chunk, len(js), list(ids.keys()), len(loose),
+               "yes" if "createServerReference" in js else "no",
+               js[:1500], js[-1500:])
+        )
+    with open("mcwh_debug_afk_chunk.txt", "w") as f:
+        f.write("\n\n====\n\n".join(diag) if diag else "no chunks fetched")
+    raise RuntimeError(
+        "AFK server actions not found in %d chunk(s) (diagnostics saved)" % len(chunks)
+    )
 
 
 def classify_failure(res) -> str:
