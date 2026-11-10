@@ -30,6 +30,32 @@ def _ensure_display() -> None:
     time.sleep(2)
 
 
+def _wait_login_form(page, wait_seconds: int) -> bool:
+    """Wait until the REAL login form renders. The challenge page also has an
+    <h1>, so detect the form by its password input instead."""
+    deadline = time.time() + wait_seconds
+    reloaded = False
+    while time.time() < deadline:
+        try:
+            title = page.title()
+        except Exception:
+            title = ""
+        if "just a moment" not in title.lower():
+            try:
+                page.wait_for_selector("input[type='password']", timeout=5000)
+                return True
+            except Exception:
+                pass
+        if not reloaded and time.time() > deadline - wait_seconds / 2:
+            reloaded = True
+            try:
+                page.reload(wait_until="domcontentloaded")
+            except Exception:
+                pass
+        time.sleep(3)
+    return False
+
+
 def open_session(base: str = "https://mcworldhost.de", wait_seconds: int = 90):
     """Launch a headed Chromium, wait out the challenge, return (pw, browser, page).
 
@@ -51,30 +77,23 @@ def open_session(base: str = "https://mcworldhost.de", wait_seconds: int = 90):
         page.goto(f"{base}/login", wait_until="domcontentloaded", timeout=45000)
     except Exception:
         pass
-    deadline = time.time() + wait_seconds
-    while time.time() < deadline:
+    if not _wait_login_form(page, wait_seconds):
         try:
             last_title = page.title()
         except Exception:
             last_title = ""
-        if "just a moment" not in last_title.lower():
-            try:
-                # a real (non-challenge) page must render actual content
-                page.wait_for_selector("h1", timeout=8000)
-                return pw, browser, page
-            except Exception:
-                pass
-        time.sleep(3)
-    browser.close()
-    pw.stop()
-    raise RuntimeError(f"Cloudflare challenge not cleared (last title={last_title!r}).")
+        browser.close()
+        pw.stop()
+        raise RuntimeError(f"Cloudflare challenge not cleared (last title={last_title!r}).")
+    return pw, browser, page
 
 
 def sign_in(page, base: str, email: str, password: str, timeout: int = 45000) -> None:
     """Submit the login form; raises on failure. Never logs credentials."""
     page.goto(f"{base}/login", wait_until="domcontentloaded")
     for attempt in (1, 2):
-        page.get_by_role("textbox", name=re.compile(r"mail", re.I)).first.wait_for(timeout=timeout)
+        if not _wait_login_form(page, 60):
+            raise RuntimeError("login form did not render (challenge stuck?)")
         page.get_by_role("textbox", name=re.compile(r"mail", re.I)).first.fill(email)
         page.get_by_role("textbox", name=re.compile(r"pass(wort)?", re.I)).first.fill(password)
         page.get_by_role("button", name=re.compile(r"sign\s*in|anmelden", re.I)).first.click()
