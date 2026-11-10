@@ -1,35 +1,18 @@
-"""MCWorldHost AFK coin farming over in-browser fetches (no ad slots).
+"""MCWorldHost AFK coin farming via the real UI (headed browser on Xvfb).
 
-Protocol (reverse-engineered from the /dashboard/afk Next.js client chunk):
+The site (2026-11 build) credits +3 coins per 60s while the Earn AFK tab is
+open with its ad slots visible ("Keep tab open · +3 coins every 60s · reload
+every 5 min"), and the old server-action IDs no longer live in the page
+chunk (the build splits them into loader + sibling chunks now). So we simply
+keep the page open like a user and reload it every few minutes to re-arm the
+watch window, tracking the balance text for progress.
 
-1. Pass the Cloudflare challenge and sign in inside the same browser
-   (python-requests is rejected by the edge even with a valid clearance).
-2. GET /dashboard/afk -> the HTML references page-<hash>.js for the route.
-3. Fetch that chunk (in-page) -> extract the two server-action IDs:
-   - armAfkWatchAction        : starts/refreshes a watch session, returns
-                                {ok, token, remainingSeconds, durationSeconds,
-                                 reward, endsAtMs}
-   - claimAfkWatchRewardAction: POST ["<token>"] after the watch window,
-                                returns {ok, balance, reward, nextToken,
-                                remainingSeconds, endsAtMs}
-4. Loop: arm -> sleep ~62s -> claim -> use nextToken for the next round.
-   All calls run as page.evaluate(fetch(...)) so they carry the browser's
-   cookies, TLS fingerprint and clearance.
+All interaction happens in the same headed Chromium that solved the
+Cloudflare challenge and signed in - python-requests is rejected by the edge
+even with a valid clearance cookie, so the browser stays the only channel.
 
-Server responses on failure (German locale):
-  {"ok": false, "error": "Noch 60s warten"}   - account cooldown, 60s since
-                                                the last credited reward
-  {"ok": false, "error": "Fehlgeschlagen"}    - token expired/invalid -> re-arm
-  {"ok": false, "code": "hour_limit"|"day_limit"|"rate_limit",
-   "caps": {...}, "retryAfterSeconds": N}
-
-Limits observed on the site: +3 coins per 60s claim, 150 per rolling hour,
-500 per day. The script therefore exits (exit 0) on day_limit/hour_limit so
-an hourly scheduled workflow can pick up the remainder in the next run.
-
-This automation never loads ad iframes; it only replays the watch actions.
+Caps observed: +3/60s, 150 per rolling hour, 500 per day.
 """
-import json
 import os
 import re
 import sys
@@ -40,108 +23,26 @@ from mcworldhost_cf import open_session, sign_in  # noqa: E402
 
 BASE = "https://mcworldhost.de"
 AFK_PAGE = "/dashboard/afk"
-CLAIM_INTERVAL = 62          # seconds between claims (60s window + jitter)
-CLAIM_JITTER = 2
-DEFAULT_MAX_MINUTES = 55     # matches the hourly GitHub Actions cadence
-CHUNK_RE = re.compile(r"page-[0-9a-f]+\.js")
-ACTION_RE = re.compile(r'createServerReference\)?\("([0-9a-f]{40,})"[^)]*"(\w+)"')
-# newer Next.js builds drop the trailing action-name argument
-ACTION_RE_LOOSE = re.compile(r'createServerReference\)?\("([0-9a-f]{32,})"')
+RELOAD_EVERY = 240          # site says "reload every 5 min"; 4 min is safe
+DEFAULT_MAX_MINUTES = 55    # matches the hourly GitHub Actions cadence
+DAY_CAP = 500
 
 
 def log(msg: str) -> None:
     print(msg, flush=True)
 
 
-def call_action(page, action_id: str, args: list):
-    """POST a Next.js server action from inside the page (browser stack)."""
-    body = json.dumps(args)
-    text = page.evaluate(
-        """async ([aid, body]) => {
-            const r = await fetch(window.location.pathname, {
-                method: 'POST',
-                headers: {
-                    'Accept': 'text/x-component',
-                    'Next-Action': aid,
-                    'Content-Type': 'application/json',
-                },
-                body: body,
-            });
-            return await r.text();
-        }""",
-        [action_id, body],
-    )
-    payloads = flight_payloads(text)
-    return next((p for p in payloads if "ok" in p), None)
-
-
-def flight_payloads(text: str) -> list:
-    out = []
-    for line in (text or "").splitlines():
-        m = re.match(r"^[0-9a-f]+:(\{.*\})$", line.strip())
-        if m:
-            try:
-                obj = json.loads(m.group(1))
-            except Exception:
-                continue
-            if isinstance(obj, dict):
-                out.append(obj)
-    return out
-
-
-def resolve_action_ids(page) -> tuple:
-    """Read the AFK page and its route chunk(s) (in-page) for the action IDs."""
-    page.goto(f"{BASE}{AFK_PAGE}", wait_until="domcontentloaded")
-    if "/login" in page.url:
-        raise RuntimeError("session rejected by the site (login redirect)")
-    html = page.content()
-    chunks = list(dict.fromkeys(CHUNK_RE.findall(html)))
-    if not chunks:
-        raise RuntimeError("could not find any AFK route chunk in the page HTML")
-    diag = []
-    for chunk in chunks:
-        chunk_url = f"{BASE}/_next/static/chunks/app/(dashboard)/dashboard/afk/{chunk}"
-        try:
-            js = page.evaluate("async (u) => await (await fetch(u)).text()", chunk_url)
-        except Exception:
-            continue
-        ids = {name: aid for aid, name in ACTION_RE.findall(js)}
-        if ids.get("armAfkWatchAction") and ids.get("claimAfkWatchRewardAction"):
-            return ids["armAfkWatchAction"], ids["claimAfkWatchRewardAction"]
-        loose = ACTION_RE_LOOSE.findall(js)
-        diag.append(
-            "chunk=%s len=%d strict_ids=%s loose_ids=%d has_csr=%s\n--- chunk head ---\n%s\n--- chunk tail ---\n%s"
-            % (chunk, len(js), list(ids.keys()), len(loose),
-               "yes" if "createServerReference" in js else "no",
-               js[:1500], js[-1500:])
-        )
-    # Newer builds split the page chunk into a loader + sibling chunks, so the
-    # action IDs are no longer in the page chunk. Dump the RENDERED AFK page
-    # (screenshot + text) instead - the UI automation path works from these.
+def read_counters(page):
+    """Return (balance, today_earned) parsed from the AFK page text."""
     try:
-        time.sleep(8)  # let hydration render the watch widget
-        page.screenshot(path="mcwh_debug_afk_page.png", full_page=True)
-        with open("mcwh_debug_afk_page.txt", "w") as f:
-            f.write("url=%s\ntitle=%s\n\n%s" % (page.url, page.title(),
-                                                page.locator("body").inner_text()[:4000]))
+        text = page.locator("body").inner_text(timeout=10000)
     except Exception:
-        pass
-    with open("mcwh_debug_afk_chunk.txt", "w") as f:
-        f.write("\n\n====\n\n".join(diag) if diag else "no chunks fetched")
-    raise RuntimeError(
-        "AFK server actions not found in %d chunk(s) (page dump saved)" % len(chunks)
-    )
-
-
-def classify_failure(res) -> str:
-    if not res:
-        return "no_payload"
-    if res.get("code") in ("hour_limit", "day_limit", "rate_limit"):
-        return res["code"]
-    error = str(res.get("error") or "")
-    if "warten" in error.lower():
-        return "cooldown"
-    return "invalid_token"
+        return None, None
+    m = re.search(r"Balance\s+(\d+)", text)
+    balance = int(m.group(1)) if m else None
+    m = re.search(r"Today\s+(\d+)\s*/\s*%d" % DAY_CAP, text)
+    today = int(m.group(1)) if m else None
+    return balance, today
 
 
 def main() -> int:
@@ -168,86 +69,58 @@ def main() -> int:
             log(f"Sign-in failed: {type(exc).__name__}: {str(exc)[:180]}")
             return 1
 
-        try:
-            arm_id, claim_id = resolve_action_ids(page)
-        except Exception as exc:
-            log(f"AFK actions not resolved: {exc}")
+        page.goto(f"{BASE}{AFK_PAGE}", wait_until="domcontentloaded")
+        if "/login" in page.url:
+            log("session rejected by the site (login redirect).")
             return 1
-        log("AFK actions resolved.")
+        try:
+            page.wait_for_selector("text=Balance", timeout=20000)
+        except Exception:
+            page.reload(wait_until="domcontentloaded")
+            try:
+                page.wait_for_selector("text=Balance", timeout=15000)
+            except Exception:
+                log("AFK page did not render a Balance readout.")
+                return 1
+
+        balance, today = read_counters(page)
+        log(f"AFK watch started: balance={balance}, today={today}/{DAY_CAP}.")
+        if today is not None and today >= DAY_CAP:
+            log("AFK daily cap already reached; stopping for today.")
+            return 0
 
         earned = 0
-        balance = None
-        armed = False
-        token = None
         while time.time() < deadline:
-            if not armed:
-                try:
-                    res = call_action(page, arm_id, [])
-                except Exception as exc:
-                    log(f"arm network error: {type(exc).__name__}")
-                    time.sleep(30)
-                    continue
-                kind = classify_failure(res)
-                if res and res.get("ok"):
-                    token = res["token"]
-                    armed = True
-                    log(f"armed watch token (reward {res.get('reward')} coins / "
-                        f"{res.get('durationSeconds')}s)")
-                elif kind == "day_limit":
-                    log("AFK daily limit reached; stopping for today.")
-                    return 0
-                elif kind in ("hour_limit", "rate_limit"):
-                    wait = int((res or {}).get("retryAfterSeconds", 600))
-                    if time.time() + min(wait, 900) >= deadline:
-                        log(f"{kind} for {wait}s; resuming in the next scheduled run.")
-                        return 0
-                    log(f"{kind}; waiting {wait}s within this run.")
-                    time.sleep(wait + 5)
-                else:
-                    log(f"arm failed ({kind}); re-signing in and retrying.")
-                    try:
-                        sign_in(page, BASE, email, password)
-                        time.sleep(10)
-                        arm_id, claim_id = resolve_action_ids(page)
-                    except Exception as exc:
-                        log(f"re-sign-in failed: {type(exc).__name__}")
-                        time.sleep(30)
-                    continue
-
-            time.sleep(CLAIM_INTERVAL + (CLAIM_JITTER * time.time() % 1))
+            time.sleep(RELOAD_EVERY)
             try:
-                res = call_action(page, claim_id, [token])
-            except Exception as exc:
-                log(f"claim network error: {type(exc).__name__}; re-arming.")
-                armed = False
-                time.sleep(10)
+                page.reload(wait_until="domcontentloaded")
+            except Exception:
+                pass
+            if "/dashboard/afk" not in page.url:
+                # an ad navigation or logout kicked us off the page
+                log("page left the AFK route; navigating back.")
+                try:
+                    page.goto(f"{BASE}{AFK_PAGE}", wait_until="domcontentloaded")
+                except Exception as exc:
+                    log(f"navigate-back failed: {type(exc).__name__}")
+                    continue
+            new_balance, new_today = read_counters(page)
+            if new_balance is None:
+                log("balance readout missing after reload; retrying next cycle.")
                 continue
-            if res and res.get("ok"):
-                balance = res.get("balance", balance)
-                earned += int(res.get("reward", 3) or 3)
-                armed = False
-                next_token = res.get("nextToken")
-                log(f"claimed +{res.get('reward')} coins (balance {balance}, "
-                    f"+{earned} this run)")
-                if next_token:
-                    # keep the chain: next watch window is already armed
-                    token = next_token
-                    armed = True
-                continue
-            kind = classify_failure(res)
-            armed = False
-            if kind == "day_limit":
-                log("AFK daily limit reached; stopping for today.")
+            if last := balance:
+                delta = new_balance - balance
+                if delta > 0:
+                    earned += delta
+                    log(f"balance {balance} -> {new_balance} (+{delta}, +{earned} this run)")
+                elif delta == 0:
+                    log(f"balance unchanged at {new_balance} (cooldown/cap?)")
+                else:
+                    log(f"balance dropped {balance} -> {new_balance} (purchase elsewhere?)")
+            balance = new_balance
+            if new_today is not None and new_today >= DAY_CAP:
+                log(f"AFK daily cap reached ({new_today}/{DAY_CAP}); stopping for today.")
                 return 0
-            if kind in ("hour_limit", "rate_limit"):
-                log(f"{kind} hit; resuming in the next scheduled run.")
-                return 0
-            if kind == "cooldown":
-                log("cooldown; re-arming in 20s.")
-                time.sleep(20)
-            else:
-                log("claim failed (invalid/expired token); re-arming.")
-                time.sleep(10)
         log(f"watch window over: +{earned} coins this run (balance {balance}).")
         return 0
     finally:
