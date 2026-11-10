@@ -60,7 +60,8 @@ async def main() -> int:
 
     print("Solving Cloudflare challenge (headed Chromium on Xvfb)...", flush=True)
     try:
-        clearance, ua = solve_challenge(BASE)
+        # sync Playwright must not run inside the asyncio loop -> worker thread
+        clearance, ua = await asyncio.to_thread(solve_challenge, BASE)
         print("Cloudflare challenge solved; clearance cookie obtained.")
     except Exception as exc:
         print(f"Cloudflare challenge failed: {exc}", file=sys.stderr)

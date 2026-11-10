@@ -146,7 +146,7 @@ def main() -> int:
         return 2
 
     deadline = time.time() + max_minutes * 60
-    log("Solving Cloudflare challenge (headed Chromium on Xvfb)...", flush=True)
+    log("Solving Cloudflare challenge (headed Chromium on Xvfb)...")
     try:
         clearance, ua = solve_challenge(BASE)
         log("Cloudflare challenge solved; clearance cookie obtained.")
