@@ -34,6 +34,9 @@ import time
 
 import requests
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from mcworldhost_cf import solve_challenge  # noqa: E402
+
 BASE = "https://mcworldhost.de"
 AFK_PAGE = "/dashboard/afk"
 CLAIM_INTERVAL = 62          # seconds between claims (60s window + jitter)
@@ -47,12 +50,19 @@ def log(msg: str) -> None:
     print(msg, flush=True)
 
 
-def new_session(email: str, password: str) -> requests.Session | None:
+def new_session(email: str, password: str, clearance: str = "", ua: str = ""):
+    """Sign in over HTTP. The cf_clearance cookie (+ matching UA) satisfies the
+    Cloudflare edge; the session then carries it for all later calls."""
     session = requests.Session()
-    session.headers["User-Agent"] = (
-        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36"
-    )
+    if ua:
+        session.headers["User-Agent"] = ua
+    if clearance:
+        session.cookies.set("cf_clearance", clearance, domain="mcworldhost.de")
+    else:
+        session.headers["User-Agent"] = (
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36"
+        )
     try:
         response = session.post(
             f"{BASE}/api/auth/sign-in/email",
@@ -136,7 +146,14 @@ def main() -> int:
         return 2
 
     deadline = time.time() + max_minutes * 60
-    session = new_session(email, password)
+    log("Solving Cloudflare challenge (headed Chromium on Xvfb)...", flush=True)
+    try:
+        clearance, ua = solve_challenge(BASE)
+        log("Cloudflare challenge solved; clearance cookie obtained.")
+    except Exception as exc:
+        log(f"Cloudflare challenge failed: {exc}")
+        return 1
+    session = new_session(email, password, clearance, ua)
     if session is None:
         return 1
     ids = resolve_action_ids(session)
@@ -177,7 +194,7 @@ def main() -> int:
                 time.sleep(wait + 5)
             else:
                 log(f"arm failed ({kind}); re-signing in and retrying.")
-                session = new_session(email, password) or session
+                session = new_session(email, password, clearance, ua) or session
                 time.sleep(20)
             continue
 

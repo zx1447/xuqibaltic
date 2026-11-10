@@ -10,13 +10,20 @@ import sys
 import requests
 from playwright.async_api import async_playwright
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from mcworldhost_cf import solve_challenge  # noqa: E402
+
 BASE = "https://mcworldhost.de"
 RUNTIME_OFFER = "7 days extra runtime"
 RUNTIME_COST = 500
 
 
-def create_session(email: str, password: str) -> requests.Session | None:
+def create_session(email: str, password: str, clearance: str, ua: str):
+    """Sign in over HTTP; the cf_clearance cookie (+ matching UA) is what gets
+    the request past the Cloudflare edge that would otherwise 403 it."""
     session = requests.Session()
+    session.headers["User-Agent"] = ua
+    session.cookies.set("cf_clearance", clearance, domain="mcworldhost.de")
     try:
         response = session.post(
             f"{BASE}/api/auth/sign-in/email",
@@ -51,7 +58,15 @@ async def main() -> int:
         print("Missing MCWH_EMAIL or MCWH_PASSWORD secret.", file=sys.stderr)
         return 2
 
-    session = create_session(email, password)
+    print("Solving Cloudflare challenge (headed Chromium on Xvfb)...", flush=True)
+    try:
+        clearance, ua = solve_challenge(BASE)
+        print("Cloudflare challenge solved; clearance cookie obtained.")
+    except Exception as exc:
+        print(f"Cloudflare challenge failed: {exc}", file=sys.stderr)
+        return 1
+
+    session = create_session(email, password, clearance, ua)
     if session is None:
         return 1
     token = session.cookies.get("__Secure-better-auth.session_token")
@@ -60,11 +75,19 @@ async def main() -> int:
         return 1
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch()
-        context = await browser.new_context(locale="en-US")
+        # headless=False: Cloudflare flags headless Chromium; the headed browser
+        # on Xvfb shares the DISPLAY the challenge solver prepared.
+        browser = await p.chromium.launch(headless=False, args=["--no-sandbox"])
+        context = await browser.new_context(locale="en-US", user_agent=ua)
         # Account/shop actions do not need ad resources.
         await context.route("**/api/ad-slot**", lambda route: route.abort())
         await context.add_cookies([{
+            "name": "cf_clearance",
+            "value": clearance,
+            "domain": ".mcworldhost.de",
+            "path": "/",
+            "secure": True,
+        }, {
             "name": "__Secure-better-auth.session_token",
             "value": token,
             "domain": "mcworldhost.de",
