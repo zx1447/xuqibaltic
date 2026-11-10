@@ -6,9 +6,9 @@
  "node_name": "Teradata 免费PaaS",
  "web_dns": "web-nzprobe-mhgdw85x7ua6ij0t.env.trial.teradata.com",
  "create_date": "2026-11-09T12:58:03.591Z",
- "jupyter_token": "487a689c4fa7f2eb91d026a682972010006ae2365fa95308",
+ "jupyter_token": "e129ce032bd870bed289c80bd18c84fccbc93cab0816bc38",
  "last_rebuild": "",
  "last_rebuild_reason": "",
- "last_run": "2026-11-10 21:09:26",
- "last_result": "fail: 等待 nzprobe RUNNING 超时 900s"
+ "last_run": "2026-11-10 21:46:09",
+ "last_result": "warn: 环境已恢复但面板未见上报"
 }
