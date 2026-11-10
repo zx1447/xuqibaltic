@@ -144,6 +144,14 @@ def sign_in(page, base: str, email: str, password: str, timeout: int = 75000) ->
             except Exception:
                 pass
             if "invalid email" in body or "ungültig" in body:
+                # the site throttles frequent logins with the same generic 401;
+                # cool down once before concluding the credentials are bad
+                if attempt == 1:
+                    print("sign-in rejected; cooling down 90s (possible throttle)...", flush=True)
+                    time.sleep(90)
+                    if not _wait_login_form(page, 60):
+                        raise RuntimeError("login form did not render after cooldown")
+                    continue
                 raise RuntimeError("invalid credentials")
             # the POST can be held by Cloudflare well past the timeout before
             # finally redirecting - check whether we actually made it
