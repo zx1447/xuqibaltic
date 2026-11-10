@@ -32,3 +32,12 @@ jobs:
           MCWH_PASSWORD: ${{ secrets.MCWH_PASSWORD }}
           MCWH_AFK_MAX_MINUTES: '52'
         run: python .github/scripts/mcworldhost_afk.py
+      - name: Upload debug snapshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcwh-debug-afk
+          path: |
+            mcwh_debug_*.png
+            mcwh_debug_*.txt
+          if-no-files-found: ignore

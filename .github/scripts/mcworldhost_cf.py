@@ -30,16 +30,33 @@ def _ensure_display() -> None:
     time.sleep(2)
 
 
+def _try_click_turnstile(page) -> None:
+    """Attempt to click the Turnstile checkbox inside the challenge iframe."""
+    try:
+        for frame in page.frames:
+            if "challenge" in (frame.url or "") or "turnstile" in (frame.url or ""):
+                box = frame.locator("input[type='checkbox'], label")
+                if box.count() > 0:
+                    box.first.click(timeout=3000)
+                    return
+    except Exception:
+        pass
+
+
 def _wait_login_form(page, wait_seconds: int) -> bool:
     """Wait until the REAL login form renders. The challenge page also has an
     <h1>, so detect the form by its password input instead."""
     deadline = time.time() + wait_seconds
     reloaded = False
+    last_click = 0.0
     while time.time() < deadline:
         try:
             title = page.title()
         except Exception:
             title = ""
+        if "just a moment" in title.lower() and time.time() - last_click > 6:
+            last_click = time.time()
+            _try_click_turnstile(page)
         if "just a moment" not in title.lower():
             try:
                 page.wait_for_selector("input[type='password']", timeout=5000)
@@ -54,6 +71,16 @@ def _wait_login_form(page, wait_seconds: int) -> bool:
                 pass
         time.sleep(3)
     return False
+
+
+def _debug_snapshot(page, tag: str) -> None:
+    """Best-effort screenshot + URL/title dump for CI artifact upload."""
+    try:
+        page.screenshot(path=f"mcwh_debug_{tag}.png", full_page=True)
+        with open(f"mcwh_debug_{tag}.txt", "w") as f:
+            f.write(f"url={page.url}\ntitle={page.title()}\n")
+    except Exception:
+        pass
 
 
 def open_session(base: str = "https://mcworldhost.de", wait_seconds: int = 90):
@@ -78,6 +105,7 @@ def open_session(base: str = "https://mcworldhost.de", wait_seconds: int = 90):
     except Exception:
         pass
     if not _wait_login_form(page, wait_seconds):
+        _debug_snapshot(page, "open_session")
         try:
             last_title = page.title()
         except Exception:
@@ -96,6 +124,7 @@ def sign_in(page, base: str, email: str, password: str, timeout: int = 45000) ->
         # fallback when the form is not present at all.
         page.goto(f"{base}/login", wait_until="domcontentloaded")
         if not _wait_login_form(page, 90):
+            _debug_snapshot(page, "sign_in")
             raise RuntimeError("login form did not render (challenge stuck?)")
     for attempt in (1, 2):
         page.get_by_role("textbox", name=re.compile(r"mail", re.I)).first.fill(email)
@@ -113,6 +142,8 @@ def sign_in(page, base: str, email: str, password: str, timeout: int = 45000) ->
             if "invalid email" in body or "ungültig" in body:
                 raise RuntimeError("invalid credentials")
             # transient (challenge hold or click race) -> one more attempt
+            _debug_snapshot(page, f"sign_in_attempt{attempt}")
             if not _wait_login_form(page, 60):
+                _debug_snapshot(page, f"sign_in_stuck{attempt}")
                 raise RuntimeError("login form did not render (challenge stuck?)")
     raise RuntimeError("login did not reach the dashboard after 2 attempts")

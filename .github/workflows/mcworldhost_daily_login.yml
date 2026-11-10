@@ -31,3 +31,12 @@ jobs:
           MCWH_EMAIL: ${{ secrets.MCWH_EMAIL }}
           MCWH_PASSWORD: ${{ secrets.MCWH_PASSWORD }}
         run: python .github/scripts/mcworldhost_daily_login.py
+      - name: Upload debug snapshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcwh-debug
+          path: |
+            mcwh_debug_*.png
+            mcwh_debug_*.txt
+          if-no-files-found: ignore
