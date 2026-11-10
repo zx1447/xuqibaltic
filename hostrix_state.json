@@ -1,11 +1,11 @@
 {
-  "hours_left": 40,
+  "hours_left": 33,
   "cooldown_h": 11.0,
   "last_check": "2026-11-07T07:05:00Z",
-  "last_action": "wait_next_tick",
-  "last_error": null,
-  "next_allowed_epoch": 1794284613,
-  "last_check_epoch": 1794271927,
+  "last_action": "renew_nochange",
+  "last_error": "服务端拒绝：⏰ Added 48 hours. It has 3d 9h now. You can add more in 12 hours.",
+  "next_allowed_epoch": 1794299589,
+  "last_check_epoch": 1794298689,
   "last_click_epoch": 1794245013,
   "last_success_epoch": 1794245013
 }
