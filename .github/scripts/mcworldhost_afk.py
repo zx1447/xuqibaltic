@@ -1,15 +1,19 @@
 """MCWorldHost AFK coin farming via the real UI (headed browser on Xvfb).
 
-The site (2026-11 build) credits +3 coins per 60s while the Earn AFK tab is
-open with its ad slots visible ("Keep tab open · +3 coins every 60s · reload
-every 5 min"), and the old server-action IDs no longer live in the page
-chunk (the build splits them into loader + sibling chunks now). So we simply
-keep the page open like a user and reload it every few minutes to re-arm the
-watch window, tracking the balance text for progress.
+The site (2026-11 build) credits +3 coins per 60s ONLY while the Earn AFK tab
+has its ad slots actually rendering (the page waits for a "mcwh-ad-status"
+ok=true postMessage from the same-origin ad wrapper). If the ads never load,
+it shows a "No ad blocker" warning and keeps the 60s ring paused - no coins.
 
-All interaction happens in the same headed Chromium that solved the
-Cloudflare challenge and signed in - python-requests is rejected by the edge
-even with a valid clearance cookie, so the browser stays the only channel.
+Observed on GitHub runners (and our sandbox): the ad network Adsterra
+(highperformanceformat.com) returns 403 for real-browser UA requests from
+datacenter IPs, so the wrapper never reports ok -> crediting never starts.
+Nothing on our side can honestly change that; faking the postMessage would be
+ad fraud and is NOT done. So the run is adaptive:
+
+  - ads blocked  -> one "Check again" retry, then exit early (no wasted minutes)
+  - ads healthy  -> keep the page open like a user, reload every 4 min to
+    re-arm the watch window, track the balance text for progress
 
 Caps observed: +3/60s, 150 per rolling hour, 500 per day.
 """
@@ -43,6 +47,15 @@ def read_counters(page):
     m = re.search(r"Today\s+(\d+)\s*/\s*%d" % DAY_CAP, text)
     today = int(m.group(1)) if m else None
     return balance, today
+
+
+def ads_unavailable(page) -> bool:
+    """True when the page shows the 'No ad blocker' warning (= crediting paused)."""
+    try:
+        page.wait_for_selector("text=No ad blocker", timeout=8000)
+        return True
+    except Exception:
+        return False
 
 
 def main() -> int:
@@ -82,6 +95,23 @@ def main() -> int:
             except Exception:
                 log("AFK page did not render a Balance readout.")
                 return 1
+        page.wait_for_timeout(8000)  # give the ad wrapper time to report status
+
+        # —— 广告可用性判定: Adsterra 拒绝数据中心 IP 时站点显示警告、计币暂停 ——
+        if ads_unavailable(page):
+            try:
+                page.get_by_role("button", name=re.compile(r"check again", re.I)).first.click(timeout=8000)
+                log("clicked 'Check again'; re-checking ad status in 20s...")
+                page.wait_for_timeout(20000)
+            except Exception:
+                pass
+            if ads_unavailable(page):
+                balance, today = read_counters(page)
+                log(f"ads are NOT served to this egress (Adsterra 403 for datacenter IPs) - "
+                    f"site keeps crediting paused (balance={balance}, today={today}/{DAY_CAP}).")
+                log("Nothing honest to automate here; exiting early instead of idling 52 min.")
+                return 0
+        log("ad status ok - crediting engine should be running.")
 
         balance, today = read_counters(page)
         log(f"AFK watch started: balance={balance}, today={today}/{DAY_CAP}.")
