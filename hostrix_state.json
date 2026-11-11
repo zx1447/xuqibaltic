@@ -2,10 +2,10 @@
   "hours_left": 8,
   "cooldown_h": 12.0,
   "last_check": "2026-11-10T08:18:09Z",
-  "last_action": "wait_next_tick",
-  "last_error": null,
+  "last_action": "login_failed",
+  "last_error": "GET /login HTTP 530",
   "last_click_epoch": 1794347898,
   "last_success_epoch": 1794347898,
   "next_allowed_epoch": 1794391098,
-  "last_check_epoch": 1794388473
+  "last_check_epoch": 1794417513
 }
