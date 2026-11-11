@@ -17,6 +17,9 @@ Teradata ClearScape 哪吒探针保活 + 自动唤醒 + 到期重建 + 进程保
                    等 2 分钟仍无上报 -> 环境 stop→start 重建
                    重建 RUNNING 后再次 ensure_probe_processes（容器重启进程全清，必须重拉）
   5. 重建后自动重部署哪吒探针（kernel websocket 执行部署脚本）
+  6. Vantage 活动: 每轮 kernel 执行真实 SQL（SELECT + keepalive_log 写入）并
+     PUT notebook 文件 —— 清零平台「48h 无 Vantage 查询 / 2h 无 Jupyter 活动」
+     两个空闲计数器，防止被 Teradata 强制暂停（2026-11-11 nzprobe 被暂停的根因）
 
 教训（2026-11-10 掉线复盘）:
   - 环境状态机: STOPPING 状态 PATCH start 会 400；必须等 STOPPED 再 start，
@@ -476,6 +479,106 @@ def ensure_probe_processes(env):
         return False
 
 
+# ------------------------------------------ 平台空闲判定对抗（Vantage 查询 + Jupyter 活动）
+# Teradata 平台空闲策略（2026-11-11 官方邮件实锤，nzprobe 已被强制暂停一次）:
+#   - 48h 未对 Vantage 发起查询 -> 环境被平台暂停（agent 跟着掉线）
+#   - 近 2h Jupyter 无活动       -> 计入空闲
+# kernel exec 起会话/执行本身就是 Jupyter 活动；这里再跑一条真实 SQL，
+# 把「Vantage 查询」计数器也清零。SQL 失败不阻断保活主流程。
+VANTAGE_CODE = r'''
+import json
+res = {"steps": [], "ok": False, "host": None}
+con = None
+err = None
+for h in ("localhost", "127.0.0.1"):
+    try:
+        import teradatasql
+        con = teradatasql.connect('{"host":"%s","user":"demo_user","password":"demo_user"}' % h)
+        res["host"] = h
+        break
+    except Exception as e:
+        err = repr(e)[:160]
+        res["steps"].append(["connect_" + h, repr(e)[:110]])
+if con is None:
+    res["error"] = "connect failed: " + str(err)
+else:
+    try:
+        cur = con.execute("SELECT CURRENT_TIMESTAMP, DATABASE, USER")
+        res["steps"].append(["select", str(cur.fetchall())])
+        res["ok"] = True
+    except Exception as e:
+        res["steps"].append(["select", repr(e)[:110]])
+    try:
+        con.execute("CREATE TABLE demo_user.keepalive_log (ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP, note VARCHAR(64))")
+        res["steps"].append(["create_table", "ok"])
+    except Exception as e:
+        s = repr(e)[:110]
+        res["steps"].append(["create_table", "exists" if ("exists" in s.lower() or "already" in s.lower()) else s])
+    try:
+        con.execute("INSERT INTO demo_user.keepalive_log (note) VALUES ('nz-keepalive')")
+        res["steps"].append(["insert", "ok"])
+    except Exception as e:
+        res["steps"].append(["insert", repr(e)[:110]])
+    try:
+        cur = con.execute("SELECT TOP 1 * FROM demo_user.keepalive_log ORDER BY ts DESC")
+        res["steps"].append(["last", str(cur.fetchall())])
+    except Exception as e:
+        res["steps"].append(["last", repr(e)[:110]])
+    try:
+        con.close()
+    except Exception:
+        pass
+print("VANTAGE_JSON::" + json.dumps(res))
+'''
+
+
+def vantage_activity(env, attempts=3):
+    """环境内执行真实 Vantage SQL（清零平台 48h 空闲查询计数器）。
+    顺带 PUT 一个 notebook 文件加强 Jupyter 活动信号。返回查询是否成功。"""
+    try:
+        base, jt = jupyter_endpoint(env)
+    except Exception as ex:
+        log("vantage_activity: 取 Jupyter endpoint 失败: %s" % str(ex)[:150])
+        STATE["last_sql"] = "skip"
+        STATE["last_sql_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+        return False
+    # 文件级 Jupyter 活动（contents API 写入，信号双保险）
+    try:
+        nb = {"cells": [{"cell_type": "code", "metadata": {}, "source": ["# nz keepalive touch"],
+                         "outputs": [], "execution_count": None}],
+              "metadata": {}, "nbformat": 4, "nbformat_minor": 5}
+        st, r = jupyter_api(base, jt, "PUT", "/api/contents/keepalive_touch.ipynb",
+                            {"type": "notebook", "format": "json", "content": nb}, timeout=30)
+        log("Jupyter 文件活动 touch -> HTTP %s" % st)
+    except Exception as ex:
+        log("Jupyter touch 异常（不阻断）: %s" % str(ex)[:120])
+    for i in range(attempts):
+        try:
+            out = kernel_execute(base, jt, VANTAGE_CODE, timeout=300)
+            marker = "VANTAGE_JSON::"
+            idx = out.rfind(marker)
+            parsed = None
+            if idx >= 0:
+                try:
+                    parsed = json.loads(out[idx + len(marker):].strip().splitlines()[0])
+                except Exception:
+                    parsed = None
+            if parsed and parsed.get("ok"):
+                log("Vantage SQL 活动 ✓ host=%s steps=%s" % (
+                    parsed.get("host"), json.dumps(parsed.get("steps"), ensure_ascii=False)[:400]))
+                STATE["last_sql"] = "ok"
+                STATE["last_sql_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+                return True
+            log("Vantage SQL 第 %d/%d 次未成功: %s" % (i + 1, attempts, (out[-400:] if out else "无输出")))
+        except Exception as ex:
+            log("vantage_activity 第 %d/%d 次异常: %s" % (i + 1, attempts, str(ex)[:200]))
+        time.sleep(30)
+    STATE["last_sql"] = "fail"
+    STATE["last_sql_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    log("Vantage SQL 活动 ✗（本轮放弃，下一轮 workflow 重试）")
+    return False
+
+
 # ---------------------------------------------------------------- 面板校验/改名
 def panel_token():
     st, txt = http("POST", PANEL_HTTP + "/api/v1/login",
@@ -565,6 +668,12 @@ def rebuild(tok, reason):
     time.sleep(15)
     panel_fix_name()
 
+    # 新环境立即跑一次真实 Vantage SQL，重置平台空闲计数（否则 48h 后又被暂停）
+    try:
+        vantage_activity(env)
+    except Exception as ex:
+        log("重建后 SQL 活动异常（不阻断）: %s" % str(ex)[:150])
+
     # 更新 state（域名/创建时间/部署信息）→ workflow 会 commit 回分支
     STATE["web_dns"] = env.get("webDnsName") or urllib.parse.urlparse(base).hostname
     STATE["create_date"] = env.get("createDate")
@@ -632,6 +741,12 @@ def main():
         STATE["jupyter_token"] = jt
     except Exception as ex:
         log("Jupyter 探活异常（不阻断）: %s" % str(ex)[:150])
+
+    # 平台空闲判定对抗: 每轮真实 Vantage SQL + Jupyter 活动（见 vantage_activity 注释）
+    if DRY:
+        log("DRY-RUN: 跳过 Vantage SQL 活动")
+    else:
+        vantage_activity(env)
 
     if DRY:
         log("DRY-RUN: 跳过探针刷新与面板上报确认")
