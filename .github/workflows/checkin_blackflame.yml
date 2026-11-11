@@ -35,14 +35,20 @@ jobs:
           echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/cloudflare-warp.list
           sudo apt-get update -qq
           sudo apt-get install -y cloudflare-warp
-          sudo warp-cli --accept-tos registration new
+          sudo systemctl restart warp-svc || true
+          sleep 3
+          sudo warp-cli --accept-tos registration new || true
+          sudo warp-cli --accept-tos set-mode warp
           sudo warp-cli --accept-tos connect
+          # 真通判定：cdn-cgi/trace 必须 warp=on（ip 字面量连通，排除 DNS 干扰）
           ok=0
-          for i in $(seq 1 30); do
-            st=$(sudo warp-cli --accept-tos status 2>&1 | tr -d '\n')
-            echo "$st"
-            if echo "$st" | grep -qi 'connected'; then ok=1; break; fi
-            sleep 2
+          for i in $(seq 1 20); do
+            trace=$(curl -s --max-time 8 https://1.1.1.1/cdn-cgi/trace || true)
+            echo "--- trace try $i ---"; echo "$trace"
+            if echo "$trace" | grep -q 'warp=on'; then ok=1; break; fi
+            sudo warp-cli --accept-tos status || true
+            sudo warp-cli --accept-tos connect || true
+            sleep 3
           done
           test "$ok" = 1
           echo "--- 出口 IP（应为 Cloudflare 104.x/162.x）---"
