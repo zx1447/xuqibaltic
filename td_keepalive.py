@@ -36,8 +36,10 @@ secrets:
   python td_keepalive.py            # 常规保活
   python td_keepalive.py --dry-run  # 只登录+读状态，不做任何变更
 """
+import base64
 import json
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -485,20 +487,24 @@ def ensure_probe_processes(env):
 #   - 近 2h Jupyter 无活动       -> 计入空闲
 # kernel exec 起会话/执行本身就是 Jupyter 活动；这里再跑一条真实 SQL，
 # 把「Vantage 查询」计数器也清零。SQL 失败不阻断保活主流程。
-VANTAGE_CODE = r'''
-import json
-res = {"steps": [], "ok": False, "host": None}
+VANTAGE_CODE_TMPL = r'''
+import base64, json
+res = {"steps": [], "ok": False, "host": None, "user": None}
+creds = json.loads(base64.b64decode("__CREDS_B64__").decode())
+import teradatasql
 con = None
 err = None
-for h in ("localhost", "127.0.0.1"):
+for u, p in creds:
+    if not p:
+        continue
     try:
-        import teradatasql
-        con = teradatasql.connect('{"host":"%s","user":"demo_user","password":"demo_user"}' % h)
-        res["host"] = h
+        con = teradatasql.connect(json.dumps({"host": "__DBC_HOST__", "user": u, "password": p}))
+        res["user"] = u
+        res["host"] = "__DBC_HOST__"
         break
     except Exception as e:
         err = repr(e)[:160]
-        res["steps"].append(["connect_" + h, repr(e)[:110]])
+        res["steps"].append(["connect_" + u, repr(e)[:90]])
 if con is None:
     res["error"] = "connect failed: " + str(err)
 else:
@@ -532,6 +538,28 @@ print("VANTAGE_JSON::" + json.dumps(res))
 '''
 
 
+def vantage_db_host(env):
+    """从环境 services 里解析 Vantage DBC 主机（bteq .logon {host}/{user}）"""
+    try:
+        for s in env.get("services", []):
+            if s.get("name") == "Vantage":
+                m = re.search(r"logon\s+([A-Za-z0-9.\-]+)/", s.get("url", ""))
+                if m:
+                    return m.group(1)
+    except Exception:
+        pass
+    return (STATE.get("env_name") or "nzprobe") + ".env.trial.teradata.com"
+
+
+def build_vantage_code(dbc_host):
+    """生成 SQL 活动代码；实例密码只进 kernel 代码，绝不写日志。"""
+    pwd = os.environ.get("TD_ENV_PASSWORD", "") or ""
+    creds = [("demo_user", pwd), ("dbc", pwd)] if pwd else [("demo_user", "demo_user"), ("dbc", "dbc")]
+    return (VANTAGE_CODE_TMPL
+            .replace("__DBC_HOST__", dbc_host)
+            .replace("__CREDS_B64__", base64.b64encode(json.dumps(creds).encode()).decode()))
+
+
 def vantage_activity(env, attempts=3):
     """环境内执行真实 Vantage SQL（清零平台 48h 空闲查询计数器）。
     顺带 PUT 一个 notebook 文件加强 Jupyter 活动信号。返回查询是否成功。"""
@@ -552,9 +580,11 @@ def vantage_activity(env, attempts=3):
         log("Jupyter 文件活动 touch -> HTTP %s" % st)
     except Exception as ex:
         log("Jupyter touch 异常（不阻断）: %s" % str(ex)[:120])
+    dbc_host = vantage_db_host(env)
+    code = build_vantage_code(dbc_host)
     for i in range(attempts):
         try:
-            out = kernel_execute(base, jt, VANTAGE_CODE, timeout=300)
+            out = kernel_execute(base, jt, code, timeout=300)
             marker = "VANTAGE_JSON::"
             idx = out.rfind(marker)
             parsed = None
@@ -564,8 +594,9 @@ def vantage_activity(env, attempts=3):
                 except Exception:
                     parsed = None
             if parsed and parsed.get("ok"):
-                log("Vantage SQL 活动 ✓ host=%s steps=%s" % (
-                    parsed.get("host"), json.dumps(parsed.get("steps"), ensure_ascii=False)[:400]))
+                log("Vantage SQL 活动 ✓ host=%s user=%s steps=%s" % (
+                    parsed.get("host"), parsed.get("user"),
+                    json.dumps(parsed.get("steps"), ensure_ascii=False)[:400]))
                 STATE["last_sql"] = "ok"
                 STATE["last_sql_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
                 return True
