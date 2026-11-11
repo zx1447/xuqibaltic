@@ -1,0 +1,79 @@
+name: bkt Renew
+
+# 免费服自动续期（+8h / 次，窗口 = 到期前 2h 或过期后）
+#  · cron 每 20 分钟巡检；canRenew=true 时解 Turnstile 并 POST renew
+#  · Turnstile 机房 IP 会被判 600010 —— 配 BH_CAPSOLVER_KEY / BH_2CAPTCHA_KEY
+#    可全网全自动；或 dispatch 时指定 solver=browser 实测 runner 能不能解
+on:
+  schedule:
+    - cron: '8,28,48 * * * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: '无视窗口强行尝试（调试）'
+        required: false
+        default: ''
+      solver:
+        description: '覆盖解算器（capsolver/2captcha/browser/manual/auto）'
+        required: false
+        default: ''
+
+concurrency:
+  group: bkt-renew
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  renew:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: bkt
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 安装 Playwright（仅 browser 解算器）
+        env:
+          S: ${{ github.event.inputs.solver || secrets.BH_SOLVER || 'auto' }}
+        run: |
+          if [ "$S" = "browser" ]; then
+            pip install playwright
+            python -m playwright install --with-deps chromium
+          else
+            echo "solver=$S，跳过 Playwright"
+          fi
+
+      - name: 续期
+        id: renew
+        env:
+          BH_COOKIE: ${{ secrets.BH_COOKIE }}
+          BH_PAT: ${{ secrets.BH_PAT }}
+          BH_SOLVER: ${{ github.event.inputs.solver || secrets.BH_SOLVER || 'auto' }}
+          BH_CAPSOLVER_KEY: ${{ secrets.BH_CAPSOLVER_KEY }}
+          BH_2CAPTCHA_KEY: ${{ secrets.BH_2CAPTCHA_KEY }}
+          BH_FORCE: ${{ github.event.inputs.force }}
+        run: python renew_bkt.py
+
+      - name: 汇总
+        if: always()
+        run: |
+          echo "动作：${{ steps.renew.outputs.action }}"
+          echo "剩余：${{ steps.renew.outputs.seconds_remaining }}s"
+          echo "到期：${{ steps.renew.outputs.active_until }}"
+          echo "增量：${{ steps.renew.outputs.gain_hours }}h"
+
+      - name: 提交状态
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add bkt_state.json || true
+          git diff --cached --quiet && echo "无状态变化" && exit 0
+          git commit -m "Update bkt state [skip ci]"
+          git push origin HEAD:bkt
