@@ -1,14 +1,14 @@
 {
-  "afk_credits": 9263,
+  "afk_credits": 9584,
   "cap_detected_at": "2026-11-11 07:51:10",
-  "claimed_today": 999,
-  "credits": 9313,
+  "claimed_today": 320,
+  "credits": 9634,
   "daily_limit": 1000,
-  "last_claim_time": "2026-11-11 02:07:17",
-  "last_claim_timestamp": 1794334037,
-  "last_status": "daily_cap_reached",
+  "last_claim_time": "2026-11-11 13:46:43",
+  "last_claim_timestamp": 1794376003,
+  "last_status": "cooldown",
   "session_id": "afk-b5aa092e19a946a2886051597cdba532",
-  "total_claims": 9297,
-  "updated_at": "2026-11-11 07:51:10",
+  "total_claims": 9617,
+  "updated_at": "2026-11-11 13:47:09",
   "username": "alejandro"
 }
