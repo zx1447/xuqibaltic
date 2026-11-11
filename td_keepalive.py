@@ -508,25 +508,26 @@ for u, p in creds:
 if con is None:
     res["error"] = "connect failed: " + str(err)
 else:
+    cur = con.cursor()
     try:
-        cur = con.execute("SELECT CURRENT_TIMESTAMP, DATABASE, USER")
+        cur.execute("SELECT CURRENT_TIMESTAMP, DATABASE, USER")
         res["steps"].append(["select", str(cur.fetchall())])
         res["ok"] = True
     except Exception as e:
         res["steps"].append(["select", repr(e)[:110]])
     try:
-        con.execute("CREATE TABLE demo_user.keepalive_log (ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP, note VARCHAR(64))")
+        cur.execute("CREATE TABLE demo_user.keepalive_log (ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP, note VARCHAR(64))")
         res["steps"].append(["create_table", "ok"])
     except Exception as e:
         s = repr(e)[:110]
         res["steps"].append(["create_table", "exists" if ("exists" in s.lower() or "already" in s.lower()) else s])
     try:
-        con.execute("INSERT INTO demo_user.keepalive_log (note) VALUES ('nz-keepalive')")
+        cur.execute("INSERT INTO demo_user.keepalive_log (note) VALUES ('nz-keepalive')")
         res["steps"].append(["insert", "ok"])
     except Exception as e:
         res["steps"].append(["insert", repr(e)[:110]])
     try:
-        cur = con.execute("SELECT TOP 1 * FROM demo_user.keepalive_log ORDER BY ts DESC")
+        cur.execute("SELECT TOP 1 * FROM demo_user.keepalive_log ORDER BY ts DESC")
         res["steps"].append(["last", str(cur.fetchall())])
     except Exception as e:
         res["steps"].append(["last", repr(e)[:110]])
