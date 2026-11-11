@@ -44,10 +44,19 @@ def log(msg):
     print(msg, flush=True)
 
 
-def req(url, method="GET", headers=None, data=None, timeout=30):
-    r = urllib.request.Request(url, data=data, method=method, headers=headers or {})
-    with opener.open(r, timeout=timeout) as resp:
-        return resp.status, resp.read().decode("utf-8", "replace")
+def req(url, method="GET", headers=None, data=None, timeout=30, retries=5):
+    """网络请求带指数重试（WARP/网络 首连偶发 TLS 失败，重试即愈）"""
+    last = None
+    for i in range(retries):
+        try:
+            r = urllib.request.Request(url, data=data, method=method, headers=headers or {})
+            with opener.open(r, timeout=timeout) as resp:
+                return resp.status, resp.read().decode("utf-8", "replace")
+        except Exception as e:  # noqa: BLE001 —— 网络层一律重试
+            last = e
+            log(f"  [网络重试 {i + 1}/{retries}] {type(e).__name__}: {e}")
+            time.sleep(2 + i * 2)
+    raise last
 
 
 def site(path, method="GET", headers=None, data=None):
