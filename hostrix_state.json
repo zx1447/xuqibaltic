@@ -2,10 +2,10 @@
   "hours_left": 8,
   "cooldown_h": 12.0,
   "last_check": "2026-11-10T08:18:09Z",
-  "last_action": "login_failed",
-  "last_error": "GET /login HTTP 530",
+  "last_action": "read_failed",
+  "last_error": "页面里找不到续期表单",
   "last_click_epoch": 1794347898,
   "last_success_epoch": 1794347898,
   "next_allowed_epoch": 1794391098,
-  "last_check_epoch": 1794417513
+  "last_check_epoch": 1794440018
 }
