@@ -1,7 +1,7 @@
 name: Teradata Keepalive
 
 # 双 cron 提高触发率（GitHub schedule 会随机丢触发）:
-#   - "23 */2 * * *"  偶数小时 :23
+#   - "23 * * * *"     每小时 :23（2026-11-11 平台空闲策略: 近 2h 无 Jupyter 活动即计空闲）
 #   - "47 1-23/2 * * *" 奇数小时 :47
 # 最大断档 ~84 分钟。每轮:
 #   - 环境 STOPPING/STOPPED -> 幂等 start（STOPPED 时重发）
@@ -16,7 +16,7 @@ on:
         required: false
         default: ""
   schedule:
-    - cron: "23 */2 * * *"
+    - cron: "23 * * * *"
     - cron: "47 1-23/2 * * *"
 
 concurrency:
