@@ -1,7 +1,13 @@
-# BlackFlame Studio 自动签到（看广告领金币）
+# BlackFlame Studio 一直运行签到（看广告领金币）
 
-对 `dashbord.blackflamestudio.us.ci` 的无人值守签到：每天自动"看广告"领金币（coins）。
+对 `dashbord.blackflamestudio.us.ci` 的无人值守签到：持续"看广告"领金币（coins）。
 金币是该站的积分/资源币 —— 开服按 **Coins/Hour** 烧币，余额不足服务器会被暂停。
+
+## 速率
+
+- **约 35 秒/轮（服务端硬性最低 30 秒 + 衔接），+5 币/轮**
+- 实测连刷无冷却、未见日限 ≈ **490 币/小时**
+- 持续模式：每班 350 分钟 ≈ 2700 币；全天 4 班接力 ≈ **1.1 万币/天**
 
 ## 机制（2026-11-11 逆向实测）
 
@@ -36,15 +42,17 @@ Discord Token
 
 ```bash
 export BFLAME_DISCORD_TOKEN='MTxx...'   # Discord 账号 token
-export BFLAME_WATCHES=1                  # 可选，本轮次数（默认 1）
+export BFLAME_RUN_MINUTES=350            # 持续模式：跑 350 分钟
+# 或定数模式：BFLAME_RUN_MINUTES=0 BFLAME_WATCHES=5
 python3 checkin_blackflame.py
 ```
 
 CI（main 分支 `checkin_blackflame.yml`）：
 
-- cron `0 1 * * *`（北京 09:00）自动跑；`workflow_dispatch` 可手动指定轮数
+- cron `25 0,6,12,18 * * *`（每天 4 班接力）每班持续 ~350 分钟，concurrency 串行无缝排队
+- 持续模式下会话 4 小时主动重登（会话 6 小时过期）；网络抖动自动重试
 - Secret：`BFLAME_DISCORD_TOKEN`（Discord token，敏感勿外传）
-- 结果写进 Job Summary（金币前后对比）
+- 手动 dispatch 可调 `run_minutes`（>0=持续分钟；0=按 `watches` 轮数）
 
 ## 注意
 
@@ -52,4 +60,4 @@ CI（main 分支 `checkin_blackflame.yml`）：
   放行 Cloudflare（WARP 104.28.x）和小厂出口。CI 因此先装 `cloudflare-warp` 再签到
 - Discord token 等同账号密码，只放 GitHub Secret，勿提交进文件
 - token 在改密码/登出所有设备时会失效，到时更新 Secret 即可
-- 适度刷币：默认每天 1 轮（+5），手动 dispatch 可加轮
+- 长跑遇站点限制/风控错误会自动退避（30~300 秒）并记录，不会硬撞

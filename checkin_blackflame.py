@@ -9,10 +9,14 @@
 #
 # 环境变量：
 #   BFLAME_DISCORD_TOKEN   必需  Discord 账号 token（MTxx... 格式）
-#   BFLAME_WATCHES         可选  本轮看广告次数，默认 1（每轮约 35 秒，+5 币）
+#   BFLAME_RUN_MINUTES     可选  >0 = 持续循环跑多少分钟（一直运行模式）
+#   BFLAME_WATCHES         可选  RUN_MINUTES=0 时的轮数，默认 1（每轮约 35 秒，+5 币）
 #   BFLAME_BASE            可选  站点地址，默认 https://dashbord.blackflamestudio.us.ci
 #
-# 退出码：0 成功；2 签到失败；3 登录链失败
+# 节奏：每轮 startAdWatch → 等 requiredSeconds(30s) → verify，+5 coins；
+#       无冷却（实测连刷可用），循环模式下会话 4h 主动重登（会话 6h 过期）。
+#
+# 退出码：0 成功；2 有轮次失败；3 登录链失败
 
 import json
 import os
@@ -25,6 +29,7 @@ import urllib.parse
 
 BASE = os.environ.get("BFLAME_BASE", "https://dashbord.blackflamestudio.us.ci").rstrip("/")
 WATCHES = int(os.environ.get("BFLAME_WATCHES", "1"))
+RUN_MINUTES = int(os.environ.get("BFLAME_RUN_MINUTES", "0"))
 TOKEN = os.environ.get("BFLAME_DISCORD_TOKEN", "").strip()
 
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -161,6 +166,47 @@ def rediscover_ids():
     return False
 
 
+# ---------- 单轮 ----------
+def one_round(idx):
+    """一轮 start→wait→verify。返回 (ok, backoff_seconds)"""
+    log(f"-- 第 {idx} 轮 --")
+    st, txt = action(ACT_START)
+    err = flight_error(txt)
+    if err:
+        log(f"  startAdWatch 报错: {err}（尝试 cancel 后重试）")
+        action(ACT_CANCEL)
+        st, txt = action(ACT_START)
+        err = flight_error(txt)
+        if err:
+            log(f"  ❌ 仍然失败: {err}")
+            if "Ad Link" in err or "ad link" in err:
+                log("  （管理员没配广告链接，退避 300s）")
+                return False, 300
+            if any(k in err.lower() for k in ("sign", "login", "auth", "session", "unauthorized")):
+                return False, -1          # 信号：需要重登
+            return False, 30
+    m = re.search(r'"requiredSeconds"\s*:\s*(\d+)', txt)
+    need = int(m.group(1)) if m else 30
+    log(f"  startAdWatch ✅ 需等 {need}s")
+    time.sleep(need + 2)
+
+    st, txt = action(ACT_VERIFY)
+    err = flight_error(txt)
+    if err:
+        if any(k in err.lower() for k in ("wait", "early", "seconds")):
+            log(f"  服务端嫌早: {err}，补 5 秒重试")
+            time.sleep(5)
+            st, txt = action(ACT_VERIFY)
+            err = flight_error(txt)
+        if err:
+            log(f"  ❌ verify 失败: {err}")
+            if any(k in err.lower() for k in ("sign", "login", "auth", "session", "unauthorized")):
+                return False, -1
+            return False, 30
+    log("  verifyAndRewardAdWatch ✅ +5 coins")
+    return True, 0
+
+
 # ---------- 主流程 ----------
 def main():
     if not TOKEN:
@@ -168,58 +214,72 @@ def main():
         sys.exit(3)
 
     login()
+    login_ts = time.time()
     before = coins_now()
-    log(f"\n== 签到 x{WATCHES}（起始 coins={before}）==")
 
     ok = 0
-    for i in range(1, WATCHES + 1):
-        log(f"-- 第 {i}/{WATCHES} 轮 --")
-        st, txt = action(ACT_START)
-        err = flight_error(txt)
-        if err:
-            # 可能有残留 watch 会话：先 cancel 再重试一次
-            log(f"  startAdWatch 报错: {err}（尝试 cancel 后重试）")
-            action(ACT_CANCEL)
-            st, txt = action(ACT_START)
-            err = flight_error(txt)
-            if err:
-                log(f"  ❌ 仍然失败: {err}")
-                if "Ad Link" in err or "ad link" in err:
-                    log("  （管理员没配广告链接，签不到，等站点配置）")
-                continue
-        m = re.search(r'"requiredSeconds"\s*:\s*(\d+)', txt)
-        need = int(m.group(1)) if m else 30
-        log(f"  startAdWatch ✅ 需等 {need}s")
-        time.sleep(need + 2)
+    rounds = 0
 
-        st, txt = action(ACT_VERIFY)
-        err = flight_error(txt)
-        if err:
-            if "wait" in err.lower() or "early" in err.lower() or "seconds" in err.lower():
-                log(f"  服务端嫌早: {err}，补 5 秒重试")
-                time.sleep(5)
-                st, txt = action(ACT_VERIFY)
-                err = flight_error(txt)
-            if err:
-                log(f"  ❌ verify 失败: {err}")
-                continue
-        ok += 1
-        log("  verifyAndRewardAdWatch ✅ +5 coins")
-        time.sleep(2)
+    if RUN_MINUTES > 0:
+        # 一直运行模式：循环到截止（会话 4h 主动重登，防 6h 过期）
+        deadline = time.time() + RUN_MINUTES * 60
+        log(f"\n== 持续签到 {RUN_MINUTES} 分钟（起始 coins={before}，约 {(RUN_MINUTES * 60) // 35} 轮）==")
+        while time.time() < deadline:
+            if time.time() - login_ts > 4 * 3600:
+                log("== 会话接近过期（4h），主动重登 ==")
+                login()
+                login_ts = time.time()
+            rounds += 1
+            try:
+                good, backoff = one_round(rounds)
+            except Exception as e:  # noqa: BLE001
+                log(f"  ❌ 异常: {type(e).__name__}: {e}")
+                good, backoff = False, 30
+            if good:
+                ok += 1
+                time.sleep(2)
+            elif backoff == -1:
+                log("== 疑似会话失效，重登 ==")
+                login()
+                login_ts = time.time()
+            else:
+                time.sleep(backoff)
+            if rounds % 25 == 0:
+                cur = coins_now()
+                elapsed = (time.time() - (deadline - RUN_MINUTES * 60)) / 60
+                rate = (cur - before) / elapsed * 60 if elapsed > 0 else 0
+                log(f"  …进度: {rounds} 轮 | coins={cur}（+{cur - before}，约 {rate:.0f} 币/小时）"
+                    f" | 剩 {max(0, (deadline - time.time()) / 60):.0f} 分钟")
+    else:
+        # 定数模式
+        log(f"\n== 签到 x{WATCHES}（起始 coins={before}）==")
+        for i in range(1, WATCHES + 1):
+            try:
+                good, backoff = one_round(i)
+            except Exception as e:  # noqa: BLE001
+                log(f"  ❌ 异常: {type(e).__name__}: {e}")
+                good = False
+            rounds += 1
+            if good:
+                ok += 1
+                time.sleep(2)
+            else:
+                time.sleep(max(backoff if backoff and backoff > 0 else 0, 0))
 
     after = coins_now()
-    log(f"\n== 完成 {ok}/{WATCHES} 轮 | coins: {before} → {after}（+{after - before}）==")
+    log(f"\n== 完成 {ok}/{rounds} 轮 | coins: {before} → {after}（+{after - before}）==")
 
-    # GitHub Actions 摘要
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
         with open(summary, "a", encoding="utf-8") as f:
             f.write("## BlackFlame 签到结果\n\n")
             f.write(f"| 项目 | 值 |\n|---|---|\n")
-            f.write(f"| 轮次 | {ok}/{WATCHES} 成功 |\n")
+            f.write(f"| 轮次 | {ok}/{rounds} 成功 |\n")
             f.write(f"| 金币 | {before} → {after}（+{after - before}）|\n")
+            if RUN_MINUTES > 0:
+                f.write(f"| 时长 | {RUN_MINUTES} 分钟（持续模式）|\n")
 
-    sys.exit(0 if ok == WATCHES else 2)
+    sys.exit(0 if ok == rounds and rounds > 0 else (0 if RUN_MINUTES > 0 and ok > 0 else 2))
 
 
 if __name__ == "__main__":
