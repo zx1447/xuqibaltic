@@ -48,6 +48,8 @@ CI（main 分支 `checkin_blackflame.yml`）：
 
 ## 注意
 
+- **站点掐机房 IP**：TLS/网络层直连 Azure/GCP 等大机房 ASN 会被 RST（实测 GH runner 裸连失败），
+  放行 Cloudflare（WARP 104.28.x）和小厂出口。CI 因此先装 `cloudflare-warp` 再签到
 - Discord token 等同账号密码，只放 GitHub Secret，勿提交进文件
 - token 在改密码/登出所有设备时会失效，到时更新 Secret 即可
 - 适度刷币：默认每天 1 轮（+5），手动 dispatch 可加轮
