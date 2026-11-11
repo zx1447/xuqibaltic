@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Teradata ClearScape 哪吒探针保活 + 自动唤醒 + 60 天到期自动重建（纯 HTTP，无浏览器依赖）
+Teradata ClearScape 哪吒探针保活 + 自动唤醒 + 到期重建 + 进程保活（纯 HTTP，无浏览器依赖）
 
 链路:
   1. Firebase Auth REST 密码登录 -> idToken
@@ -9,12 +9,20 @@ Teradata ClearScape 哪吒探针保活 + 自动唤醒 + 60 天到期自动重建
   3. GET /environments 检查环境状态
      - 环境不存在（到期被平台回收）        -> 重建
      - createDate + 60 天 <= 3 天          -> 主动重建（删旧建新，同配置）
-     - state != RUNNING                    -> PATCH start 唤醒 + 等待
+     - STOPPING/STOPPED                    -> 等待 STOPPED 后 PATCH start（幂等重发）
      - RUNNING                             -> Jupyter /api/status 探活
-  4. 重建后自动重部署哪吒探针:
-     - PUT 部署脚本到 Jupyter contents（token 认证）
-     - kernel websocket 执行: 容器内自己从 GitHub 下载 agent + 配置 + 启动
-     - 校验面板节点（uuid 固定, 名字不对则改名）
+  4. 面板上报确认:
+     - 已上报   -> ensure_probe_processes 轻量确认（缺 watchdog 则拉起）
+     - 未上报   -> ensure_probe_processes（kernel exec 拉起 watchdog/agent/v4proxy）
+                   等 2 分钟仍无上报 -> 环境 stop→start 重建
+                   重建 RUNNING 后再次 ensure_probe_processes（容器重启进程全清，必须重拉）
+  5. 重建后自动重部署哪吒探针（kernel websocket 执行部署脚本）
+
+教训（2026-11-10 掉线复盘）:
+  - 环境状态机: STOPPING 状态 PATCH start 会 400；必须等 STOPPED 再 start，
+    且 wait_running 里要在 STOPPED 时幂等重发 start（修 20:53 卡死 900s 超时）。
+  - stop→start 重建会重启容器、清空所有进程；旧代码重建后从不重拉探针，
+    导致"环境 RUNNING 但面板零上报"无限循环，每轮重建都白做。
 
 secrets:
   TD_EMAIL / TD_PASSWORD        Teradata 账号
@@ -147,7 +155,9 @@ def create_env(tok, name, password, region):
     return st
 
 
-def wait_running(tok, name, timeout=1200, interval=30):
+def wait_running(tok, name, timeout=1200, interval=30, auto_start=True):
+    """等待 RUNNING。状态机: STOPPING -> (等) -> STOPPED -> (auto_start 时幂等重发 start)
+    -> STARTING -> RUNNING。auto_start 幂等: 仅在 STOPPED 时发送，STARTING/RUNNING 不重发。"""
     t0 = time.time()
     while time.time() - t0 < timeout:
         try:
@@ -157,6 +167,8 @@ def wait_running(tok, name, timeout=1200, interval=30):
                     log("环境 %s state=%s (等待中 %ds)" % (name, s, int(time.time() - t0)))
                     if s == "RUNNING":
                         return e
+                    if s == "STOPPED" and auto_start:
+                        start_env(tok, name)
                     break
             else:
                 log("环境 %s 尚未出现在列表 (等待 %ds)" % (name, int(time.time() - t0)))
@@ -166,11 +178,40 @@ def wait_running(tok, name, timeout=1200, interval=30):
     raise TimeoutError("等待 %s RUNNING 超时 %ds" % (name, timeout))
 
 
+def wait_stopped(tok, name, timeout=600, interval=20):
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        try:
+            cur = next((e for e in list_envs(tok) if e.get("name") == name), None)
+        except Exception:
+            cur = None
+        if cur:
+            log("环境 %s state=%s (等待停止 %ds)" % (name, cur.get("state"), int(time.time() - t0)))
+            if cur.get("state") == "STOPPED":
+                return cur
+        time.sleep(interval)
+    raise TimeoutError("等待 %s STOPPED 超时 %ds" % (name, timeout))
+
+
 def jupyter_url(env):
     for s in env.get("services", []):
         if s.get("name") == "Jupyterlab":
             return s.get("url", "")
     return ""
+
+
+def jupyter_endpoint(env):
+    """从 env services 提取 (站点根 base, token)。API 路径必须相对站点根拼接，
+    不能带 /lab/tree/... 路径（否则 POST 落到静态路径上 405）。"""
+    jurl = jupyter_url(env)
+    if not jurl:
+        raise RuntimeError("环境无 Jupyterlab service URL")
+    p = urllib.parse.urlparse(jurl)
+    base = "%s://%s" % (p.scheme, p.netloc)
+    jt = urllib.parse.parse_qs(urllib.parse.urlparse(jurl).query).get("token", [""])[0]
+    if not jt:
+        raise RuntimeError("Jupyterlab service URL 无 token 参数")
+    return base, jt
 
 
 # ---------------------------------------------------------------- Jupyter (token 认证)
@@ -304,6 +345,15 @@ echo "[PID $$] watchdog started $(date '+%F %T')" >> $LOG
       echo "[$(date '+%F %T')] start v4proxy" >> $LOG
       setsid nohup python3 $P/v4proxy.py >> $P/v4proxy.log 2>&1 < /dev/null &
     }
+    # agent 年龄 >=4h 无条件重启（防休眠唤醒后 TCP 断开进程僵死）
+    APID=$(pgrep -x nezha-agent | head -1)
+    if [ -n "$APID" ]; then
+      AGE=$(( $(date +%s) - $(stat -c %Y /proc/$APID 2>/dev/null || date +%s) ))
+      if [ $AGE -ge 14400 ]; then
+        echo "[$(date '+%F %T')] agent age ${AGE}s >= 4h -> kill (respawn next loop)" >> $LOG
+        kill $APID 2>/dev/null || true
+      fi
+    fi
     pgrep -x nezha-agent >/dev/null || {
       echo "[$(date '+%F %T')] start nezha-agent" >> $LOG
       setsid nohup env NZ_SERVER=__PANEL_ADDR__ NZ_TLS=true NZ_CLIENT_SECRET=__NZ_SECRET__ \
@@ -346,11 +396,7 @@ def build_deploy_sh(web_dns):
 
 def deploy_probe(env):
     """新环境里完整部署探针，返回 (base, deploy输出)"""
-    jurl = jupyter_url(env)
-    if not jurl:
-        raise RuntimeError("环境无 Jupyterlab service URL")
-    base = jurl.split("?")[0]
-    jt = urllib.parse.parse_qs(urllib.parse.urlparse(jurl).query).get("token", [""])[0]
+    base, jt = jupyter_endpoint(env)
     log("Jupyter: %s token=%s..." % (base, jt[:12]))
 
     # 0) API 就绪确认
@@ -382,6 +428,52 @@ def deploy_probe(env):
     if "DEPLOY_DONE_MARKER" not in out or "AGENT_OK" not in out:
         raise RuntimeError("部署脚本执行异常（未看到完成标记）")
     return base, jt
+
+
+# ---------------------------------------------------------------- 进程保活（kernel exec 轻量路径）
+ENSURE_CODE = r'''
+import subprocess as sp, time as T
+def sh(c, t=25):
+    try:
+        r = sp.run(c, shell=True, capture_output=True, text=True, timeout=t)
+        return (r.stdout + r.stderr).strip()
+    except Exception as e:
+        return "EXC " + str(e)
+P = "/home/jovyan/JupyterLabRoot/nz"
+wd_ok = sp.run("pgrep -f 'bash .*watchdog.sh'", shell=True, capture_output=True).returncode == 0
+if not wd_ok:
+    print("watchdog 缺失 -> 清理并拉起")
+    print(sh("pkill -x nezha-agent 2>/dev/null; pkill -f 'python3 .*v4proxy' 2>/dev/null; sleep 1; "
+             "cd %s && setsid nohup bash watchdog.sh > watchdog.out 2>&1 < /dev/null & sleep 8; echo started" % P, t=30))
+else:
+    print("watchdog 已在运行")
+T.sleep(6)
+print("== 进程验证 ==")
+print("agent:", sh("pgrep -ax nezha-agent || echo NO_AGENT"))
+print("v4proxy:", sh("pgrep -f 'python3 .*v4proxy' >/dev/null && echo PROXY_OK || echo NO_PROXY"))
+print("== agent.log tail ==")
+print(sh("tail -6 %s/agent.log 2>/dev/null || echo NOLOG" % P))
+print("ENSURE_DONE_MARKER")
+'''
+
+
+def ensure_probe_processes(env):
+    """kernel exec 确保容器内 watchdog 在跑（watchdog 会拉起 v4proxy+agent）。
+    返回 True=确认 agent 进程存在；False=执行失败或 agent 未起来。"""
+    try:
+        base, jt = jupyter_endpoint(env)
+    except Exception as ex:
+        log("kernel 路径不可用（取 Jupyter endpoint 失败）: %s" % str(ex)[:150])
+        return False
+    try:
+        out = kernel_execute(base, jt, ENSURE_CODE, timeout=180)
+        print(out, flush=True)
+        if "ENSURE_DONE_MARKER" in out and "NO_AGENT" not in out:
+            return True
+        return False
+    except Exception as ex:
+        log("kernel exec 失败（runner POST 可能被 WAF 拦）: %s" % str(ex)[:200])
+        return False
 
 
 # ---------------------------------------------------------------- 面板校验/改名
@@ -526,18 +618,20 @@ def main():
         if DRY:
             log("DRY-RUN: 环境未运行，将 PATCH start（跳过）")
             return
-        start_env(tok, name)
-        env = wait_running(tok, name, timeout=900)
+        # STOPPING 状态直接 start 会 400；wait_running(auto_start) 会在 STOPPED 时幂等重发
+        if env.get("state") != "STOPPING":
+            start_env(tok, name)
+        env = wait_running(tok, name, timeout=1200)
 
     # RUNNING → Jupyter 探活（顺带刷新 state 里的 jupyter token）
-    jurl = jupyter_url(env)
-    if jurl:
-        base = jurl.split("?")[0]
-        jt = urllib.parse.parse_qs(urllib.parse.urlparse(jurl).query).get("token", [""])[0]
-        st, d = jupyter_api(base, jt, "GET", "/api/status", timeout=25)
-        log("Jupyter 探活 %s -> HTTP %s" % (base, st))
-        STATE["web_dns"] = urllib.parse.urlparse(base).hostname
+    try:
+        jbase, jt = jupyter_endpoint(env)
+        st, d = jupyter_api(jbase, jt, "GET", "/api/status", timeout=25)
+        log("Jupyter 探活 %s -> HTTP %s" % (jbase, st))
+        STATE["web_dns"] = urllib.parse.urlparse(jbase).hostname
         STATE["jupyter_token"] = jt
+    except Exception as ex:
+        log("Jupyter 探活异常（不阻断）: %s" % str(ex)[:150])
 
     if DRY:
         log("DRY-RUN: 跳过探针刷新与面板上报确认")
@@ -555,10 +649,12 @@ def main():
                 break
         return
 
-    # —— 面板上报确认；探针不上报则环境 stop→start 重建（纯 API 路径）——
-    # 背景：环境休眠冻结会切断 agent 的 TCP 连接，容器唤醒后 agent 进程可能
-    # 僵死（进程在但不连接不日志）；GitHub runner 出口 IP 会被前置 WAF 拦
-    # POST（405），kernel 远程杀进程不可靠，stop→start 重建是可靠自愈路径。
+    # —— 面板上报确认；修复梯度: ① kernel exec 进程保活 ② 环境 stop→start 重建 ——
+    # 背景: 容器休眠/重启会清空所有进程（watchdog/agent/v4proxy），环境状态仍是
+    # RUNNING 但面板零上报。旧代码此时直接 stop→start 重建，且重建后从不重拉探针
+    # 进程，形成"重建成功却零上报"死循环（2026-11-10 掉线复盘）。
+    # 新梯度: 先 kernel exec 拉起 watchdog（最轻、不动环境）；仍无上报才重建，
+    # 且重建后必须再次 ensure（容器重启进程全清）。
     def panel_reported(ptok_):
         st_, txt_ = http("GET", PANEL_HTTP + "/api/v1/server",
                          {"Authorization": "Bearer " + ptok_})
@@ -579,35 +675,50 @@ def main():
             if panel_reported(ptok):
                 confirmed = True
                 break
+
+    fix_note = ""
     if confirmed:
         log("面板上报确认 ✓（探针健康）")
+        # 轻量确认: watchdog 万一不在就补拉（正常时输出"已在运行"）
+        if ensure_probe_processes(env):
+            log("进程保活轻量确认 ✓")
     else:
-        log("⚠️ 面板 2 分钟未见上报——agent 僵死，执行环境 stop→start 重建")
-        try:
-            stop_env(tok, name)
-            t0 = time.time()
-            while time.time() - t0 < 420:
-                time.sleep(20)
-                try:
-                    cur = next((e for e in list_envs(tok) if e.get("name") == name), None)
-                except Exception:
-                    cur = None
-                if cur and cur.get("state") == "STOPPED":
-                    log("环境已 STOPPED (耗时 %ds)" % int(time.time() - t0))
-                    break
-                if cur:
-                    log("环境 %s state=%s (等待停止 %ds)" % (name, cur.get("state"), int(time.time() - t0)))
-            start_env(tok, name)
-            env = wait_running(tok, name, timeout=900)
-            confirmed = False
-            for _ in range(20):
+        log("⚠️ 面板 2 分钟未见上报——尝试 kernel exec 进程保活（拉起 watchdog/agent）")
+        if ensure_probe_processes(env):
+            for _ in range(8):
                 time.sleep(15)
                 if panel_reported(ptok):
                     confirmed = True
+                    fix_note = "kernel 进程保活修复（未动环境）"
                     break
-            log("重建后结果: %s" % ("面板上报确认 ✓（探针已恢复）" if confirmed else "⚠️ 仍未上报，等下一轮"))
-        except Exception as e:
-            log("重建异常（不阻断，等下一轮）: %s" % str(e)[:200])
+            if confirmed:
+                log("进程保活修复成功 ✓")
+            else:
+                log("进程保活后仍无上报，转入环境重建")
+        else:
+            log("kernel 保活不可用，直接转入环境重建")
+        if not confirmed:
+            log("执行环境 stop→start 重建")
+            try:
+                stop_env(tok, name)
+                wait_stopped(tok, name, timeout=600)
+                env = wait_running(tok, name, timeout=1200, auto_start=True)
+                # 容器已重启、进程全清——必须重新拉起探针
+                if ensure_probe_processes(env):
+                    log("重建后探针进程已拉起，等待上报")
+                else:
+                    log("⚠️ 重建后 kernel 拉起失败（探针进程可能缺失）")
+                confirmed = False
+                for _ in range(20):
+                    time.sleep(15)
+                    if panel_reported(ptok):
+                        confirmed = True
+                        fix_note = "stop→start 重建 + 进程重拉修复"
+                        break
+                log("重建后结果: %s" % ("面板上报确认 ✓（探针已恢复）" if confirmed
+                                       else "⚠️ 仍未上报，等下一轮"))
+            except Exception as e:
+                log("重建异常（不阻断，等下一轮）: %s" % str(e)[:200])
 
     # 面板侧核对（探针 uuid 固定，名字不对则改名）
     st, txt = http("GET", PANEL_HTTP + "/api/v1/server",
@@ -625,7 +736,8 @@ def main():
             break
 
     STATE["last_run"] = time.strftime("%Y-%m-%d %H:%M:%S")
-    STATE["last_result"] = "ok" if confirmed else "warn: 环境已恢复但面板未见上报"
+    STATE["last_result"] = ("ok: " + fix_note) if (confirmed and fix_note) else \
+                           ("ok" if confirmed else "warn: 环境已恢复但面板未见上报")
     json.dump(STATE, open(STATE_FILE, "w"), indent=1, ensure_ascii=False)
     log("保活完成 ✓")
 
