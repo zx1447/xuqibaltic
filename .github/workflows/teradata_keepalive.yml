@@ -1,9 +1,13 @@
 name: Teradata Keepalive
 
-# 每 2 小时一轮:
-#   - 环境 STOPPED -> PATCH start 自动唤醒
+# 双 cron 提高触发率（GitHub schedule 会随机丢触发）:
+#   - "23 */2 * * *"  偶数小时 :23
+#   - "47 1-23/2 * * *" 奇数小时 :47
+# 最大断档 ~84 分钟。每轮:
+#   - 环境 STOPPING/STOPPED -> 幂等 start（STOPPED 时重发）
 #   - 距 60 天到期 <= 3 天, 或环境已被平台回收 -> 删旧建新(同配置) + 自动重部署哪吒探针
-#   - 重建全程无浏览器: Firebase REST -> Firestore token -> environments API -> Jupyter token API -> kernel ws
+#   - 面板无上报 -> kernel exec 拉起 watchdog/agent/v4proxy -> 仍无上报才 stop→start 重建
+#     （重建后容器进程全清，脚本会重新拉起探针——2026-11-10 掉线复盘修复）
 on:
   workflow_dispatch:
     inputs:
@@ -12,7 +16,8 @@ on:
         required: false
         default: ""
   schedule:
-    - cron: "23 */2 * * *" # re-registered
+    - cron: "23 */2 * * *"
+    - cron: "47 1-23/2 * * *"
 
 concurrency:
   group: teradata-keepalive
