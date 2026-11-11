@@ -1,13 +1,13 @@
 {
-  "action": "gate_wait",
+  "action": "renewed",
   "solver": "browser",
   "proxy": true,
-  "before_seconds": 6862,
-  "after_seconds": 28794,
-  "active_until": "2026-11-11T20:07:15.000Z",
-  "gain_hours": 6.09,
-  "last_renew": "2026-11-11T12:07:20Z",
-  "updated": "2026-11-11T12:25:34Z",
-  "seconds_remaining": 27700,
-  "can_renew": false
+  "before_seconds": 1226,
+  "after_seconds": 28784,
+  "active_until": "2026-11-12T03:47:37.000Z",
+  "gain_hours": 7.655,
+  "last_renew": "2026-11-11T19:47:52Z",
+  "updated": "2026-11-11T19:47:52Z",
+  "seconds_remaining": 1248,
+  "can_renew": true
 }
