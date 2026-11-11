@@ -37,8 +37,9 @@ jobs:
           sudo apt-get install -y cloudflare-warp
           sudo systemctl restart warp-svc || true
           sleep 3
+          sudo warp-cli --accept-tos --help 2>&1 | head -40 || true
           sudo warp-cli --accept-tos registration new || true
-          sudo warp-cli --accept-tos set-mode warp
+          sudo warp-cli --accept-tos mode warp 2>/dev/null || sudo warp-cli --accept-tos set-mode warp 2>/dev/null || true
           sudo warp-cli --accept-tos connect
           # 真通判定：cdn-cgi/trace 必须 warp=on（ip 字面量连通，排除 DNS 干扰）
           ok=0
