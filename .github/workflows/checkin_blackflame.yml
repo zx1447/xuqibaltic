@@ -1,0 +1,41 @@
+name: BlackFlame Checkin
+
+# BlackFlame Studio 自动签到（看广告领金币）
+#  · 每天北京 09:00 自动签到（默认 1 轮 +5 币）
+#  · 脚本在 blackflame 分支；会话约 6h 短命 → 每次用 BFLAME_DISCORD_TOKEN 现换
+#  · 手动 dispatch 可指定 watches 多刷几轮
+on:
+  schedule:
+    - cron: '0 1 * * *'
+  workflow_dispatch:
+    inputs:
+      watches:
+        description: '本轮看广告次数（每轮约 35 秒，+5 币）'
+        required: false
+        default: '1'
+
+concurrency:
+  group: blackflame-checkin
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  checkin:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: blackflame
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 签到领金币
+        env:
+          BFLAME_DISCORD_TOKEN: ${{ secrets.BFLAME_DISCORD_TOKEN }}
+          BFLAME_WATCHES: ${{ inputs.watches || '1' }}
+        run: python3 checkin_blackflame.py
