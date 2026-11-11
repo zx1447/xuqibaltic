@@ -1,16 +1,21 @@
 name: BlackFlame Checkin
 
-# BlackFlame Studio 自动签到（看广告领金币）
-#  · 每天北京 09:00 自动签到（默认 1 轮 +5 币）
-#  · 脚本在 blackflame 分支；会话约 6h 短命 → 每次用 BFLAME_DISCORD_TOKEN 现换
-#  · 手动 dispatch 可指定 watches 多刷几轮
+# BlackFlame Studio 一直运行签到（看广告领金币，+5 币/轮，约 35 秒/轮）
+#  · 每天 4 班接力（00:25/06:25/12:25/18:25 UTC），每班持续刷 ~350 分钟
+#  · GitHub 托管 runner 上限 360 分钟/班；concurrency 串行，班次无缝排队
+#  · 脚本在 blackflame 分支；会话约 6h 过期 → 脚本 4h 主动重登
+#  · 手动 dispatch 可调 run_minutes（>0=持续分钟数；0=按 watches 轮数）
 on:
   schedule:
-    - cron: '0 1 * * *'
+    - cron: '25 0,6,12,18 * * *'
   workflow_dispatch:
     inputs:
+      run_minutes:
+        description: '持续跑多少分钟（0 = 按 watches 轮数跑）'
+        required: false
+        default: '350'
       watches:
-        description: '本轮看广告次数（每轮约 35 秒，+5 币）'
+        description: 'run_minutes=0 时的轮数（每轮约 35 秒，+5 币）'
         required: false
         default: '1'
 
@@ -24,7 +29,7 @@ permissions:
 jobs:
   checkin:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 360
     steps:
       # 站点在 TLS/网络层掐大机房 ASN（Azure/GCP 直连被 RST），放行 Cloudflare 等出口
       # → runner 先接入 Cloudflare WARP，以 104.28.x 出口访问
@@ -52,8 +57,6 @@ jobs:
             sleep 3
           done
           test "$ok" = 1
-          echo "--- 出口 IP（应为 Cloudflare 104.x/162.x）---"
-          curl -s --max-time 15 https://api4.ipify.org; echo
           echo "--- 站点连通性（首连偶发失败，重试判定）---"
           ok2=0
           for i in $(seq 1 5); do
@@ -72,8 +75,9 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: 签到领金币
+      - name: 持续签到领金币
         env:
           BFLAME_DISCORD_TOKEN: ${{ secrets.BFLAME_DISCORD_TOKEN }}
+          BFLAME_RUN_MINUTES: ${{ inputs.run_minutes || '350' }}
           BFLAME_WATCHES: ${{ inputs.watches || '1' }}
         run: python3 checkin_blackflame.py
