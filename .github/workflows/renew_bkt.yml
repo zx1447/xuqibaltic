@@ -1,9 +1,11 @@
 name: bkt Renew
 
 # 免费服自动续期（+8h / 次，窗口 = 到期前 2h 或过期后）
-#  · cron 每 20 分钟巡检；canRenew=true 时解 Turnstile 并 POST renew
-#  · Turnstile 机房 IP 会被判 600010 —— 配 BH_CAPSOLVER_KEY / BH_2CAPTCHA_KEY
-#    可全网全自动；或 dispatch 时指定 solver=browser 实测 runner 能不能解
+#  · cron 每 20 分钟：--gate 探测窗口，窗口开才装 xray/Chrome/UC 全家桶并解算
+#  · browser 解算器 = 家宽订阅出口（xray SOCKS5）+ undetected-chromedriver
+#    真浏览器 + pyautogui 屏幕真点击，续期 POST 在浏览器页面内提交
+#    —— 机房 IP + 普通自动化指纹（Playwright 等）实测必 600010，此为唯一活路
+#  · 站点常量/订阅地址已在脚本内 b64 混淆，日志脱敏
 on:
   schedule:
     - cron: '8,28,48 * * * *'
@@ -28,7 +30,7 @@ permissions:
 jobs:
   renew:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -38,18 +40,30 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: 安装 Playwright（仅 browser 解算器）
+      - name: 窗口探测（gate）
+        id: gate
         env:
-          S: ${{ github.event.inputs.solver || secrets.BH_SOLVER || 'auto' }}
-        run: |
-          if [ "$S" = "browser" ]; then
-            pip install playwright
-            python -m playwright install --with-deps chromium
-          else
-            echo "solver=$S，跳过 Playwright"
-          fi
+          BH_COOKIE: ${{ secrets.BH_COOKIE }}
+          BH_PAT: ${{ secrets.BH_PAT }}
+          BH_FORCE: ${{ github.event.inputs.force }}
+        run: python renew_bkt.py --gate
 
-      - name: 续期
+      - name: Install xray + Chrome + UC 依赖（窗口开才装）
+        if: steps.gate.outputs.window_open == 'true' || github.event.inputs.force == '1'
+        run: |
+          mkdir -p "$HOME/.xray"
+          curl -fsSL -o /tmp/xray.zip https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip
+          unzip -o /tmp/xray.zip -d "$HOME/.xray"
+          chmod +x "$HOME/.xray/xray"
+          echo "XRAY_BIN=$HOME/.xray/xray" >> "$GITHUB_ENV"
+          "$HOME/.xray/xray" version | head -1
+          google-chrome --version || sudo apt-get install -y google-chrome-stable
+          which xvfb-run || sudo apt-get install -y xvfb
+          pip install --upgrade pip
+          pip install undetected-chromedriver pyautogui python-xlib setuptools
+
+      - name: 续期（Xvfb 内真浏览器）
+        if: steps.gate.outputs.window_open == 'true' || github.event.inputs.force == '1'
         id: renew
         env:
           BH_COOKIE: ${{ secrets.BH_COOKIE }}
@@ -58,7 +72,7 @@ jobs:
           BH_CAPSOLVER_KEY: ${{ secrets.BH_CAPSOLVER_KEY }}
           BH_2CAPTCHA_KEY: ${{ secrets.BH_2CAPTCHA_KEY }}
           BH_FORCE: ${{ github.event.inputs.force }}
-        run: python renew_bkt.py
+        run: xvfb-run -a -s "-screen 0 1280x900x24" python renew_bkt.py
 
       - name: 汇总
         if: always()
