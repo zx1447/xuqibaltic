@@ -33,7 +33,7 @@ python3 renew_coalbyte.py
 
 CI（main 分支 `renew_coalbyte.yml`）：
 
-- cron 每天一跑（到期恒定保持 ~5 天余量）；`workflow_dispatch` 可手动
+- cron 每 4 天一跑（逢 1/5/9/13/17/21/25/29 日北京 12:17）；`workflow_dispatch` 可手动
 - Secret：`COALBYTE_EMAIL`（邮箱，防公开仓泄露）
 - 结果写进 Job Summary
 
