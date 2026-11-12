@@ -3,11 +3,11 @@
   "solver": "browser",
   "proxy": true,
   "before_seconds": 0,
-  "after_seconds": 28789,
-  "active_until": "2026-11-12T16:53:33.000Z",
-  "gain_hours": 7.996944444444445,
-  "last_renew": "2026-11-12T08:53:43Z",
-  "updated": "2026-11-12T08:53:43Z",
+  "after_seconds": 28794,
+  "active_until": "2026-11-13T01:33:02.000Z",
+  "gain_hours": 7.998333333333333,
+  "last_renew": "2026-11-12T17:33:07Z",
+  "updated": "2026-11-12T17:33:07Z",
   "seconds_remaining": 0,
   "can_renew": true
 }
