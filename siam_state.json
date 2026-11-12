@@ -79,16 +79,6 @@
       "sameSite": "Lax"
     },
     {
-      "name": "_cfuvid",
-      "value": "9NV4Fx2nZKVdZelC4NhKTKBmMPRKoaaFnmGMwuz9Ifw-1794290057.7760353-1.0.1.1-MAtdj603YcMDlAUV8xypdMdQTV3epVTWEt2pwdbWuFg",
-      "domain": ".discord.com",
-      "path": "/",
-      "expires": -1,
-      "httpOnly": true,
-      "secure": true,
-      "sameSite": "None"
-    },
-    {
       "name": "cf_clearance",
       "value": "CkbcLPzmEwonhBnEJcuE69cxU0VpXpccZKwvQI8dNPZ3f1IMaWyOLwpayV2Prsg7e8AvJUPocxx_Or3N5FrEkasEqG_ziYZqcoZsBz53BMa1Wod0OsA5jRYgpYfEk1uQPdUrxJ3E3yGSNh9zFmW9uOkeCgZX6kkNrkhVDxgoYDgvs1EYw9u1aGOLpRKnCxDRaXeNKA7MvV5VQM_R96MZxyaYlIg0RUf8GZmeC50No27TEnfjwpRKZ7UNJiroeJ_MspPwLl5UuilOZXqa-wlw8qP6i2w2aqI3wDULcENNDEIBLBCbnsq4Mzv__ZQvZPj73uDaog-Nz9yxfxEE26SOw1GKYHrhy7-7sU9_WAEoM3q5cTedEYM8wrsWPELJEhLo5_GfdpSMqMKRr1Au57vZd1ogCRoT_V0afipJPgbCS79xohddB8G5P_IYLnfUcQhkJGrAoJrSIrecqrB18qwhTgv_pNgrNhz2iMQWibAs07Uublx_yECyKHrtkd9gzQ_G3sPrMLOB7Lw-p05NE-m8hWJebO05-E1EonHvitCVQ8QLC3NQUv7FYZblZepMqjcBWASvxp6nQw",
       "domain": ".siam-node.cloud",
@@ -99,12 +89,22 @@
       "sameSite": "None",
       "partitionKey": "https://siam-node.cloud",
       "_crHasCrossSiteAncestor": false
+    },
+    {
+      "name": "_cfuvid",
+      "value": "PLS2aE0hVY.F7C5uVVigGAwW1_UsuzFpuR5x_6d2XVE-1794462142.2794566-1.0.1.1-_fDEpY1dcolAdFArC2pwfGJnl4gN2OPmiuv5kZRTr1g",
+      "domain": ".discord.com",
+      "path": "/",
+      "expires": -1,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "None"
     }
   ],
   "current_workflow_target": 6,
   "checkin_mode": "six_times_every_14_seconds_daily",
   "checkin_interval_seconds": 14,
   "next_scheduled_run_note": "GitHub Actions runs once daily at 00:00 UTC",
-  "last_workflow_end_time": "2026-11-11T04:41:04.285Z",
+  "last_workflow_end_time": "2026-11-12T05:43:53.601Z",
   "last_balance": 1786
 }
