@@ -1,11 +1,12 @@
 name: CoalByte Renew
 
 # CoalByte（Pelican 免费游戏服）自动续期：每次 +5 天（到期=now+5d，不叠加）
-#  · 每天一跑，余量恒定保持 ~5 天；邮箱发现名下全部服务器，新开的自动纳入
+#  · 每 4 天一跑（逢 1/5/9/13/17/21/25/29 日），最大间隔 4 天 ≥ 1 天余量保险
+#  · 邮箱发现名下全部服务器，新开的自动纳入
 #  · 该 API 无认证无冷却，裸 POST 即续
 on:
   schedule:
-    - cron: '17 4 * * *'
+    - cron: '17 4 */4 * *'
   workflow_dispatch:
 
 concurrency:
