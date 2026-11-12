@@ -1,5 +1,5 @@
 {
-  "action": "renewed",
+  "action": "gate_wait",
   "solver": "browser",
   "proxy": true,
   "before_seconds": 1226,
@@ -7,7 +7,7 @@
   "active_until": "2026-11-12T03:47:37.000Z",
   "gain_hours": 7.655,
   "last_renew": "2026-11-11T19:47:52Z",
-  "updated": "2026-11-11T19:47:52Z",
-  "seconds_remaining": 1248,
-  "can_renew": true
+  "updated": "2026-11-12T01:42:19Z",
+  "seconds_remaining": 7517,
+  "can_renew": false
 }
