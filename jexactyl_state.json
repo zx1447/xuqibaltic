@@ -1,9 +1,9 @@
 {
-  "last_status": "waiting_2_hours",
+  "last_status": "earning",
   "total_success": 352,
-  "last_start_time": "2026-11-11 14:21:48",
+  "last_start_time": "2026-11-12 03:35:53",
   "last_http_status": 204,
-  "last_request_time": "2026-11-11 20:01:41",
+  "last_request_time": "2026-11-12 08:45:22",
   "last_success_time": "2026-07-30 14:13:58",
   "current_run_success": 334,
   "current_run_throttled": 0,
@@ -28,7 +28,7 @@
   "current_primary_success": 0,
   "current_secondary_success": 0,
   "current_throttled": 0,
-  "current_failures": 334,
+  "current_failures": 304,
   "last_run_primary_success": 0,
   "last_run_secondary_success": 0,
   "secondary_account_username": "maike",
@@ -41,5 +41,5 @@
   "last_renew_attempt_time": "2026-08-06 11:38:09",
   "last_renew_status": "network_error",
   "total_renew_success": 1,
-  "renew_retry_timestamp": 1794398617
+  "renew_retry_timestamp": 1794444438
 }
