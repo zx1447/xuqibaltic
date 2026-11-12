@@ -1,0 +1,34 @@
+name: CoalByte Renew
+
+# CoalByte（Pelican 免费游戏服）自动续期：每次 +5 天（到期=now+5d，不叠加）
+#  · 每天一跑，余量恒定保持 ~5 天；邮箱发现名下全部服务器，新开的自动纳入
+#  · 该 API 无认证无冷却，裸 POST 即续
+on:
+  schedule:
+    - cron: '17 4 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: coalbyte-renew
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  renew:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: coalbyte
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 续期全部服务器
+        env:
+          COALBYTE_EMAIL: ${{ secrets.COALBYTE_EMAIL }}
+        run: python3 renew_coalbyte.py
