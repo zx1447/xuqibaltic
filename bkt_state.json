@@ -2,12 +2,12 @@
   "action": "wait",
   "solver": "browser",
   "proxy": true,
-  "before_seconds": 7134,
+  "before_seconds": 6632,
   "after_seconds": 28794,
-  "active_until": "2026-11-13T16:14:26.000Z",
-  "gain_hours": 6.016666666666667,
-  "last_renew": "2026-11-13T08:14:31Z",
-  "updated": "2026-11-13T13:23:20Z",
-  "seconds_remaining": 10265,
+  "active_until": "2026-11-13T22:24:38.000Z",
+  "gain_hours": 6.1561111111111115,
+  "last_renew": "2026-11-13T14:24:43Z",
+  "updated": "2026-11-13T18:53:50Z",
+  "seconds_remaining": 12647,
   "can_renew": false
 }
