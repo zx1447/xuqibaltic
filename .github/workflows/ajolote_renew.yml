@@ -1,0 +1,78 @@
+name: Ajolote Renew
+
+# Ajolote Hosting（ajolote.lat）免费服自动续期
+#  · 免费计划：续期完全免费，代价是看一个 ~40s 的站内广告（provider=placeholder，无需真人）
+#  · 每次续期 +7 天；到期停机不能启动，+30 天（deleteAt）删档连世界一起删
+#  · 另：每次开机也自动续期（本 workflow 不改动开机状态，纯广告续期）
+#  · 剩余 < 3 天自动续；330min 长驻循环（30 分钟一轮）+ GH_PAT 自派发接力 + schedule 兜底
+on:
+  schedule:
+    - cron: '47 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      run_minutes:
+        description: '本轮守护时长（分钟，默认 330；快测填 1）'
+        required: false
+        default: '330'
+      force:
+        description: '强制续期一次（验证链路，填 1）'
+        required: false
+        default: ''
+
+concurrency:
+  group: ajolote-renew
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  renew:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: axolotl
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 续期巡检
+        id: run
+        env:
+          AJOLOTE_EMAIL: ${{ secrets.AJOLOTE_EMAIL }}
+          AJOLOTE_PASSWORD: ${{ secrets.AJOLOTE_PASSWORD }}
+          RUN_MINUTES: ${{ github.event.inputs.run_minutes || '330' }}
+          FORCE: ${{ github.event.inputs.force || '' }}
+        run: |
+          if [ -n "$FORCE" ]; then
+            python3 renew_ajolote.py --force
+          else
+            python3 renew_ajolote.py --loop "$RUN_MINUTES"
+          fi
+
+      - name: 回写 session/状态
+        if: always()
+        run: |
+          git config user.name 'zx-build'
+          git config user.email 'build@zx.local'
+          if ! git diff --quiet ajolote_state.json 2>/dev/null || ! git diff --cached --quiet ajolote_state.json 2>/dev/null; then
+            git add ajolote_state.json
+            git commit -m "state: ajolote renewal cache [skip ci]" || true
+            git push origin axolotl || true
+          fi
+
+      - name: 自派发接力（下一轮守护）
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "GH_PAT 未配置，跳过接力（schedule 兜底）"
+            exit 0
+          fi
+          gh workflow run ajolote_renew.yml -R "$GITHUB_REPOSITORY" -f run_minutes=330 \
+            && echo "✅ 已派发下一轮守护" \
+            || echo "⚠️ 接力派发失败（schedule 兜底）"
