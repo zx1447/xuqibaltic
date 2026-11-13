@@ -89,7 +89,20 @@ jobs:
           git add bkt_state.json || true
           git diff --cached --quiet && echo "无状态变化" && exit 0
           git commit -m "Update bkt state [skip ci]"
-          git push origin HEAD:bkt
+          # 状态回写竞态修复（2026-11-13）：并发/接力轮次会同时写 bkt 分支，
+          # 裸 push 被 rejected (non-fast-forward) 会让整轮判 failure。
+          # 这里 fetch+rebase 后重试，最多 3 次；仍失败只告警，不影响续期结论。
+          for i in 1 2 3; do
+            git fetch -q origin bkt || true
+            git rebase origin/bkt >/dev/null 2>&1 || { git rebase --abort >/dev/null 2>&1 || true; git checkout --theirs bkt_state.json 2>/dev/null || true; }
+            if git push origin HEAD:bkt; then
+              echo "✅ 状态已回写 bkt（第 $i 次尝试）"
+              exit 0
+            fi
+            echo "⚠️ 第 $i 次 push 被拒（多半是对端又推了新 state），重试…"
+            sleep $((i * 3))
+          done
+          echo "⚠️ 状态回写失败（已重试 3 次）——本轮续期结果不受影响，下一轮会补写"
 
       - name: 自派发接力（下一轮守护）
         if: always()
