@@ -133,7 +133,7 @@ def _ensure_nezha_job_params():
     return {
         "name": "nezha-keepalive",
         "displayName": "哪吒监控保活",
-        "description": "每 5 分钟确保 nezha-agent 在运行；容器重置后自动按用户命令重装。零 token 脚本任务。",
+        "description": "每 5 分钟确保 nezha-agent 在运行；二进制+固定UUID配置常驻 /workspace/nezha，重启直接复用不重装。零 token 脚本任务。",
         "agentId": "main",
         "schedule": {"kind": "every", "everyMs": 300000},
         "sessionTarget": "isolated",
