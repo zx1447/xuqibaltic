@@ -918,12 +918,21 @@ def sync_state_git():
         run("git", "commit", "-m", f"Update bkt state [skip ci] {ts}")
         for i in range(1, 4):
             run("git", "fetch", "-q", "origin", "bkt")
-            run("git", "rebase", "origin/bkt")
-            r = run("git", "push", "origin", "HEAD:bkt")
-            if r.returncode == 0:
+            # -X theirs：冲突时以「本地这份更新」为准（rebase 中 theirs = 我们刚提交的
+            # 状态），否则 abort 会把本次续期结果整个丢掉，还会推上旧内容却报成功。
+            rb = run("git", "-c", "user.name=github-actions[bot]",
+                     "-c", "user.email=github-actions[bot]@users.noreply.github.com",
+                     "rebase", "-X", "theirs", "origin/bkt")
+            if rb.returncode != 0:
+                run("git", "rebase", "--abort")
+                log(f"⚠️ [loop] 第 {i} 次 rebase 失败，重试")
+                time.sleep(i * 2)
+                continue
+            push = run("git", "push", "origin", "HEAD:bkt")
+            if push.returncode == 0:
                 log(f"💾 [loop] state 已同步到 bkt（第 {i} 次尝试）")
                 return
-            run("git", "rebase", "--abort")
+            log(f"⚠️ [loop] 第 {i} 次 push 被拒，重试")
             time.sleep(i * 2)
         log("⚠️ [loop] state 同步失败（已重试 3 次），下一轮再试")
     except Exception as e:  # noqa: BLE001
