@@ -1,0 +1,46 @@
+name: GemHost Keepalive
+
+# GemHost.pl 免费服守护：检测停止 → 自动拉起（免费服 6h/会话，耗尽自动停机）
+#  · 每 15 分钟巡检；running/starting 不动，offline 即 start（拉起=新 6h 会话）
+#  · cookie 缓存 gemhost_state.json，变化时回写 gemhost 分支
+on:
+  schedule:
+    - cron: '3,18,33,48 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: gemhost-keepalive
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: gemhost
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 守护（停机拉起）
+        id: run
+        env:
+          GEMHOST_EMAIL: ${{ secrets.GEMHOST_EMAIL }}
+          GEMHOST_PASSWORD: ${{ secrets.GEMHOST_PASSWORD }}
+        run: python3 gemhost_keepalive.py
+
+      - name: 回写状态
+        run: |
+          git config user.name 'zx-build'
+          git config user.email 'build@zx.local'
+          if ! git diff --quiet gemhost_state.json 2>/dev/null || ! git diff --cached --quiet gemhost_state.json 2>/dev/null; then
+            git add gemhost_state.json
+            git commit -m "state: gemhost cookie cache [skip ci]" || true
+            git push origin gemhost || true
+          fi
