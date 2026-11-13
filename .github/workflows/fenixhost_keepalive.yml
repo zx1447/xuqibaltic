@@ -1,9 +1,10 @@
 name: FenixHost Free Service Renew
 
 on:
-  schedule:
-    # 每 12 小时检查；距离上次成功续期满 2 天时调用 renewFree。
-    - cron: "13 5,17 * * *"
+  # ⏸ 暂停（2026-11-13）：FenixHost 官网维护中，暂停定时运行（此前每 12 小时空跑且次次失败）。
+  # 维护结束后取消下面注释即可恢复（每 12 小时）。
+  # schedule:
+  #   - cron: "13 5,17 * * *"
   workflow_dispatch:
     inputs:
       force_renew:

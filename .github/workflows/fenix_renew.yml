@@ -2,9 +2,10 @@ name: FenixHost Auto Renew
 
 on:
   workflow_dispatch:
-  schedule:
-    # 每 3 天跑一次 (UTC 00:00)
-    - cron: "0 0 */3 * *"
+  # ⏸ 暂停（2026-11-13）：FenixHost 官网维护中，暂停定时运行，避免空跑烧 Actions 配额。
+  # 维护结束后取消下面注释即可恢复（每 3 天 UTC 00:00）。
+  # schedule:
+  #   - cron: "0 0 */3 * *"
 
 permissions:
   contents: read
