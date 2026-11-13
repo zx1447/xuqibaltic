@@ -1,12 +1,19 @@
 name: GemHost Keepalive
 
 # GemHost.pl 免费服守护：检测停止 → 自动拉起（免费服 6h/会话，耗尽自动停机）
-#  · 每 15 分钟巡检；running/starting 不动，offline 即 start（拉起=新 6h 会话）
+#  · 【2026-11-13 加装甲】15 分钟 cron 被 GitHub schedule 饿死（22h 只送了 1 次）
+#    → 改"330min 长驻循环（30 分钟一轮）+ GH_PAT 自派发接力 + schedule 兜底"（bkt 装甲）
+#  · running/starting 不动，offline 即 start（拉起=新 6h 会话）
 #  · cookie 缓存 gemhost_state.json，变化时回写 gemhost 分支
 on:
   schedule:
     - cron: '3,18,33,48 * * * *'
   workflow_dispatch:
+    inputs:
+      run_minutes:
+        description: '本轮守护时长（分钟，默认 330；快测填 3）'
+        required: false
+        default: '330'
 
 concurrency:
   group: gemhost-keepalive
@@ -18,7 +25,7 @@ permissions:
 jobs:
   keepalive:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 355
     steps:
       - uses: actions/checkout@v4
         with:
@@ -28,14 +35,33 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: 守护（停机拉起）
+      - name: 守护循环（每 30 分钟一轮，停机拉起）
         id: run
         env:
           GEMHOST_EMAIL: ${{ secrets.GEMHOST_EMAIL }}
           GEMHOST_PASSWORD: ${{ secrets.GEMHOST_PASSWORD }}
-        run: python3 gemhost_keepalive.py
+          RUN_MINUTES: ${{ github.event.inputs.run_minutes || '330' }}
+        run: |
+          set +e
+          end=$((SECONDS + RUN_MINUTES * 60))
+          n=0
+          while [ $SECONDS -lt $end ]; do
+            n=$((n+1))
+            echo "—— [loop] 第 $n 轮（预算剩 $(( (end-SECONDS)/60 )) 分钟）——"
+            python3 gemhost_keepalive.py
+            rc=$?
+            if [ "$rc" = "3" ]; then echo "鉴权/配置死（rc=3），停止守护"; break; fi
+            rest=$((end - SECONDS))
+            [ $rest -le 0 ] && break
+            sl=1800; [ $rest -lt $sl ] && sl=$rest
+            echo "— [loop] 休眠 $((sl/60)) 分钟后复查 —"
+            sleep $sl
+          done
+          echo "— [loop] 本轮预算用尽，交棒下一次运行 —"
+          exit 0
 
       - name: 回写状态
+        if: always()
         run: |
           git config user.name 'zx-build'
           git config user.email 'build@zx.local'
@@ -44,3 +70,16 @@ jobs:
             git commit -m "state: gemhost cookie cache [skip ci]" || true
             git push origin gemhost || true
           fi
+
+      - name: 自派发接力（下一轮守护）
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "GH_PAT 未配置，跳过接力（schedule 兜底）"
+            exit 0
+          fi
+          gh workflow run gemhost_keepalive.yml -R "$GITHUB_REPOSITORY" -f run_minutes=330 \
+            && echo "✅ 已派发下一轮守护" \
+            || echo "⚠️ 接力派发失败（schedule 兜底）"
