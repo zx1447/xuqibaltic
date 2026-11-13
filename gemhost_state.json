@@ -1,0 +1,13 @@
+{
+  "cookies": {
+    "gemhost_csrf": "87093dbfce5216611b64a7ed0af17aead31094f3abcbf634f09afdc85166b3e0",
+    "gemhost_access": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjU1NDksImVtYWlsIjoienh5MTcxNXhAZ21haWwuY29tIiwicm9sZSI6InVzZXIiLCJ0eXAiOiJhY2Nlc3MiLCJzaWQiOjE5NjczLCJpYXQiOjE3OTQ1MzUxOTcsImV4cCI6MTc5NTEzOTk5N30.8d1oE0Lj1fUzG-GoyzcVItele6TSi4EIbAnXJefqZ_k"
+  },
+  "servers": [
+    {
+      "id": 8331623,
+      "name": "nice"
+    }
+  ],
+  "updated_at": "2026-11-13T01:59:58Z"
+}
