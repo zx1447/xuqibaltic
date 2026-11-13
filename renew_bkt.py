@@ -891,6 +891,45 @@ def main():
             globals()["XRAY_PROC"] = None
 
 
+def sync_state_git():
+    """把 bkt_state.json 推到 bkt 分支（2026-11-13 加）。
+
+    背景：--loop 一轮守 5.5 小时，而 state 只在循环**结束**时由 workflow 推送，
+    中途所有续期结果都不落远端 —— 面板上看到的永远是 5 小时前的旧快照，
+    万一收尾那次 push 失败，整轮战绩连记录都没有。
+    这里每轮循环结束就同步一次：fetch + rebase + push，失败只告警不中断守护。
+    """
+    if not os.environ.get("GITHUB_ACTIONS"):
+        return  # 本地跑不动 git，跳过
+    import subprocess
+
+    def run(*args):
+        return subprocess.run(args, capture_output=True, text=True)
+
+    try:
+        if not os.path.exists(STATE):
+            return
+        run("git", "config", "user.name", "github-actions[bot]")
+        run("git", "config", "user.email", "github-actions[bot]@users.noreply.github.com")
+        run("git", "add", os.path.basename(STATE))
+        if run("git", "diff", "--cached", "--quiet").returncode == 0:
+            return
+        ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        run("git", "commit", "-m", f"Update bkt state [skip ci] {ts}")
+        for i in range(1, 4):
+            run("git", "fetch", "-q", "origin", "bkt")
+            run("git", "rebase", "origin/bkt")
+            r = run("git", "push", "origin", "HEAD:bkt")
+            if r.returncode == 0:
+                log(f"💾 [loop] state 已同步到 bkt（第 {i} 次尝试）")
+                return
+            run("git", "rebase", "--abort")
+            time.sleep(i * 2)
+        log("⚠️ [loop] state 同步失败（已重试 3 次），下一轮再试")
+    except Exception as e:  # noqa: BLE001
+        log(f"⚠️ [loop] state 同步异常: {type(e).__name__}: {e}")
+
+
 def loop(minutes):
     """长驻守护：每 20 分钟复查一次，窗口一开立即解算续期。
 
@@ -910,6 +949,7 @@ def loop(minutes):
         except Exception as e:  # noqa: BLE001
             log(f"⚠️ [loop] 本轮异常: {type(e).__name__}: {e}")
             rc = 9
+        sync_state_git()
         if rc in (2, 3):
             log("— [loop] 鉴权/配置类错误，停止守护 —")
             return rc
