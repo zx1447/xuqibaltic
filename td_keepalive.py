@@ -396,15 +396,16 @@ done
 '''
 
 IDLE_BUSTER_CODE = r'''
-import subprocess as _sp
+import subprocess as _sp, base64 as _b64
 _KA = "/home/jovyan/JupyterLabRoot/nz/idle_buster.sh"
+_BSH = _b64.b64decode("__KA_B64__").decode()
 def _sh(c, t=20):
     try:
         r = _sp.run(c, shell=True, capture_output=True, text=True, timeout=t)
         return (r.stdout + r.stderr).strip()
     except Exception as e:
         return "EXC " + str(e)
-_sh("cat > %s << 'KAEOF'\n%s\nKAEOF\nchmod +x %s" % (_KA, __IDLE_BUSTER_SH__, _KA), t=15)
+_sh("cat > %s << 'KAEOF'\n%s\nKAEOF\nchmod +x %s" % (_KA, _BSH, _KA), t=15)
 if _sp.run("pgrep -f 'bash .*idle_buster.sh'", shell=True, capture_output=True).returncode == 0:
     print("idle_buster 已在运行")
 else:
@@ -414,8 +415,9 @@ print("IDLE_BUSTER_DONE_MARKER")
 
 
 def install_idle_buster(base, jt):
-    """kernel exec 安装/确认容器内 idle_buster 心跳循环（幂等）。"""
-    code = IDLE_BUSTER_CODE.replace("__IDLE_BUSTER_SH__", IDLE_BUSTER_SH)
+    """kernel exec 安装/确认容器内 idle_buster 心跳循环（幂等）。
+    bash 脚本内容以 base64 传入，避免引号/百分号破坏 kernel 代码。"""
+    code = IDLE_BUSTER_CODE.replace("__KA_B64__", base64.b64encode(IDLE_BUSTER_SH.encode()).decode())
     try:
         out = kernel_execute(base, jt, code, timeout=120)
         ok = "IDLE_BUSTER_DONE_MARKER" in out and "KA_FAIL" not in out
