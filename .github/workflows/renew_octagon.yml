@@ -1,0 +1,47 @@
+name: Octagon Renew
+
+# Octagon Circle 免费服自动续期（替代已下线的 AFK 挂机）
+#  · 120 币 / 3 天（SET 语义）；剩余 < 24h 才续（免浪费），到期自动挂起、续期自动解挂
+#  · cookie 滑动延续 + 失效时 Discord OAuth 自动重登（OCTAGON_DISCORD_TOKEN）
+#  · 账密登录要 Turnstile，Discord OAuth 是唯一省事活路
+on:
+  schedule:
+    - cron: '0 5,17 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: octagon-renew
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  renew:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: octagon
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 续期检查
+        id: renew
+        env:
+          OCTAGON_COOKIE: ${{ secrets.OCTAGON_COOKIE }}
+          OCTAGON_DISCORD_TOKEN: ${{ secrets.OCTAGON_DISCORD_TOKEN }}
+          OCTAGON_RENEW_HOURS: '24'
+        run: node renew_octagon.js
+
+      - name: 把滑动续期后的 cookie 写回 secret
+        if: always() && steps.renew.outputs.cookie != ''
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+          NEW_COOKIE: ${{ steps.renew.outputs.cookie }}
+        run: |
+          printf '%s' "$NEW_COOKIE" | gh secret set OCTAGON_COOKIE --repo "$GITHUB_REPOSITORY"
+          echo "✅ secret OCTAGON_COOKIE 已更新"
