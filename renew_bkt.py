@@ -891,5 +891,43 @@ def main():
             globals()["XRAY_PROC"] = None
 
 
+def loop(minutes):
+    """长驻守护：每 20 分钟复查一次，窗口一开立即解算续期。
+
+    背景（2026-11-13 事故）：GitHub schedule 调度饿死——20 分钟一轮的 cron
+    实际只送进来 ~4 次/天，窗口开了没人来，服务器眼睁睁过期。故改长驻循环：
+    一次触发守 ~5.5 小时，结束由 workflow 自派发接力（workflow_dispatch
+    不受 schedule 饿死影响），schedule 只作兜底。
+    """
+    deadline = time.time() + minutes * 60
+    cycles = 0
+    while True:
+        cycles += 1
+        left = (deadline - time.time()) / 60
+        log(f"—— [loop] 第 {cycles} 轮（预算剩 {left:.0f} 分钟）——")
+        try:
+            rc = main()
+        except Exception as e:  # noqa: BLE001
+            log(f"⚠️ [loop] 本轮异常: {type(e).__name__}: {e}")
+            rc = 9
+        if rc in (2, 3):
+            log("— [loop] 鉴权/配置类错误，停止守护 —")
+            return rc
+        rest = deadline - time.time()
+        if rest <= 0:
+            break
+        t = min(1200, rest)
+        log(f"— [loop] 休眠 {t / 60:.0f} 分钟后复查 —")
+        time.sleep(t)
+    log("— [loop] 本轮预算用尽，交棒下一次运行 —")
+    return 0
+
+
 if __name__ == "__main__":
+    if "--loop" in sys.argv:
+        try:
+            mins = float(sys.argv[sys.argv.index("--loop") + 1])
+        except (IndexError, ValueError):
+            mins = 330.0
+        sys.exit(loop(mins))
     sys.exit(main())
