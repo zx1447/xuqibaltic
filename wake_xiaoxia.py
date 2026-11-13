@@ -17,10 +17,19 @@
 #
 # 状态文件 xiaoxia_state.json（token 缓存，7 天内免重登录，变化时 workflow 回写）
 #
+# 哪吒监控联动（2026-11-13）：实例每次启动/唤醒后必须确保容器内哪吒 agent 也启动。
+#   容器侧：OpenClaw cron 脚本任务「nezha-keepalive」每 5 分钟自检拉起（零 token）；
+#   本侧：每轮巡检经网关 WS（/api/instance/agent/ws，纯 stdlib 实现）触发 cron.run
+#         立即补检一遍；任务若被删则自动重建（cron.add）。双层保险。
+#
 # 退出码：0 正常/拉起成功；2 有失败；3 登录失败/缺凭据
 
+import base64
 import json
 import os
+import socket
+import ssl
+import struct
 import sys
 import time
 import urllib.request
@@ -99,6 +108,182 @@ def login():
     return tok
 
 
+def _ensure_nezha_job_params():
+    """nezha-keepalive 定时任务参数（与容器侧 scripts/keepalive/nezha-keepalive.sh 配套）"""
+    tools = ["ls", "read", "edit", "write", "apply_patch", "exec", "process",
+             "skills_search", "skills_read", "dashboard", "nodes", "mobile_ui",
+             "computer", "automations", "sessions", "theme", "terminal", "portal",
+             "message", "tts", "github_identity_status", "transcripts", "presence",
+             "gateway", "plugins", "openclaw", "agents_list", "get_goal",
+             "create_goal", "update_goal", "skill_workshop", "progress_card",
+             "secrets", "sessions_list", "sessions_history", "sessions_search",
+             "conversations_list", "conversations_send", "conversations_turn",
+             "sessions_send", "sessions_spawn", "sessions_yield", "subagents",
+             "session_status", "web_search", "web_fetch", "view_image", "pdf",
+             "browser", "memory_search", "memory_get", "intent", "tavily_search",
+             "tavily_extract", "recent_session_context"]
+    script = (
+        'const r = await exec({ command: "bash /workspace/scripts/keepalive/nezha-keepalive.sh" });\n'
+        'const out = String(r?.aggregated ?? "").trim();\n'
+        'if (r?.status !== "completed" || r?.exitCode !== 0) {\n'
+        '  throw new Error(`nezha keepalive failed (exit ${r?.exitCode ?? r?.status}): ${out.slice(-800)}`);\n'
+        '}\n'
+        'return { notify: out.split("\\n").slice(-1).join("\\n") || "哪吒在线" };'
+    )
+    return {
+        "name": "nezha-keepalive",
+        "displayName": "哪吒监控保活",
+        "description": "每 5 分钟确保 nezha-agent 在运行；容器重置后自动按用户命令重装。零 token 脚本任务。",
+        "agentId": "main",
+        "schedule": {"kind": "every", "everyMs": 300000},
+        "sessionTarget": "isolated",
+        "wakeMode": "now",
+        "payload": {"kind": "script", "script": script, "toolsAllow": tools,
+                    "toolsAllowIsDefault": True, "timeoutSeconds": 300, "toolBudget": 50},
+        "delivery": {"mode": "none"},
+        "failureAlert": {"after": 3, "cooldownMs": 7200000},
+    }
+
+
+class _MiniWS:
+    """极简 WebSocket 客户端（RFC6455 文本帧，仅够网关 RPC 用；零第三方依赖）"""
+
+    def __init__(self, wss_url, cookie, timeout=20):
+        from urllib.parse import urlparse
+        u = urlparse(wss_url)
+        host, port = u.hostname, (u.port or 443)
+        raw = socket.create_connection((host, port), timeout=timeout)
+        self.sock = ssl.create_default_context().wrap_socket(raw, server_hostname=host)
+        self.sock.settimeout(timeout)
+        key = base64.b64encode(os.urandom(16)).decode()
+        path = u.path + (f"?{u.query}" if u.query else "")
+        req = (f"GET {path} HTTP/1.1\r\nHost: {host}\r\n"
+               f"Upgrade: websocket\r\nConnection: Upgrade\r\n"
+               f"Sec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n"
+               f"Cookie: xx_hosting_token={cookie}\r\n"
+               f"Origin: {BASE}\r\nUser-Agent: {UA}\r\n\r\n")
+        self.sock.sendall(req.encode())
+        buf = b""
+        while b"\r\n\r\n" not in buf:
+            chunk = self.sock.recv(4096)
+            if not chunk:
+                raise RuntimeError("ws handshake closed")
+            buf += chunk
+        head, self._buf = buf.split(b"\r\n\r\n", 1)
+        if b" 101" not in head.split(b"\r\n", 1)[0]:
+            raise RuntimeError(f"ws upgrade fail: {head[:120]!r}")
+        self._frag = b""
+
+    def _recv_exact(self, n):
+        while len(self._buf) < n:
+            chunk = self.sock.recv(max(4096, n - len(self._buf)))
+            if not chunk:
+                raise RuntimeError("ws closed")
+            self._buf += chunk
+        out, self._buf = self._buf[:n], self._buf[n:]
+        return out
+
+    def send_text(self, s):
+        payload = s.encode()
+        mask = os.urandom(4)
+        hdr = bytes([0x81])
+        n = len(payload)
+        if n < 126:
+            hdr += bytes([0x80 | n])
+        elif n < 65536:
+            hdr += bytes([0x80 | 126]) + struct.pack(">H", n)
+        else:
+            hdr += bytes([0x80 | 127]) + struct.pack(">Q", n)
+        masked = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
+        self.sock.sendall(hdr + mask + masked)
+
+    def recv_text(self, timeout=None):
+        if timeout is not None:
+            self.sock.settimeout(timeout)
+        while True:
+            b0, b1 = self._recv_exact(2)
+            fin, op = b0 & 0x80, b0 & 0x0F
+            ln = b1 & 0x7F
+            if ln == 126:
+                ln = struct.unpack(">H", self._recv_exact(2))[0]
+            elif ln == 127:
+                ln = struct.unpack(">Q", self._recv_exact(8))[0]
+            mask = self._recv_exact(4) if (b1 & 0x80) else None
+            data = self._recv_exact(ln) if ln else b""
+            if mask:
+                data = bytes(b ^ mask[i % 4] for i, b in enumerate(data))
+            if op == 0x8:
+                raise RuntimeError("ws closed by server")
+            if op in (0x1, 0x0):
+                self._frag += data
+                if fin:
+                    out, self._frag = self._frag, b""
+                    return out.decode("utf-8", "replace")
+            # 0x9 ping / 0xA pong / 其它控制帧：忽略（会话短，无需应答）
+
+    def close(self):
+        try:
+            self.sock.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def ensure_nezha(token):
+    """第二层保险：经网关 WS 触发容器内哪吒保活任务立即跑一遍（脚本任务零 token）。
+    任务被删则自动重建。失败仅告警，不影响唤醒主流程。"""
+    ws_base = BASE.replace("https://", "wss://").replace("http://", "ws://")
+    ws = None
+    try:
+        ws = _MiniWS(f"{ws_base}/api/instance/agent/ws", token)
+        seq = [0]
+
+        def rpc(method, params, timeout=25):
+            seq[0] += 1
+            rid = f"req-{seq[0]}-{os.urandom(4).hex()}"
+            ws.send_text(json.dumps({"type": "req", "id": rid,
+                                     "method": method, "params": params}))
+            deadline = time.time() + timeout
+            while time.time() < deadline:
+                f = json.loads(ws.recv_text(timeout=max(1, deadline - time.time())))
+                if f.get("type") == "res" and f.get("id") == rid:
+                    return f
+            return {"ok": False, "error": {"message": "rpc timeout"}}
+
+        hello = rpc("connect", {
+            "minProtocol": 4, "maxProtocol": 4,
+            "client": {"id": "gateway-client", "version": "xx-workspace",
+                       "platform": "web", "mode": "backend"},
+            "role": "operator",
+            "scopes": ["operator.read", "operator.write", "operator.admin"],
+            "caps": ["tool-events"], "auth": {}})
+        if not hello.get("ok"):
+            log(f"  ⚠️ 网关 connect 失败: {json.dumps(hello, ensure_ascii=False)[:150]}")
+            return False
+
+        jobs = (rpc("cron.list", {}).get("payload") or {}).get("jobs") or []
+        job = next((j for j in jobs if j.get("name") == "nezha-keepalive"
+                    and j.get("enabled")), None)
+        if job is None:
+            log("  ⚠️ nezha-keepalive 任务不存在 → 重建")
+            add = rpc("cron.add", _ensure_nezha_job_params())
+            job = (add.get("payload") or {}) if add.get("ok") else None
+            if not (job and job.get("id")):
+                log(f"  ⚠️ 重建失败: {json.dumps(add, ensure_ascii=False)[:150]}")
+                return False
+        run = rpc("cron.run", {"id": job["id"]})
+        payload = run.get("payload") or {}
+        ok = bool(payload.get("enqueued") or payload.get("ok"))
+        log(f"  {'✅' if ok else '⚠️'} 哪吒保活补检已派发 (job {job['id'][:8]}…) "
+            f"{json.dumps(payload, ensure_ascii=False)[:120]}")
+        return ok
+    except Exception as e:  # noqa: BLE001
+        log(f"  ⚠️ ensure_nezha 异常: {type(e).__name__}: {e}")
+        return False
+    finally:
+        if ws is not None:
+            ws.close()
+
+
 def pass_once(token):
     """一轮巡检。返回 (ok?, new_token)"""
     st, d = req("/api/instance", token=token)
@@ -126,6 +311,7 @@ def pass_once(token):
 
     if avail == "ready" and status not in WAKE_STATES:
         log("  ✅ 运行中，无需动作")
+        ensure_nezha(token)  # 哪吒联动：补检容器内监控 agent
         return True, token
 
     # 休眠/停机 → 拉起
@@ -136,6 +322,8 @@ def pass_once(token):
     st3, d3 = req("/api/instance", token=token)
     avail2 = (d3.get("availability") or "?").lower()
     log(f"     复查: availability={avail2} | status={d3.get('status')}")
+    if avail2 == "ready":
+        ensure_nezha(token)  # 哪吒联动：每次启动/唤醒后立即补检
     return avail2 in ("ready", "loading"), token
 
 
