@@ -123,3 +123,39 @@ bkt 分支（本分支，单提交干净历史）:
 main 分支:
   .github/workflows/renew_bkt.yml   定时任务（schedule 只认默认分支）
 ```
+
+---
+
+## 二、2026-11-13 过期事故复盘 + 改版
+
+### 事故
+
+服务器 11-13 09:33（北京）过期停机约 3 小时。**链路无罪、解算无罪——真凶是 GitHub
+schedule 调度饿死**：`8,28,48` 的 20 分钟 cron 实际只送进来 ~4 次/天（全仓 35 个
+workflow 抢调度，schedule 事件被成批丢弃；同仓 cocalc 3 次/天、octopus 4 次/天）。
+22:53Z 最后一次 gate 还是"未到窗口"，07:33（北京）开窗后 cron 再没来过。
+
+### 实弹验证（11-13 02:12Z）
+
+手动 force 一发即中，**家宽解算器全链路首次实弹成功**：
+
+```
+家宽订阅 1 条 VLESS → 出口 83.168.x.x (PL) → undetected-chromedriver (Chrome 156)
+→ pyautogui 真点击复选框 ×2 → Turnstile token (len=794) → POST free/renew
+→ HTTP 200 {"success":true} → 0h → 8.00h（+8h）
+```
+
+注：Playwright 系（含家宽+真点击）实测全 600010；**undetected-chromedriver 才是
+活路**——差别在 UC 对自动化指纹的抹除，不在 IP。
+
+### 改版机制（同日上线）
+
+| 件 | 说明 |
+|---|---|
+| `renew_bkt.py --loop 330` | 长驻守护：每 20 分钟 gate 复查，窗口一开立即解算续期；鉴权死（rc 2/3）才停 |
+| workflow 自派发接力 | 每轮结束 `gh workflow run`（**GH_PAT** secret）叫醒下一轮 330min——workflow_dispatch 不受 schedule 饿死影响 |
+| schedule `8,28,48` | 保留作兜底（万一接力断链） |
+| concurrency `bkt-renew` | 串行不取消，多余触发自动排队合并 |
+
+覆盖账：窗口 = 到期前 2h；循环 20 分钟粒度 → 开窗后 ≤20 分钟续上，**正常零掉线**；
+单轮预算 330min < 续期间隔 ~6h，每轮恰好续一次，接力无缝续命。
