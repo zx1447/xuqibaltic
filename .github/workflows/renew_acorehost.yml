@@ -1,0 +1,55 @@
+name: AcoreHost Renew
+
+# AcoreHosting 免费服计划自动续期（dev.sqidgeon.serverplans）
+#  · renew：仅剩 <8h 可打（续命）；restore：计划挂起后拉回。两报错均良性=健康等待
+#  · 长驻循环 330min（30 分钟一轮）+ GH_PAT 自派发接力 + schedule 兜底
+#    —— 同 bkt 装甲：治 GitHub schedule 调度饿死（35 个 workflow 抢调度）
+on:
+  schedule:
+    - cron: '26 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      run_minutes:
+        description: '本轮守护时长（分钟，默认 330；快测填 3）'
+        required: false
+        default: '330'
+
+concurrency:
+  group: acore-renew
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  renew:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: acorehost
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 守护循环（renew 优先，restore 兜底）
+        id: renew
+        env:
+          ACORE_API_KEY: ${{ secrets.ACORE_API_KEY }}
+          RUN_MINUTES: ${{ github.event.inputs.run_minutes || '330' }}
+        run: python3 renew_acorehost.py --loop "$RUN_MINUTES"
+
+      - name: 自派发接力（下一轮守护）
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "GH_PAT 未配置，跳过接力（schedule 兜底）"
+            exit 0
+          fi
+          gh workflow run renew_acorehost.yml -R "$GITHUB_REPOSITORY" -f run_minutes=330 \
+            && echo "✅ 已派发下一轮守护" \
+            || echo "⚠️ 接力派发失败（schedule 兜底）"
