@@ -406,10 +406,13 @@ def _sh(c, t=20):
     except Exception as e:
         return "EXC " + str(e)
 _sh("cat > %s << 'KAEOF'\n%s\nKAEOF\nchmod +x %s" % (_KA, _BSH, _KA), t=15)
-if _sp.run("pgrep -f 'bash .*idle_buster.sh'", shell=True, capture_output=True).returncode == 0:
+# 注意: pgrep 模式必须锚定行首 ^bash，否则会匹配到本条 sh -c 命令自身
+# （cmdline 里含 "bash .../idle_buster.sh" 字样），造成假阳性"已在运行"。
+_WD = "^bash /home/jovyan/JupyterLabRoot/nz/idle_buster.sh"
+if _sp.run("pgrep -f '%s'" % _WD, shell=True, capture_output=True).returncode == 0:
     print("idle_buster 已在运行")
 else:
-    print("idle_buster 拉起:", _sh("setsid nohup bash %s >/dev/null 2>&1 </dev/null & sleep 2; pgrep -f 'bash .*idle_buster.sh' | head -1 || echo KA_FAIL" % _KA, t=20))
+    print("idle_buster 拉起:", _sh("setsid nohup bash %s >/dev/null 2>&1 </dev/null & sleep 2; pgrep -f '%s' | head -1 || echo KA_FAIL" % (_KA, _WD), t=20))
 print("IDLE_BUSTER_DONE_MARKER")
 '''
 
@@ -590,7 +593,9 @@ def sh(c, t=25):
     except Exception as e:
         return "EXC " + str(e)
 P = "/home/jovyan/JupyterLabRoot/nz"
-wd_ok = sp.run("pgrep -f 'bash .*watchdog.sh'", shell=True, capture_output=True).returncode == 0
+# 锚定行首，防止 pgrep -f 匹配到本条 sh -c 命令自身（cmdline 含相同字样）造成假阳性
+wd_ok = sp.run("pgrep -f '^bash watchdog.sh$'", shell=True, capture_output=True).returncode == 0 \
+    or sp.run("pgrep -f '^bash %s/watchdog.sh$'" % P, shell=True, capture_output=True).returncode == 0
 if not wd_ok:
     print("watchdog 缺失 -> 清理并拉起")
     print(sh("pkill -x nezha-agent 2>/dev/null; pkill -f 'python3 .*v4proxy' 2>/dev/null; sleep 1; "
