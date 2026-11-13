@@ -1,0 +1,67 @@
+name: Xiaoxia Keepalive
+
+# 小虾（cn.xiaoxia.app）云端电脑自动唤醒：检测休眠(offline) → POST /api/instance/start 拉起
+#  · 闲置自动休眠、日 100 万 token 用完停机（次日 0 点 UTC 自恢复）；休眠期 bot 消息不唤醒不补收
+#  · /api/instance/start 幂等（运行中 no-op），盲打安全
+#  · 330min 长驻循环（30 分钟一轮）+ GH_PAT 自派发接力 + schedule 兜底（bkt 装甲）
+on:
+  schedule:
+    - cron: '31 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      run_minutes:
+        description: '本轮守护时长（分钟，默认 330；快测填 3）'
+        required: false
+        default: '330'
+
+concurrency:
+  group: xiaoxia-keepalive
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: xiaoxia
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 唤醒巡检（offline 就拉起）
+        id: run
+        env:
+          XIAOXIA_EMAIL: ${{ secrets.XIAOXIA_EMAIL }}
+          XIAOXIA_PASSWORD: ${{ secrets.XIAOXIA_PASSWORD }}
+          RUN_MINUTES: ${{ github.event.inputs.run_minutes || '330' }}
+        run: python3 wake_xiaoxia.py --loop "$RUN_MINUTES"
+
+      - name: 回写 token 状态
+        if: always()
+        run: |
+          git config user.name 'zx-build'
+          git config user.email 'build@zx.local'
+          if ! git diff --quiet xiaoxia_state.json 2>/dev/null || ! git diff --cached --quiet xiaoxia_state.json 2>/dev/null; then
+            git add xiaoxia_state.json
+            git commit -m "state: xiaoxia token cache [skip ci]" || true
+            git push origin xiaoxia || true
+          fi
+
+      - name: 自派发接力（下一轮守护）
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "GH_PAT 未配置，跳过接力（schedule 兜底）"
+            exit 0
+          fi
+          gh workflow run xiaoxia_keepalive.yml -R "$GITHUB_REPOSITORY" -f run_minutes=330 \
+            && echo "✅ 已派发下一轮守护" \
+            || echo "⚠️ 接力派发失败（schedule 兜底）"
