@@ -52,13 +52,25 @@ jobs:
           while [ $SECONDS -lt $end ]; do
             n=$((n+1))
             echo "—— [loop] 第 $n 轮（预算剩 $(( (end-SECONDS)/60 )) 分钟）——"
-            python3 gemhost_keepalive.py
+            # 自适应休眠：脚本按「距离会话到期还剩多久」算出该睡多久，
+            # 保证在剩余时间跌破 15min 阈值之前就醒来，不会漏掉续期窗口。
+            GITHUB_OUTPUT=/tmp/gh_out python3 gemhost_keepalive.py
             rc=$?
+            if [ -f /tmp/gh_out ]; then
+              grep '^next_wake_seconds=' /tmp/gh_out | tail -1 | cut -d= -f2 > /tmp/gh_wake || true
+            fi
             if [ "$rc" = "3" ]; then echo "鉴权/配置死（rc=3），停止守护"; break; fi
             rest=$((end - SECONDS))
             [ $rest -le 0 ] && break
-            sl=1800; [ $rest -lt $sl ] && sl=$rest
-            echo "— [loop] 休眠 $((sl/60)) 分钟后复查 —"
+
+            sl=1800
+            if [ -s /tmp/gh_wake ]; then
+              w=$(cat /tmp/gh_wake)
+              case "$w" in ''|*[!0-9]*) w=1800 ;; esac
+              [ "$w" -ge 60 ] && [ "$w" -le 1800 ] && sl=$w
+            fi
+            [ $rest -lt $sl ] && sl=$rest
+            echo "— [loop] 休眠 $((sl/60)) 分 $((sl%60)) 秒后复查 —"
             sleep $sl
           done
           echo "— [loop] 本轮预算用尽，交棒下一次运行 —"
