@@ -9,8 +9,8 @@
  "jupyter_token": "e129ce032bd870bed289c80bd18c84fccbc93cab0816bc38",
  "last_rebuild": "",
  "last_rebuild_reason": "",
- "last_run": "2026-11-14 11:37:19",
- "last_result": "ok",
+ "last_run": "2026-11-14 14:45:05",
+ "last_result": "warn: 环境已恢复但面板未见上报",
  "last_sql": "ok",
- "last_sql_at": "2026-11-14 11:36:37"
+ "last_sql_at": "2026-11-14 14:33:32"
 }
