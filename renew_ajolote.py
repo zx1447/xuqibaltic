@@ -63,10 +63,10 @@ class Api:
         self.opener = urllib.request.build_opener(
             urllib.request.HTTPCookieProcessor(self.jar))
 
-    def req(self, path, method="GET", body=None, form=None, retries=3):
+    def req(self, path, method="GET", body=None, form=None, retries=5):
         url = f"{BASE}{path}"
         last = None
-        for _ in range(retries):
+        for attempt in range(retries):
             data = None
             headers = {
                 "User-Agent": UA,
@@ -82,7 +82,7 @@ class Api:
                 headers["Content-Type"] = "application/json"
             r = urllib.request.Request(url, data=data, method=method, headers=headers)
             try:
-                with self.opener.open(r, timeout=30) as resp:
+                with self.opener.open(r, timeout=45) as resp:
                     raw = resp.read().decode("utf-8", "replace")
                     try:
                         return resp.status, json.loads(raw) if raw.strip() else {}
@@ -100,8 +100,11 @@ class Api:
                     continue
                 return e.code, d
             except Exception as e:  # noqa: BLE001
+                # 超时/连接重置（GitHub runner 到 ajolote.lat 偶发）：指数退避重试，
+                # 别让一次网络抖动把 330 分钟的守护轮次判死（2026-11-13 22:53 实况）。
                 last = (0, {"error": f"{type(e).__name__}: {e}"})
-                time.sleep(3)
+                if attempt < retries - 1:
+                    time.sleep(5 * (attempt + 1))
         return last if last else (0, {"error": "unreachable"})
 
     def seed_session(self, token):
@@ -254,21 +257,36 @@ def pass_once(api, force=False):
 
 
 def loop(minutes, force=False):
-    """长驻守护：30 分钟一轮（bkt 装甲，接力由 workflow 负责）"""
+    """长驻守护：30 分钟一轮（bkt 装甲，接力由 workflow 负责）。
+
+    容错策略（2026-11-13 改进）：单轮失败**不再判死整轮**。
+    原实现用 ok_all 累积，任一轮网络抖动就 exit 2 → 330 分钟守护直接结束、
+    还落个红叉。现在只有「连续 3 轮全失败」才 exit 2，其余情况照常守到期满。
+    """
     api = Api()
     deadline = time.time() + minutes * 60
     cycles = 0
-    ok_all = True
+    consecutive_fail = 0
+    ok_any = False
     while True:
         cycles += 1
         left = (deadline - time.time()) / 60
         log(f"—— [loop] 第 {cycles} 轮（预算剩 {left:.0f} 分钟）——")
         try:
             ok = pass_once(api, force=(force and cycles == 1))
-            ok_all = ok_all and ok
         except Exception as e:  # noqa: BLE001
             log(f"⚠️ [loop] 本轮异常: {type(e).__name__}: {e}")
-            ok_all = False
+            ok = False
+        if ok:
+            consecutive_fail = 0
+            ok_any = True
+        else:
+            consecutive_fail += 1
+            log(f"⚠️ [loop] 本轮失败（连续 {consecutive_fail} 轮）——不影响守护，稍后重试")
+            if consecutive_fail >= 3:
+                log("— [loop] 连续 3 轮失败（疑似站点故障/凭据失效），本轮退出并交给接力 —")
+                save_state(api)
+                return 2
         rest = deadline - time.time()
         if rest <= 0:
             break
@@ -276,8 +294,8 @@ def loop(minutes, force=False):
         log(f"— [loop] 休眠 {t / 60:.0f} 分钟后复查 —")
         time.sleep(t)
     save_state(api)
-    log("— [loop] 本轮预算用尽，交棒下一次运行 —")
-    return 0 if ok_all else 2
+    log(f"— [loop] 本轮预算用尽（{cycles} 轮，成功过={ok_any}），交棒下一次运行 —")
+    return 0 if ok_any else 2
 
 
 def main():
