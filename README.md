@@ -1,127 +1,74 @@
-# Discord 面板自动续期（多账号）
+# L3chrane X Bots —— AFK 挂机赚币（分支 `l3chrane`）
 
-一个脚本管两个 Discord 面板续期。两者机制**完全不同**，共用点击 + 网关判定。
+站点：https://l3chranexbots.oriaxen.com · Discord bot 托管（Node.js / Python）
+账号：Discord **ajkvip**（id 1438491113576202260 / vipdkyi@gmail.com）
 
-| | McServers | Antagonix |
-|---|---|---|
-| 有效期 | 7 天 | **5 天** |
-| 有效期内点击 | ❌ 回 `You can renew again later.` | ✅ **直接续，从现在起重置 +5 天** |
-| 续期节奏 | 每 5 天探一次 | 剩余 ≤ 4.5 天才点 |
-| 面板消息 | `1567495211016519802` | `1567073789395730475` |
-| 频道 | `1567486173495173181` | `1567073787143524383` |
-| bot / application_id | `1524370665631649865` | `1565149630260322418` |
-| 按钮 custom_id | `renew_server` | `b\|fa67c4d1a69f9e08bc484195\|renew` |
-| 成功文案 | （无回执） | `Hébergement renouvelé pour 5 jours...` |
+## 一、站点机制（2026-11-13 全部实测）
 
-## 通用请求格式
-
-```http
-POST https://discord.com/api/v9/interactions
-Authorization: <该账号的用户 token>
-
-{
-  "type": 3,
-  "nonce": "<19 位数字>",
-  "guild_id": "...",
-  "channel_id": "...",
-  "message_flags": 0,
-  "message_id": "...",
-  "application_id": "<bot 的用户 ID>",
-  "session_id": "<32 位十六进制>",
-  "data": { "component_type": 2, "custom_id": "..." }
-}
-```
-
-成功返回 **HTTP 204**。
-
-### 三个必踩的坑
-
-| 报错 | 原因 |
+| 项 | 值 |
 |---|---|
-| `{"code":10005,"message":"未知集成"}` | `type` 写成 `2`（应用命令），组件交互必须 `3` |
-| `{"code":50035}` 说 `application_id` 必填 | 消息 JSON 里 `application_id` 是 `null`，必须手填 |
-| `{"code":10002,"Application inconnue"}` | 用了 guild id；应该用 **bot 的用户 ID** |
+| 免费档 | 512MB RAM · 50% CPU · 600MB 磁盘 · 24/7 |
+| 货币 | **coin** |
+| 部署成本 | **5 coins / 台**（`POST /create`，字段 `name` + `runtime`=node\|python） |
+| 官方 AFK | 打开 `/afk` 页面，**每 60 秒自动 +1 coin** |
+| 前端计时器 | 纯内存（刷新重置 60s），离开页面暂停 |
 
-## 怎么确认真续上了
+### 关键发现：服务端**不做任何间隔校验**
 
-bot 的回复是 **ephemeral（私密）**，普通消息接口读不到：
+`POST /afk/claim` → `{"success":true,"coins":1,"newBalance":N,"dailyEarned":N}`
+
+实测：**1 秒内连刷 10 次全部成功**，`maxDaily=0`（无日上限）、无 cooldown、无 turnstile。
+
+也就是说官方"每 60 秒 1 coin"纯粹是前端自律，接口层是敞开的。
+
+## 二、登录链路
 
 ```
-GET /channels/{c}/messages/{m}  →  403 {"code":20002,"detail":"只有机器人可使用此端点"}
+Discord 用户 token
+  → GET  discord.com/api/oauth2/authorize?client_id=1519415022168571914&scope=identify   （验证 token + 拿应用信息）
+  → POST discord.com/api/v9/oauth2/authorize  {"authorize":true,"permissions":"0"}        （已授权 → 返回 location 带 code）
+  → GET  /auth/discord/callback?code=...                                                  （换 Express session）
+  ← Set-Cookie: connect.sid=s%3A...                                                       （站点会话）
 ```
 
-所以脚本连 **Discord 网关**监听推送：
+client_id `1519415022168571914`（应用名 "L3chrane X Bots"，Bot Dev By Stoki）是**公开值**，从 `/auth/discord` 的 302 里直接解出来。
 
-```
-【MESSAGE_CREATE】flags=192 ephemeral=true
-【MESSAGE_UPDATE】"Hébergement renouvelé pour 5 jours à partir de maintenant."
-INTERACTION_SUCCESS
-```
+## 三、脚本
 
-判定时**只挑短句回执**（≤120 字）来匹配，避免面板 embed 那种大段文字误命中。
-
-三种结果：
-
-| verdict | 触发 | 后续 |
-|---|---|---|
-| `renewed` | 匹配成功文案 | 记录 `last_click_at`，下次按间隔判断 |
-| `too-early` | `You can renew again later.` | 不记点击时间，等下一个周期 |
-| `no-reply` | 204 + INTERACTION_SUCCESS 但无文案 | 按成功计 |
-
-## 调度
-
-```yaml
-- cron: "37 6 * * *"     # 每天唤醒一次
-```
-
-cron 只负责"每天唤醒"，真正节奏由脚本按 `last_click_at` 判定：
-
-- **McServers**：距上次成功点击满 **5 天** 才点（有效期内点了会被拒）
-- **Antagonix**：距上次成功点击满 **2 天** 就点（随时可点），
-  另加一道兜底：面板剩余 **≤ 3.5 天** 时无论如何都补一次
-
-每日唤醒 + 脚本内判定：两个目标间隔不同，用日历日 `*/2` 会互相错位，月边界也容易漏；
-现在最多只晚 1 天。
-
-## 手动触发
-
-Actions → **Discord Panel Renew** → Run workflow
-
-| 输入 | 说明 |
-|---|---|
-| `target` | `mcservers` / `antagonix` / `all`（默认 all） |
-| `force` | `true` = 无视间隔立即点 |
-| `dry_run` | `true` = 只看判定不点击 |
-
-## 本地跑
+`l3chrane_afk.py`（纯标准库）
 
 ```bash
-npm install
-
-export DISCORDERENEW_TOKEN='...'   # McServers 账号
-export ANTAGONIX_TOKEN='...'       # Antagonix 账号
-
-node renew_mcservers.js                    # 两个都处理
-DR_TARGET=antagonix node renew_mcservers.js
-DR_DRY_RUN=1 node renew_mcservers.js
-DR_FORCE=1 node renew_mcservers.js
+L3CH_DISCORD_TOKEN=xxx python3 l3chrane_afk.py --status   # 只查余额
+L3CH_DISCORD_TOKEN=xxx python3 l3chrane_afk.py            # 攒到目标（默认 50）
+L3CH_DISCORD_TOKEN=xxx python3 l3chrane_afk.py --once     # 单次自检
+L3CH_DISCORD_TOKEN=xxx python3 l3chrane_afk.py --loop 330 # 长驻守护
 ```
 
-## 当前状态
-
-| 服务 | 到期 | Secret |
-|---|---|---|
-| McServers | 2026-11-11 12:01 UTC | `DISCORDERENEW_TOKEN` |
-| Antagonix | 2026-11-09 12:26 UTC | `ANTAGONIX_TOKEN` |
-
-## 需要维护的地方
-
-| 情况 | 怎么办 |
+| 环境变量 | 说明 |
 |---|---|
-| token 失效（401） | 换对应 secret |
-| 面板消息被删/重建 | Antagonix 会自动探测新消息 id；McServers 需改 `DR_*` 或代码里的 message |
-| 机器人改了按钮 id | 改 `TARGETS` 里对应项的 `customId` |
+| `L3CH_DISCORD_TOKEN` | **必填**，Discord 用户 token |
+| `L3CH_GOAL` | 目标余额，默认 50（=10 台服务器） |
+| `L3CH_DELAY` | 每次 claim 间隔秒，默认 2.0（正常节奏，避免被风控盯上） |
+| `L3CH_BASE` | 站点地址，默认 `https://l3chranexbots.oriaxen.com` |
 
-> ⚠️ Discord 用户 token 会因改密码 / 退出所有设备 / **跨地区使用**被吊销。
-> 之前 Antagonix 的 token 就是拿到 GitHub 美国 IP 用之后被杀的（活不过 2 分钟）。
-> 如果日志报 `401`，需要重新抓 token。
+特性：会话缓存复用（`l3chrane_state.json`）、失效自动重登、网络重试 4 次指数退避、长驻循环单轮失败不判死（连续 3 轮才退出）。
+
+## 四、实测记录
+
+```
+💰 当前余额：12 coins｜目标 20
+  +1 coin → 余额 13（本次 1 次）
+  … 
+  +1 coin → 余额 20（本次 8 次）
+🎯 达到目标 20 coins，停止
+```
+
+## 五、部署后怎么用
+
+攒够 5 coins 就能在 dashboard 部署：
+
+```
+POST /create   form: name=MyBot & runtime=node|python
+```
+
+**注意**：这个平台跑的是**你自己上传的 bot 代码**，需要配 Discord bot token（不是用户 token）才真正上线。本脚本负责的是**赚 coin 这一步**，避免每次手动挂页面。
