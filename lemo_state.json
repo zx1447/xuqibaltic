@@ -1,14 +1,15 @@
 {
-  "afk_credits": 12583,
+  "afk_credits": 12910,
   "cap_detected_at": "2026-11-14 07:50:13",
-  "claimed_today": 319,
-  "credits": 12633,
+  "claimed_today": 646,
+  "credits": 12960,
   "daily_limit": 1000,
-  "last_claim_time": "2026-11-14 13:45:59",
-  "last_claim_timestamp": 1794635159,
-  "last_status": "cooldown",
+  "last_claim_time": "2026-11-14 19:41:15",
+  "last_claim_timestamp": 1794656475,
+  "last_error": "HTTPSConnectionPool(host='app.lemonhost.me', port=443): Read timed out. (read timeout=30)",
+  "last_status": "credited",
   "session_id": "afk-b5aa092e19a946a2886051597cdba532",
-  "total_claims": 12613,
-  "updated_at": "2026-11-14 13:46:11",
+  "total_claims": 12940,
+  "updated_at": "2026-11-14 19:42:39",
   "username": "alejandro"
 }
