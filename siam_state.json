@@ -105,6 +105,7 @@
   "checkin_mode": "six_times_every_14_seconds_daily",
   "checkin_interval_seconds": 14,
   "next_scheduled_run_note": "GitHub Actions runs once daily at 00:00 UTC",
-  "last_workflow_end_time": "2026-11-13T05:01:06.319Z",
-  "last_balance": 1786
+  "last_workflow_end_time": "2026-11-14T04:54:45.584Z",
+  "last_balance": 1786,
+  "last_error": "page.goto: net::ERR_TIMED_OUT at https://my.siam-node.cloud/?p=topup\nCall log:\n  - navigating to \"https://my.siam-node.cloud/?p=topup\", waiting until \"domcontentloaded\"\n"
 }
