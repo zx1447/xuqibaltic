@@ -6,10 +6,10 @@
   "daily_limit": 1000,
   "last_claim_time": "2026-11-14 19:41:15",
   "last_claim_timestamp": 1794656475,
-  "last_error": "HTTPSConnectionPool(host='app.lemonhost.me', port=443): Read timed out. (read timeout=30)",
-  "last_status": "credited",
+  "last_error": "HTTPSConnectionPool(host='app.lemonhost.me', port=443): Max retries exceeded with url: /api/client/account (Caused by ConnectTimeoutError(<HTTPSConnection(host='app.lemonhost.me', port=443) at 0x7cfe24e4be30>, 'Connection to app.lemonhost.me timed out. (connect timeout=30)'))",
+  "last_status": "unreachable",
   "session_id": "afk-b5aa092e19a946a2886051597cdba532",
   "total_claims": 12940,
-  "updated_at": "2026-11-14 19:42:39",
+  "updated_at": "2026-11-14 19:44:08",
   "username": "alejandro"
 }
