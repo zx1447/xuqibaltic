@@ -1,5 +1,5 @@
 {
-  "action": "renewed",
+  "action": "wait",
   "solver": "browser",
   "proxy": true,
   "before_seconds": 6606,
@@ -7,7 +7,7 @@
   "active_until": "2026-11-14T10:46:11.000Z",
   "gain_hours": 6.163333333333333,
   "last_renew": "2026-11-14T02:46:16Z",
-  "updated": "2026-11-14T02:46:16Z",
-  "seconds_remaining": 7808,
+  "updated": "2026-11-14T03:06:19Z",
+  "seconds_remaining": 27591,
   "can_renew": false
 }
