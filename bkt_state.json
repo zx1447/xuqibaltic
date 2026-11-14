@@ -5,9 +5,10 @@
   "before_seconds": 6617,
   "after_seconds": 28795,
   "active_until": "2026-11-14T23:07:05.000Z",
-  "gain_hours": 6.160555555555556,
-  "last_renew": "2026-11-14T15:07:09Z",
-  "updated": "2026-11-14T15:27:12Z",
-  "seconds_remaining": 27592,
-  "can_renew": false
+  "gain_hours": 6.159166666666667,
+  "last_renew": "2026-11-14T08:56:39Z",
+  "updated": "2026-11-14T15:27:32Z",
+  "seconds_remaining": 27572,
+  "can_renew": false,
+  "error": "HTTP 400 {\"success\":false,\"error\":\"Free server renewal is available only 2 hours before session expiration or after it expires.\",\"errorCode\":\"game.freeRenewNotAllowed\"}"
 }
