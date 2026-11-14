@@ -1,0 +1,76 @@
+name: L3chrane AFK Earn
+
+# L3chrane X Bots（l3chranexbots.oriaxen.com）AFK 挂机赚 coin
+#  · 官方：/afk 页面每 60s +1 coin；实测 POST /afk/claim 服务端无间隔校验、无日上限
+#  · 用途：攒够 5 coins 即可在该平台部署一台 Discord bot（512MB/50%CPU/600MB）
+#  · 330min 长驻循环（30 分钟一轮）+ GH_PAT 自派发接力 + schedule 兜底
+on:
+  schedule:
+    - cron: '23 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      run_minutes:
+        description: '本轮守护时长（分钟，默认 330；快测填 1）'
+        required: false
+        default: '330'
+      goal:
+        description: '目标余额（默认 50）'
+        required: false
+        default: '50'
+
+concurrency:
+  group: l3chrane-afk
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  earn:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: l3chrane
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: AFK 赚币
+        env:
+          L3CH_DISCORD_TOKEN: ${{ secrets.L3CH_DISCORD_TOKEN }}
+          L3CH_GOAL: ${{ github.event.inputs.goal || '50' }}
+          RUN_MINUTES: ${{ github.event.inputs.run_minutes || '330' }}
+        run: python3 l3chrane_afk.py --loop "$RUN_MINUTES"
+
+      - name: 回写会话/状态
+        if: always()
+        run: |
+          git config user.name 'zx-build'
+          git config user.email 'build@zx.local'
+          if git diff --quiet l3chrane_state.json 2>/dev/null && git diff --cached --quiet l3chrane_state.json 2>/dev/null; then
+            echo "无状态变化"; exit 0
+          fi
+          git add l3chrane_state.json
+          git commit -m "state: l3chrane afk [skip ci]" || true
+          for i in 1 2 3; do
+            git fetch -q origin l3chrane || true
+            git -c user.name='zx-build' -c user.email='build@zx.local' rebase -X theirs origin/l3chrane >/dev/null 2>&1 \
+              || { git rebase --abort >/dev/null 2>&1 || true; }
+            if git push origin HEAD:l3chrane 2>/dev/null; then
+              echo "✅ 状态已回写（第 $i 次）"; exit 0
+            fi
+            echo "⚠️ 第 $i 次 push 被拒，重试…"; sleep $((i*3))
+          done
+          echo "⚠️ 状态回写失败——不影响赚币结论"
+
+      - name: 自派发接力
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then echo "GH_PAT 未配置，跳过接力"; exit 0; fi
+          gh workflow run l3chrane_afk.yml -R "$GITHUB_REPOSITORY" -f run_minutes=330 -f goal=50 \
+            && echo "✅ 已派发下一轮" || echo "⚠️ 接力失败（schedule 兜底）"
