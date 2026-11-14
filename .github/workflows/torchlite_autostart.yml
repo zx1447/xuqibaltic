@@ -1,5 +1,8 @@
 name: Torchlite Auto Start (chain)
 
+# ⚠️ 2026-11-14：本 workflow 已暂停。torchlite 分支已删除以释放配额。
+#    保留文件（含接力逻辑）以备日后恢复，但不再有任何定时触发。
+#
 # 服务器处于「停止」状态就自动启动。不做窗口续期。
 #
 # 每次 start 重新发放 40 分钟；到期自然下线后由守护进程下一轮再拉起。
@@ -14,8 +17,13 @@ name: Torchlite Auto Start (chain)
 # cron 只作为兜底（防链路断）。chain 参数防止失控递归。
 
 on:
-  schedule:
-    - cron: "7 */4 * * *"
+  # ⏸ 暂停（2026-11-14）：torchlite 数据分支已删除以释放配额。
+  #   分支不在了，cron 触发会在 checkout ref: torchlite 处失败，
+  #   失败仍会计入 Actions 分钟数，反而继续烧配额，故注释掉。
+  #   要恢复：先按 /home/user/backup_deleted/torchlite_20261114/ 里的
+  #   bundle 或 patch 重建分支，再取消下面注释。
+  # schedule:
+  #   - cron: "7 */4 * * *"
   workflow_dispatch:
     inputs:
       minutes:
