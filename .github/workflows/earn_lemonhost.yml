@@ -77,7 +77,7 @@ jobs:
         run: |
           sleep 45
           url="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/earn_lemonhost.yml/dispatches"
-          body='{"ref":"lemo","inputs":{"run_minutes":"355"}}'
+          body='{"ref":"main","inputs":{"run_minutes":"355"}}'
 
           try_dispatch() {
             curl -sS -o /tmp/lemo-dispatch.json -w '%{http_code}' \

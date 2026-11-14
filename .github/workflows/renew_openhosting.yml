@@ -70,5 +70,5 @@ jobs:
             -H "Authorization: token $GH_PAT" \
             -H "Accept: application/vnd.github+json" \
             "https://api.github.com/repos/zx1447/xuqibaltic/actions/workflows/renew_openhosting.yml/dispatches" \
-            -d '{"ref":"openhosting","inputs":{"run_minutes":"340"}}' \
+            -d '{"ref":"main","inputs":{"run_minutes":"340"}}' \
             -w "\ndispatch HTTP %{http_code}\n"
