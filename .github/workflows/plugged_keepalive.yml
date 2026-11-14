@@ -1,0 +1,56 @@
+name: Plugged Keepalive
+
+# plugged.host 免费服守护：检测停止 → 自动开机
+# 目标：mockingbird（嘲鸫）75cd14b3-aaf3-4a1c-a214-dbd787e76d5a
+#       Minecraft Java · pl2 (Poland) · pl2.plugged.host:34066
+#
+# 设计：每 4 小时定时检测一次，不用长驻循环 + 接力链。
+#   理由：动作很轻（2 个 GET + 偶尔 1 个 POST，几秒钟就跑完），
+#   长驻 330 分钟的 job 只是为了减少调度次数，反而要占一整条
+#   并发槽、还会因为接力链断掉而失效。定时跑更简单也更省配额。
+#
+# cron "17 */4 * * *" = 每 4 小时的第 17 分（UTC），
+#   刻意避开整点，减少 GitHub schedule 高峰排队的概率。
+
+on:
+  schedule:
+    - cron: '17 */4 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: '只检测不开机 (true/false)'
+        required: false
+        default: 'false'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: plugged-keepalive-${{ github.ref_name || 'manual' }}
+  cancel-in-progress: false
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: Active
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 检测并拉起
+        env:
+          PLUGGED_API_KEY: ${{ secrets.PLUGGED_API_KEY }}
+          PLUGGED_SERVERS: '75cd14b3-aaf3-4a1c-a214-dbd787e76d5a'
+          POWER_WAIT_SECONDS: '90'
+        run: |
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            echo "== 干跑模式：只读状态，不开机 =="
+            python3 plugged_state.py
+            exit 0
+          fi
+          python3 plugged_keepalive.py
