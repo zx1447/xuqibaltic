@@ -7,7 +7,9 @@ name: GemHost Keepalive
 #  · cookie 缓存 gemhost_state.json，变化时回写 gemhost 分支
 on:
   schedule:
-    - cron: '3,18,33,48 * * * *'
+    # 只作兜底：每 6 小时一次。主路径是末尾的「自派发接力」。
+    # 原来 15 分钟一次会派发大量 330 分钟任务，排队互挤全变 cancelled。
+    - cron: '3 */6 * * *'
   workflow_dispatch:
     inputs:
       run_minutes:
@@ -16,7 +18,9 @@ on:
         default: '330'
 
 concurrency:
-  group: gemhost-keepalive
+  # 按 ref 隔离：main / axolotl / l3chrane 等各分支互不阻塞。
+  # 同时兼容手动触发（无 ref 事件时回退到固定名）。
+  group: gemhost-keepalive-${{ github.ref_name || 'manual' }}
   cancel-in-progress: false
 
 permissions:
@@ -80,6 +84,9 @@ jobs:
             echo "GH_PAT 未配置，跳过接力（schedule 兜底）"
             exit 0
           fi
-          gh workflow run gemhost_keepalive.yml -R "$GITHUB_REPOSITORY" -f run_minutes=330 \
+          # 必须显式指定 --ref main：默认分支才是唯一模板来源。
+          # 不指定的话 GitHub 会用触发分支，从 axolotl 触发就会在 axolotl 上再派一条，
+          # 进而演变成多分支无限自我复制。
+          gh workflow run gemhost_keepalive.yml -R "$GITHUB_REPOSITORY" --ref main -f run_minutes=330 \
             && echo "✅ 已派发下一轮守护" \
             || echo "⚠️ 接力派发失败（schedule 兜底）"

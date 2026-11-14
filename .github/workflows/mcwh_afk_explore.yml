@@ -7,7 +7,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: mcworldhost-afk
+  # 与 mcworldhost_afk.yml 同名会互相顶掉，这里单独一组
+  group: mcworldhost-afk-explore
   cancel-in-progress: false
 
 jobs:
