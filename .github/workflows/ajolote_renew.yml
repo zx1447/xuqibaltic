@@ -58,11 +58,26 @@ jobs:
         run: |
           git config user.name 'zx-build'
           git config user.email 'build@zx.local'
-          if ! git diff --quiet ajolote_state.json 2>/dev/null || ! git diff --cached --quiet ajolote_state.json 2>/dev/null; then
-            git add ajolote_state.json
-            git commit -m "state: ajolote renewal cache [skip ci]" || true
-            git push origin axolotl || true
+          if git diff --quiet ajolote_state.json 2>/dev/null && git diff --cached --quiet ajolote_state.json 2>/dev/null; then
+            echo "无状态变化"
+            exit 0
           fi
+          git add ajolote_state.json
+          git commit -m "state: ajolote renewal cache [skip ci]" || true
+          # 状态回写竞态：并发/接力轮次同时写 axolotl，裸 push 会被拒。
+          # fetch+rebase 后重试 3 次；仍失败只告警——绝不让它把整轮判成 failure。
+          for i in 1 2 3; do
+            git fetch -q origin axolotl || true
+            git -c user.name='zx-build' -c user.email='build@zx.local' rebase -X theirs origin/axolotl >/dev/null 2>&1 \
+              || { git rebase --abort >/dev/null 2>&1 || true; }
+            if git push origin HEAD:axolotl 2>/dev/null; then
+              echo "✅ 状态已回写（第 $i 次尝试）"
+              exit 0
+            fi
+            echo "⚠️ 第 $i 次 push 被拒，重试…"
+            sleep $((i * 3))
+          done
+          echo "⚠️ 状态回写失败（已重试 3 次）——不影响续期结论"
 
       - name: 自派发接力（下一轮守护）
         if: always()
