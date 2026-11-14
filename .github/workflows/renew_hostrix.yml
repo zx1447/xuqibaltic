@@ -15,7 +15,7 @@ on:
         default: ''
 
 concurrency:
-  group: hostrix-renew
+  group: hostrix-renew-${{ github.ref_name || 'manual' }}
   cancel-in-progress: false
 
 permissions:

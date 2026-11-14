@@ -16,7 +16,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: fenixhost-free-service-renew
+  group: fenixhost-free-service-renew-${{ github.ref_name || 'manual' }}
   cancel-in-progress: true
 
 jobs:

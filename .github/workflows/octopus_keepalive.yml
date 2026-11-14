@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: octopus-keepalive
+  group: octopus-keepalive-${{ github.ref_name || 'manual' }}
   cancel-in-progress: false
 
 jobs:

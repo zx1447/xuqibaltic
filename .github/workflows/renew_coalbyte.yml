@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: coalbyte-renew
+  group: coalbyte-renew-${{ github.ref_name || 'manual' }}
   cancel-in-progress: false
 
 permissions:

@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: pidginhost-renew
+  group: pidginhost-renew-${{ github.ref_name || 'manual' }}
   cancel-in-progress: false
 
 jobs:

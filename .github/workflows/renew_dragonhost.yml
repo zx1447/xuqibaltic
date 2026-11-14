@@ -15,7 +15,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: dragonhost-last-day-renew
+  group: dragonhost-last-day-renew-${{ github.ref_name || 'manual' }}
   cancel-in-progress: true
 
 jobs:

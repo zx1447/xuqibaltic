@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: mcworldhost-daily-login
+  group: mcworldhost-daily-login-${{ github.ref_name || 'manual' }}
   cancel-in-progress: false
 
 jobs:

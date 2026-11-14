@@ -15,7 +15,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: gamesilo-wake
+  group: gamesilo-wake-${{ github.ref_name || 'manual' }}
   cancel-in-progress: false
 
 jobs:

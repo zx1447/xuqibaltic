@@ -10,7 +10,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: siam-checkin
+  group: siam-checkin-${{ github.ref_name || 'manual' }}
   cancel-in-progress: false
 
 jobs:

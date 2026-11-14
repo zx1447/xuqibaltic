@@ -34,7 +34,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: discord-panel-renew
+  group: discord-panel-renew-${{ github.ref_name || 'manual' }}
   cancel-in-progress: false
 
 jobs:

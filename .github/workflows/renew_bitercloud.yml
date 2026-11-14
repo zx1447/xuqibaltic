@@ -10,7 +10,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: bitercloud-auto-renew
+  group: bitercloud-auto-renew-${{ github.ref_name || 'manual' }}
   cancel-in-progress: true
 
 jobs:

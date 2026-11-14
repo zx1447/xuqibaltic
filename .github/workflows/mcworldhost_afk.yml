@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: mcworldhost-afk
+  group: mcworldhost-afk-${{ github.ref_name || 'manual' }}
   cancel-in-progress: false
 
 jobs:

@@ -11,7 +11,7 @@ on:
 permissions:
   contents: write
 concurrency:
-  group: shiphsot-auto-renew
+  group: shiphsot-auto-renew-${{ github.ref_name || 'manual' }}
   cancel-in-progress: true
 jobs:
   renew:

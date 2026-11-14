@@ -10,7 +10,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: auto-renew
+  group: auto-renew-${{ github.ref_name || 'manual' }}
   cancel-in-progress: true
 
 jobs:

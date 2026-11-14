@@ -32,7 +32,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: cleanup-old-runs
+  group: cleanup-old-runs-${{ github.ref_name || 'manual' }}
   cancel-in-progress: false
 
 jobs:

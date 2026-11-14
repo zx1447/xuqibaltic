@@ -20,7 +20,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: slicenodes-all-server-hourly-monitor
+  group: slicenodes-all-server-hourly-monitor-${{ github.ref_name || 'manual' }}
   cancel-in-progress: false
 
 jobs:

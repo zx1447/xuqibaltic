@@ -20,7 +20,7 @@ on:
         default: '1'
 
 concurrency:
-  group: blackflame-checkin
+  group: blackflame-checkin-${{ github.ref_name || 'manual' }}
   cancel-in-progress: false
 
 permissions:

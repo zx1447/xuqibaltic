@@ -14,7 +14,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: openhosting-afk
+  group: openhosting-afk-${{ github.ref_name || 'manual' }}
   cancel-in-progress: false
 
 jobs:

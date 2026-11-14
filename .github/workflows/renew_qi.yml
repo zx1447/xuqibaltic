@@ -39,7 +39,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: qi-renew
+  group: qi-renew-${{ github.ref_name || 'manual' }}
   cancel-in-progress: false     # 精准等待期间不要被下一次定时抢掉
 
 jobs:

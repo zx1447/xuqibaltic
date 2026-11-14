@@ -15,7 +15,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: boxmineworld-afk-earn
+  group: boxmineworld-afk-earn-${{ github.ref_name || 'manual' }}
   cancel-in-progress: false
 
 jobs:

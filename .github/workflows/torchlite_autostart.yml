@@ -40,7 +40,7 @@ permissions:
 
 # 新的顶掉旧的：长驻 job 卡死时 run 级 cancel 不生效，只有 concurrency 抢占能踢掉。
 concurrency:
-  group: torchlite-keepalive
+  group: torchlite-keepalive-${{ github.ref_name || 'manual' }}
   cancel-in-progress: true
 
 jobs:

@@ -20,7 +20,7 @@ permissions:
   actions: write   # 自派发下一轮需要，否则只能用 PAT
 
 concurrency:
-  group: lemonhost-afk-claim
+  group: lemonhost-afk-claim-${{ github.ref_name || 'manual' }}
   cancel-in-progress: false
 
 jobs:

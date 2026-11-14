@@ -10,7 +10,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: domainvip-renew
+  group: domainvip-renew-${{ github.ref_name || 'manual' }}
   cancel-in-progress: false
 
 jobs:

@@ -15,7 +15,7 @@ on:
         default: '330'
 
 concurrency:
-  group: acore-renew
+  group: acore-renew-${{ github.ref_name || 'manual' }}
   cancel-in-progress: false
 
 permissions:

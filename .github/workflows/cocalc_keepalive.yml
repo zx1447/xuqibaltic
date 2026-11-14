@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: cocalc-keepalive
+  group: cocalc-keepalive-${{ github.ref_name || 'manual' }}
   cancel-in-progress: false
 
 jobs:

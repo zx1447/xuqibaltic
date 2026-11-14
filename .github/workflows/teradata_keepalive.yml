@@ -20,7 +20,7 @@ on:
     - cron: "47 1-23/2 * * *"
 
 concurrency:
-  group: teradata-keepalive
+  group: teradata-keepalive-${{ github.ref_name || 'manual' }}
   cancel-in-progress: false
 
 permissions:

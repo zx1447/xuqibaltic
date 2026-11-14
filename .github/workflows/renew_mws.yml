@@ -31,7 +31,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: lev-renew
+  group: lev-renew-${{ github.ref_name || 'manual' }}
   cancel-in-progress: false
 
 jobs:
